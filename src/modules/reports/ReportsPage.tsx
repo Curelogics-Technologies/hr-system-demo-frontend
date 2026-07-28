@@ -118,22 +118,12 @@ function nextRun(cadence: ReportCadence, day: number, time: string, lang: string
   if (cadence === 'daily') {
     if (next <= now) next.setDate(next.getDate() + 1);
     while (next.getDay() === 0 || next.getDay() === 6) next.setDate(next.getDate() + 1);
-  } else if (cadence === 'weekly') {
+  } else {
+    const safeDay = ((day - 1) % 7) + 1;
     const todayIso = now.getDay() === 0 ? 7 : now.getDay();
-    let until = (day - todayIso + 7) % 7;
+    let until = (safeDay - todayIso + 7) % 7;
     if (until === 0 && next <= now) until = 7;
     next.setDate(now.getDate() + until);
-  } else {
-    // Monthly: the Nth day of this month, or of next month if already past.
-    const clamp = (y: number, m: number) => Math.min(day, new Date(y, m + 1, 0).getDate());
-    next.setFullYear(now.getFullYear(), now.getMonth(), clamp(now.getFullYear(), now.getMonth()));
-    next.setHours(hours, minutes, 0, 0);
-    if (next <= now) {
-      const m = now.getMonth() === 11 ? 0 : now.getMonth() + 1;
-      const y = now.getMonth() === 11 ? now.getFullYear() + 1 : now.getFullYear();
-      next.setFullYear(y, m, clamp(y, m));
-      next.setHours(hours, minutes, 0, 0);
-    }
   }
 
   return new Intl.DateTimeFormat(lang, {
@@ -195,9 +185,9 @@ function ReportCard({ report, onToggle, onConfigure, onDownload, onSendNow, owne
     const days = isIt
       ? ['', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato', 'Domenica']
       : ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const safeDay = ((report.day - 1) % 7) + 1;
     if (report.cadence === 'daily') return isIt ? 'Ogni giorno feriale' : 'Every weekday';
-    if (report.cadence === 'weekly') return `${days[report.day]} ${report.time}`;
-    return isIt ? `Giorno ${report.day} alle ${report.time}` : `Day ${report.day} at ${report.time}`;
+    return `${days[safeDay]} ${report.time}`;
   };
 
   return (
@@ -976,11 +966,11 @@ function ConfigModal({ report, ownerName, companyId, onClose, onSave }: {
 
   const scheduleHint = (() => {
     const days = isIt
-      ? ['', 'Lunedi', 'Martedi', 'Mercoledi', 'Giovedi', 'Venerdi', 'Sabato', 'Domenica']
+      ? ['', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato', 'Domenica']
       : ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const safeDay = ((day - 1) % 7) + 1;
     if (report.cadence === 'daily') return isIt ? `Ogni giorno feriale alle ${time}` : `Every weekday at ${time}`;
-    if (report.cadence === 'weekly') return isIt ? `Ogni ${days[day]} alle ${time}` : `Every ${days[day]} at ${time}`;
-    return isIt ? `Il giorno ${day} di ogni mese alle ${time}` : `Day ${day} of each month at ${time}`;
+    return isIt ? `Ogni ${days[safeDay]} alle ${time}` : `Every ${days[safeDay]} at ${time}`;
   })();
 
   const filteredHighlights = preview ? [
@@ -1077,7 +1067,7 @@ function ConfigModal({ report, ownerName, companyId, onClose, onSave }: {
             <div style={{ display: 'flex', gap: 10 }}>
               {report.cadence !== 'daily' && (
                 <select
-                  value={day}
+                  value={((day - 1) % 7) + 1}
                   onChange={e => setDay(Number(e.target.value))}
                   style={{
                     flex: 1, height: 38, padding: '0 10px', border: '1.5px solid var(--border)',
@@ -1085,20 +1075,21 @@ function ConfigModal({ report, ownerName, companyId, onClose, onSave }: {
                     background: 'var(--surface)', color: 'var(--text-primary)',
                   }}
                 >
-                  {report.cadence === 'monthly'
-                    ? Array.from({ length: 28 }, (_, i) => i + 1).map(d => (
-                        <option key={d} value={d}>{isIt ? `Giorno ${d}` : `Day ${d}`}</option>
-                      ))
-                    : [1, 2, 3, 4, 5, 6, 7].map(d => (
-                        <option key={d} value={d}>{t(`reports.days.${d}`)}</option>
-                      ))}
+                  {[1, 2, 3, 4, 5, 6, 7].map(d => (
+                    <option key={d} value={d}>{t(`reports.days.${d}`)}</option>
+                  ))}
                 </select>
               )}
               <div style={{ flex: 1 }}>
                 <TimePicker value={time} onChange={setTime} />
               </div>
             </div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>{scheduleHint}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+              <span>{scheduleHint}</span>
+              <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>
+                {isIt ? 'Prossimo invio' : 'Next run'}: <strong style={{ color: 'var(--accent)' }}>{nextRun(report.cadence, day, time, i18n.language)}</strong>
+              </span>
+            </div>
           </div>
 
           {/* Recipients */}
