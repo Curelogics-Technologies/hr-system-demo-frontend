@@ -1260,6 +1260,8 @@ export default function AdminLeavePanel() {
         status?: LeaveStatus;
         leaveType?: 'vacation' | 'sick';
         archived?: boolean;
+        /** Cross-company filter, used by super-admin views. */
+        companyId?: number;
       } = {};
       if (dateFrom)     params.dateFrom    = dateFrom;
       if (dateTo)       params.dateTo      = dateTo;

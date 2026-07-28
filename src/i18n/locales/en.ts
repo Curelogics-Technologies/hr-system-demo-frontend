@@ -1,6 +1,7 @@
 const en = {
   // ─── Common ───────────────────────────────────────────────────────────────
   common: {
+    warning: 'Warning',
     createdAt: 'Created',
     createdBy: 'Created by',
     updatedAt: 'Last updated',
@@ -1068,8 +1069,8 @@ const en = {
     SHIFT_TOO_EARLY_PARAMS: 'Your shift for today starts at {{shiftStart}} and you can check in from {{allowedFrom}}. Please try again later.',
     DEVICE_NOT_REGISTERED: 'Device not registered. Please register your device first.',
     DEVICE_MISMATCH: 'Your device is different; you cannot check in, check out, or start or end a break from this device.',
-    DEVICE_REGISTRATION_NOT_REQUIRED: 'Device registration is not required for your account right now.',
-    DEVICE_ALREADY_REGISTERED: 'This device is already registered to another account.',
+    DEVICE_REGISTRATION_NOT_REQUIRED: 'This account is already registered on a different device, so it cannot be registered again here. To move it to this device, ask an administrator to reset the device binding for this account — then register again on this screen. To keep the existing setup, use the device where it was originally registered.',
+    DEVICE_ALREADY_REGISTERED: 'This device is already in use by another account in your company. Each account must have its own device. Use "Check Device Registration" below to see which account holds it — then either register this account on a different device, or ask an administrator to reset the device binding on the account shown.',
     ON_HOLIDAY: 'The user is on leave today, so they cannot record attendance.',
     BEFORE_SHIFT_START: 'Action not allowed before shift start.',
     AFTER_SHIFT_END: 'Action not allowed after shift end.',
@@ -1993,6 +1994,14 @@ const en = {
     managerPassword: 'Password',
     checkSubmit: 'Query Device Owner',
     deviceOwnerInfo: 'Device Owner Information',
+    terminalOwnerInfo: 'Terminal currently using this device',
+    ownerTerminal: 'Terminal / Store',
+    ownerAccount: 'Account',
+    ownerDevice: 'Device',
+    noTerminalForDevice: 'No terminal is registered on this device in this company. This device is free — you can register a terminal on it now.',
+    noOwnerForDevice: 'No account is registered on this device in this company. This device is free — you can register on it now.',
+    whatNow: 'What to do next',
+    ownerFoundHelp: 'This device is already taken by the account above. You have two options: register this terminal on its own separate device (recommended), or ask an administrator to reset the device binding on the account above from Device Management, then register again here.',
     ownerName: 'Registered Employee',
     ownerRole: 'Role',
     ownerDate: 'Registered At',

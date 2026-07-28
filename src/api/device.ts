@@ -59,15 +59,23 @@ export interface CheckDeviceRegistrationPayload {
 
 export interface CheckDeviceRegistrationResponse {
   found: boolean;
-  message?: string;
+  /** Set when nothing matched, so the UI can render a localised message. */
+  code?: string;
   details?: {
     name: string;
     surname: string;
+    email: string;
     role: string;
+    /** True when the device is held by a store terminal rather than a person. */
+    isTerminal: boolean;
+    storeName: string | null;
+    storeCode: string | null;
     registeredAt: string;
-    ipAddress: string;
-    browser: string;
-    os: string;
+    ipAddress: string | null;
+    browser: string | null;
+    browserVersion: string | null;
+    os: string | null;
+    deviceModel: string | null;
   };
 }
 
