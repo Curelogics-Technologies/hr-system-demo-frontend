@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../../context/AuthContext';
 import { useToast } from '../../../context/ToastContext';
@@ -51,8 +52,39 @@ export const DocumentsTable: React.FC<DocumentsTableProps> = ({
   const [previewDocMimeType, setPreviewDocMimeType] = useState<string>('');
   const [previewLoadingId, setPreviewLoadingId] = useState<number | null>(null);
   const [openMenuId, setOpenMenuId] = useState<number | null>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
   const { isMobile } = useBreakpoint();
   const pageSize = 10;
+
+  useEffect(() => {
+    const handleScrollOrResize = () => {
+      if (openMenuId !== null) {
+        setOpenMenuId(null);
+        setMenuPos(null);
+      }
+    };
+    window.addEventListener('scroll', handleScrollOrResize, true);
+    window.addEventListener('resize', handleScrollOrResize);
+    return () => {
+      window.removeEventListener('scroll', handleScrollOrResize, true);
+      window.removeEventListener('resize', handleScrollOrResize);
+    };
+  }, [openMenuId]);
+
+  const handleToggleMenu = (e: React.MouseEvent<HTMLButtonElement>, docId: number) => {
+    e.stopPropagation();
+    if (openMenuId === docId) {
+      setOpenMenuId(null);
+      setMenuPos(null);
+    } else {
+      const rect = e.currentTarget.getBoundingClientRect();
+      setMenuPos({
+        top: rect.bottom + 4,
+        right: Math.max(10, window.innerWidth - rect.right)
+      });
+      setOpenMenuId(docId);
+    }
+  };
 
   // Reset to page 1 when the set of document IDs changes (e.g. search or filter)
   const prevDocIdsRef = useRef<string>('');
@@ -334,10 +366,11 @@ export const DocumentsTable: React.FC<DocumentsTableProps> = ({
                         </button>
                       )}
                     </>
-                  ) : isMobile ? (
+                  ) : (
                     <>
                       <button 
-                        onClick={() => setOpenMenuId(openMenuId === doc.id ? null : doc.id)}
+                        onClick={(e) => handleToggleMenu(e, doc.id)}
+                        title={t('common.actions', 'Actions')}
                         style={{ 
                           display: 'flex', alignItems: 'center', justifyContent: 'center', 
                           width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', 
@@ -347,98 +380,54 @@ export const DocumentsTable: React.FC<DocumentsTableProps> = ({
                       >
                         <IconDots />
                       </button>
-                      {openMenuId === doc.id && (
+                      {openMenuId === doc.id && menuPos && createPortal(
                         <>
                           <div 
-                            style={{ position: 'fixed', inset: 0, zIndex: 998 }} 
-                            onClick={() => setOpenMenuId(null)} 
+                            style={{ position: 'fixed', inset: 0, zIndex: 99998 }} 
+                            onClick={(e) => { e.stopPropagation(); setOpenMenuId(null); setMenuPos(null); }} 
                           />
                           <div style={{ 
-                            position: 'absolute', top: '100%', right: 10, zIndex: 999, 
-                            background: 'var(--surface)', border: '1px solid var(--border)', 
-                            borderRadius: 12, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', 
+                            position: 'fixed', top: menuPos.top, right: menuPos.right, zIndex: 99999, 
+                            background: 'var(--surface, #ffffff)', border: '1px solid var(--border)', 
+                            borderRadius: 14, boxShadow: '0 10px 30px rgba(0,0,0,0.18)', 
                             padding: 6, display: 'flex', flexDirection: 'column', gap: 2,
-                            minWidth: 140, animation: 'slideUp 0.15s ease'
+                            minWidth: 160, transformOrigin: 'top right', animation: 'fadeIn 0.15s ease'
                           }}>
                             <button 
-                              onClick={() => { handlePreview(doc); setOpenMenuId(null); }} 
+                              onClick={() => { handlePreview(doc); setOpenMenuId(null); setMenuPos(null); }} 
                               disabled={previewLoadingId === doc.id}
-                              style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 8, border: 'none', background: 'transparent', color: 'var(--text-primary)', cursor: 'pointer', fontSize: 13, textAlign: 'left', fontWeight: 500 }}>
+                              style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 8, border: 'none', background: 'transparent', color: 'var(--text-primary)', cursor: 'pointer', fontSize: 13, textAlign: 'left', fontWeight: 500 }}>
                               <span style={{ opacity: 0.7 }}><IconEye /></span> {t('common.preview', 'Preview')}
                             </button>
                             <button 
-                              onClick={() => { handleDownload(doc); setOpenMenuId(null); }} 
-                              style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 8, border: 'none', background: 'transparent', color: 'var(--text-primary)', cursor: 'pointer', fontSize: 13, textAlign: 'left', fontWeight: 500 }}>
-                              <span style={{ opacity: 0.7 }}><IconDownload /></span> {t('documents.download')}
+                              onClick={() => { handleDownload(doc); setOpenMenuId(null); setMenuPos(null); }} 
+                              style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 8, border: 'none', background: 'transparent', color: 'var(--text-primary)', cursor: 'pointer', fontSize: 13, textAlign: 'left', fontWeight: 500 }}>
+                              <span style={{ opacity: 0.7 }}><IconDownload /></span> {t('documents.download', 'Download')}
                             </button>
                             {onEdit && canManage && (
                               <button 
-                                onClick={() => { onEdit(doc); setOpenMenuId(null); }} 
-                                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 8, border: 'none', background: 'transparent', color: 'var(--text-primary)', cursor: 'pointer', fontSize: 13, textAlign: 'left', fontWeight: 500 }}>
-                                <span style={{ opacity: 0.7 }}><IconPen /></span> {t('common.edit')}
+                                onClick={() => { onEdit(doc); setOpenMenuId(null); setMenuPos(null); }} 
+                                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 8, border: 'none', background: 'transparent', color: 'var(--text-primary)', cursor: 'pointer', fontSize: 13, textAlign: 'left', fontWeight: 500 }}>
+                                <span style={{ opacity: 0.7 }}><IconPen /></span> {t('common.edit', 'Edit')}
                               </button>
                             )}
                             {doc.requiresSignature && !doc.signedAt && Number(doc.employeeId || doc.employee_id) === user?.id && (
                               <button 
-                                onClick={() => { handleSignClick(doc); setOpenMenuId(null); }} 
-                                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 8, border: 'none', background: 'var(--primary)', color: '#fff', cursor: 'pointer', fontSize: 13, textAlign: 'left', fontWeight: 600 }}>
-                                <IconPen /> {t('documents.sign')}
+                                onClick={() => { handleSignClick(doc); setOpenMenuId(null); setMenuPos(null); }} 
+                                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 8, border: 'none', background: 'var(--primary)', color: '#fff', cursor: 'pointer', fontSize: 13, textAlign: 'left', fontWeight: 600 }}>
+                                <IconPen /> {t('documents.sign', 'Sign')}
                               </button>
                             )}
                             {canManage && (
                               <button 
-                                onClick={() => { handleDeleteClick(doc); setOpenMenuId(null); }} 
-                                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 8, border: 'none', background: 'rgba(220,38,38,0.05)', color: '#DC2626', cursor: 'pointer', fontSize: 13, textAlign: 'left', fontWeight: 600, marginTop: 4 }}>
-                                <IconTrash /> {t('common.delete')}
+                                onClick={() => { handleDeleteClick(doc); setOpenMenuId(null); setMenuPos(null); }} 
+                                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 8, border: 'none', background: 'rgba(220,38,38,0.06)', color: '#DC2626', cursor: 'pointer', fontSize: 13, textAlign: 'left', fontWeight: 600, marginTop: 4 }}>
+                                <IconTrash /> {t('common.delete', 'Delete')}
                               </button>
                             )}
                           </div>
-                        </>
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      <button 
-                        onClick={() => handlePreview(doc)} 
-                        title={t('common.preview', 'Preview')}
-                        disabled={previewLoadingId === doc.id}
-                        style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--background)', color: 'var(--text-secondary)', cursor: previewLoadingId === doc.id ? 'wait' : 'pointer', fontSize: 12 }}>
-                        {previewLoadingId === doc.id ? '...' : <IconEye />}
-                      </button>
-                      <button 
-                        onClick={() => handleDownload(doc)} 
-                        title={t('documents.download')}
-                        style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--background)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 12 }}>
-                        <IconDownload />
-                      </button>
-                      {onEdit && canManage && (
-                        <button 
-                          onClick={() => onEdit(doc)} 
-                          title={t('common.edit')}
-                          style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--background)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 12 }}>
-                          <IconPen />
-                        </button>
-                      )}
-                      {doc.requiresSignature && !doc.signedAt && Number(doc.employeeId || doc.employee_id) === user?.id && (
-                        <>
-                          {doc.expiresAt && new Date(doc.expiresAt) < new Date() ? (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 6, border: '1px solid rgba(220,38,38,0.2)', background: 'rgba(220,38,38,0.05)', color: '#DC2626', fontSize: 11, fontWeight: 700, textTransform: 'uppercase' }}>
-                              🚫 {t('documents.expired')}
-                            </div>
-                          ) : (
-                            <button onClick={() => handleSignClick(doc)} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 6, border: 'none', background: 'var(--primary)', color: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
-                              <IconPen /> {t('documents.sign')}
-                            </button>
-                          )}
-                        </>
-                      )}
-                      {canManage && (
-                        <button 
-                          onClick={() => handleDeleteClick(doc)} 
-                          title={t('common.delete')}
-                          style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 8px', borderRadius: 6, border: '1px solid #DC262630', background: 'rgba(220,38,38,0.05)', color: '#DC2626', cursor: 'pointer', fontSize: 12 }}>
-                          <IconTrash />
-                        </button>
+                        </>,
+                        document.body
                       )}
                     </>
                   )}

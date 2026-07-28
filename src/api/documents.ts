@@ -207,11 +207,12 @@ export async function uploadDocumentUnified(
     visibleToRoles?: string[];
     employeeId?: number | null;
     companyId?: number | null;
+    extractZip?: boolean;
   }
 ): Promise<any> {
   const formData = new FormData();
   formData.append('file', file);
-  formData.append('extract_zip', 'false');
+  formData.append('extract_zip', options?.extractZip === false ? 'false' : 'true');
   if (options?.categoryId != null) formData.append('category_id', String(options.categoryId));
   if (options?.requiresSignature) formData.append('requires_signature', 'true');
   if (options?.expiresAt) formData.append('expires_at', options.expiresAt);
@@ -232,6 +233,9 @@ export interface DocumentUpdatePayload {
   requires_signature?: boolean;
   expires_at?: string | null;
   visible_to_roles?: string[];
+  company_id?: number | null;
+  confirm?: boolean;
+  notify?: boolean;
 }
 
 export async function updateDocumentGeneric(id: number, payload: DocumentUpdatePayload): Promise<void> {

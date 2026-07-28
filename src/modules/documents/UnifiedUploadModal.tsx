@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
-import { uploadDocumentUnified, updateDocumentGeneric, deleteDocument } from '../../api/documents';
+import { uploadDocumentUnified, updateDocumentGeneric, deleteDocument, getDocumentPreviewUrlGeneric } from '../../api/documents';
 import { getEmployees } from '../../api/employees';
 import { Employee, Company } from '../../types';
 import { createPortal } from 'react-dom';
@@ -167,6 +167,7 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
   const [previewDocUrl, setPreviewDocUrl] = useState<string | null>(null);
   const [previewDocName, setPreviewDocName] = useState<string>('');
   const [previewDocMimeType, setPreviewDocMimeType] = useState<string>('');
+  const [previewLoading, setPreviewLoading] = useState<boolean>(false);
 
   const isConfirmedRef = useRef(false);
   const uploadedDocsRef = useRef(uploadedDocs);
@@ -220,7 +221,7 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
     }
   }, [associatedCompanies, globalCompanyId]);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = Array.from(e.target.files || []);
     if (selectedFiles.length === 0) return;
 
@@ -244,18 +245,76 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
       setUploadedDocs([]);
     }
 
-    const items: UploadFileItem[] = selectedFiles.map((f, i) => ({
-      id: `${f.name}-${i}-${Date.now()}`,
-      file: f,
-      requiresSignature: globalRequiresSignature,
-      expiresAt: globalExpiresAt,
-      visibility: globalVisibility,
-      companyId: globalCompanyId,
-      useGlobal: true,
-      expanded: false
-    }));
+    setUploading(true);
+    const items: UploadFileItem[] = [];
+    const defaultCompId = globalCompanyId || (associatedCompanies.length === 1 ? associatedCompanies[0].id : (user?.companyId || null));
+
+    for (let i = 0; i < selectedFiles.length; i++) {
+      const f = selectedFiles[i];
+      const ext = f.name.substring(f.name.lastIndexOf('.')).toLowerCase();
+      const isArchive = ['.zip', '.rar', '.7z'].includes(ext);
+
+      if (isArchive) {
+        try {
+          const response = await uploadDocumentUnified(f, {
+            requiresSignature: globalRequiresSignature,
+            expiresAt: globalExpiresAt || null,
+            visibleToRoles: globalVisibility === 'hr' ? ['admin', 'hr'] : ['admin', 'hr', 'area_manager', 'store_manager', 'employee'],
+            employeeId: targetEmployeeId,
+            companyId: defaultCompId,
+            extractZip: true
+          });
+
+          if (response && response.isZip && Array.isArray(response.files)) {
+            for (const extFile of response.files) {
+              items.push({
+                id: `zip-ext-${extFile.documentId}-${Date.now()}-${Math.random()}`,
+                file: new File([], extFile.fileName),
+                requiresSignature: globalRequiresSignature,
+                expiresAt: globalExpiresAt,
+                visibility: globalVisibility,
+                companyId: defaultCompId,
+                useGlobal: true,
+                expanded: false,
+                uploaded: true,
+                documentId: extFile.documentId,
+                matched: extFile.matched,
+                matchedEmployee: extFile.employee
+              });
+            }
+          } else {
+            items.push({
+              id: `${f.name}-${i}-${Date.now()}`,
+              file: f,
+              requiresSignature: globalRequiresSignature,
+              expiresAt: globalExpiresAt,
+              visibility: globalVisibility,
+              companyId: defaultCompId,
+              useGlobal: true,
+              expanded: false
+            });
+          }
+        } catch (err: any) {
+          showToast(err?.message || `${t('documents.errorUpload')} (${f.name})`, 'error');
+          setUploading(false);
+          return;
+        }
+      } else {
+        items.push({
+          id: `${f.name}-${i}-${Date.now()}`,
+          file: f,
+          requiresSignature: globalRequiresSignature,
+          expiresAt: globalExpiresAt,
+          visibility: globalVisibility,
+          companyId: defaultCompId,
+          useGlobal: true,
+          expanded: false
+        });
+      }
+    }
 
     setFiles(items);
+    setUploading(false);
     setStep(2);
   };
 
@@ -319,6 +378,7 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
 
     setUploading(true);
     const updatedFiles = [...files];
+    const matchingList: UnmatchedItem[] = [];
 
     for (let i = 0; i < updatedFiles.length; i++) {
       const item = updatedFiles[i];
@@ -327,13 +387,32 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
           ? ['admin', 'hr']
           : ['admin', 'hr', 'area_manager', 'store_manager', 'employee'];
 
+        const existingDoc = unmatchedDocs.find(d => d.documentId === item.documentId);
+        
         if (item.uploaded && item.documentId) {
+          const matchedEmpId = existingDoc ? existingDoc.manualEmployeeId : (item.matchedEmployee?.id || null);
           await updateDocumentGeneric(item.documentId, {
             title: item.file.name,
-            employee_id: null,
+            employee_id: matchedEmpId,
             requires_signature: item.requiresSignature,
             expires_at: item.expiresAt || null,
-            visible_to_roles: visibleToRoles
+            visible_to_roles: visibleToRoles,
+            company_id: item.companyId
+          });
+
+          const fileName = item.file.name;
+          const lastDot = fileName.lastIndexOf('.');
+          const initialTitle = lastDot > 0 ? fileName.substring(0, lastDot) : fileName;
+          const extension = lastDot > 0 ? fileName.substring(lastDot) : '';
+
+          matchingList.push({
+            documentId: item.documentId,
+            fileName,
+            editableTitle: existingDoc ? existingDoc.editableTitle : initialTitle,
+            fileExtension: extension,
+            manualEmployeeId: matchedEmpId,
+            companyId: item.companyId,
+            isAutoMatched: existingDoc ? existingDoc.isAutoMatched : !!(item.matched && item.matchedEmployee)
           });
         } else {
           const response = await uploadDocumentUnified(item.file, {
@@ -341,17 +420,62 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
             expiresAt: item.expiresAt || null,
             visibleToRoles,
             employeeId: targetEmployeeId,
-            companyId: item.companyId
+            companyId: item.companyId,
+            extractZip: true
           });
 
-          if (response && response.documentId) {
-            updatedFiles[i] = {
-              ...item,
-              uploaded: true,
-              documentId: response.documentId,
-              matched: response.matched,
-              matchedEmployee: response.employee
-            };
+          if (response) {
+            if (response.isZip && Array.isArray(response.files)) {
+              updatedFiles[i] = { ...item, uploaded: true };
+
+              for (const extFile of response.files) {
+                const fileName = extFile.fileName;
+                const lastDot = fileName.lastIndexOf('.');
+                const initialTitle = lastDot > 0 ? fileName.substring(0, lastDot) : fileName;
+                const extension = lastDot > 0 ? fileName.substring(lastDot) : '';
+
+                const existingDoc = unmatchedDocs.find(d => d.documentId === extFile.documentId);
+                const isAutoMatched = extFile.matched && extFile.employee;
+                const matchedEmpId = existingDoc ? existingDoc.manualEmployeeId : (isAutoMatched ? extFile.employee.id : null);
+
+                matchingList.push({
+                  documentId: extFile.documentId,
+                  fileName,
+                  editableTitle: existingDoc ? existingDoc.editableTitle : initialTitle,
+                  fileExtension: extension,
+                  manualEmployeeId: matchedEmpId,
+                  companyId: item.companyId,
+                  isAutoMatched: existingDoc ? existingDoc.isAutoMatched : !!isAutoMatched
+                });
+              }
+            } else if (response.documentId) {
+              updatedFiles[i] = {
+                ...item,
+                uploaded: true,
+                documentId: response.documentId,
+                matched: response.matched,
+                matchedEmployee: response.employee
+              };
+
+              const fileName = item.file.name;
+              const lastDot = fileName.lastIndexOf('.');
+              const initialTitle = lastDot > 0 ? fileName.substring(0, lastDot) : fileName;
+              const extension = lastDot > 0 ? fileName.substring(lastDot) : '';
+
+              const existingDoc = unmatchedDocs.find(d => d.documentId === response.documentId);
+              const isAutoMatched = response.matched && response.employee;
+              const matchedEmpId = existingDoc ? existingDoc.manualEmployeeId : (isAutoMatched ? response.employee.id : null);
+
+              matchingList.push({
+                documentId: response.documentId,
+                fileName,
+                editableTitle: existingDoc ? existingDoc.editableTitle : initialTitle,
+                fileExtension: extension,
+                manualEmployeeId: matchedEmpId,
+                companyId: item.companyId,
+                isAutoMatched: existingDoc ? existingDoc.isAutoMatched : !!isAutoMatched
+              });
+            }
           }
         }
       } catch (err: any) {
@@ -362,85 +486,43 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
     }
 
     setFiles(updatedFiles);
-    setUploading(false);
-
-    // Build the matching docs list for Step 3 containing ALL uploaded files
-    const matchingList: UnmatchedItem[] = [];
-    for (const item of updatedFiles) {
-      if (!item.documentId) continue;
-      
-      const fileName = item.file.name;
-      const lastDot = fileName.lastIndexOf('.');
-      const initialTitle = lastDot > 0 ? fileName.substring(0, lastDot) : fileName;
-      const extension = lastDot > 0 ? fileName.substring(lastDot) : '';
-
-      const existingDoc = unmatchedDocs.find(d => d.documentId === item.documentId);
-      
-      let manualEmployeeId: number | null = null;
-      let isAutoMatched = !!item.matched;
-      
-      if (existingDoc) {
-        manualEmployeeId = existingDoc.manualEmployeeId;
-        isAutoMatched = !!existingDoc.isAutoMatched;
-      } else if (item.matched && item.matchedEmployee) {
-        manualEmployeeId = item.matchedEmployee.id;
-      } else if (targetEmployeeId) {
-        manualEmployeeId = targetEmployeeId;
-        isAutoMatched = true;
-      }
-
-      matchingList.push({
-        documentId: item.documentId,
-        fileName,
-        editableTitle: existingDoc ? existingDoc.editableTitle : initialTitle,
-        fileExtension: extension,
-        manualEmployeeId,
-        companyId: item.companyId,
-        isAutoMatched
-      });
-    }
-
     setUnmatchedDocs(matchingList);
+    setUploading(false);
     setStep(3);
   };
 
   const buildFinalUploadedDocs = (currentFiles: UploadFileItem[], manualAssignments: UnmatchedItem[]) => {
     const finalDocs: UploadedDocDetail[] = [];
 
-    currentFiles.forEach(item => {
-      if (!item.documentId) return;
-
-      const manualMatch = manualAssignments.find(m => m.documentId === item.documentId);
-      let assignedEmpId: number | null = null;
+    manualAssignments.forEach(item => {
+      let assignedEmpId: number | null = item.manualEmployeeId;
       let assignedEmpName = 'Unassigned';
 
-      if (manualMatch) {
-        assignedEmpId = manualMatch.manualEmployeeId;
-        if (assignedEmpId) {
-          const emp = employees.find(e => e.id === assignedEmpId);
-          if (emp) assignedEmpName = `${emp.name} ${emp.surname}`;
+      if (assignedEmpId) {
+        const emp = employees.find(e => e.id === assignedEmpId);
+        if (emp && (!item.companyId || !emp.companyId || emp.companyId === item.companyId)) {
+          assignedEmpName = `${emp.name || ''} ${emp.surname || ''}`.trim();
+        } else {
+          assignedEmpId = null;
+          assignedEmpName = 'Unassigned';
         }
-      } else if (item.matched && item.matchedEmployee) {
-        assignedEmpId = item.matchedEmployee.id;
-        assignedEmpName = `${item.matchedEmployee.name} ${item.matchedEmployee.surname}`;
-      } else if (targetEmployeeId && targetEmployeeName) {
-        assignedEmpId = targetEmployeeId;
-        assignedEmpName = targetEmployeeName;
       }
 
       const comp = companies.find(c => c.id === item.companyId);
+      const matchingFileItem = currentFiles.find(f => f.documentId === item.documentId);
+      const fileObject = matchingFileItem?.file || new File([], `${item.editableTitle}${item.fileExtension}`);
 
       finalDocs.push({
         documentId: item.documentId,
-        fileName: manualMatch ? `${manualMatch.editableTitle}${manualMatch.fileExtension}` : item.file.name,
-        requiresSignature: item.requiresSignature,
-        expiresAt: item.expiresAt,
-        visibility: item.visibility,
+        fileName: `${item.editableTitle}${item.fileExtension}`,
+        requiresSignature: matchingFileItem ? matchingFileItem.requiresSignature : globalRequiresSignature,
+        expiresAt: matchingFileItem ? matchingFileItem.expiresAt : globalExpiresAt,
+        visibility: matchingFileItem ? matchingFileItem.visibility : globalVisibility,
         companyId: item.companyId,
         companyName: comp ? comp.name : 'Unknown Company',
         assignedEmployeeId: assignedEmpId,
         assignedEmployeeName: assignedEmpName,
-        fileObject: item.file
+        fileObject: fileObject
       });
     });
 
@@ -470,7 +552,9 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
         const fullTitle = `${item.editableTitle}${item.fileExtension}`;
         await updateDocumentGeneric(item.documentId, {
           title: fullTitle,
-          employee_id: item.manualEmployeeId || null
+          employee_id: item.manualEmployeeId || null,
+          confirm: true,
+          notify: true
         });
       }
       isConfirmedRef.current = true;
@@ -493,14 +577,41 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
   };
 
   // Preview management
-  const openPreview = (doc: UploadedDocDetail) => {
+  const openPreview = async (doc: UploadedDocDetail) => {
     if (previewDocUrl) {
       URL.revokeObjectURL(previewDocUrl);
+      setPreviewDocUrl(null);
     }
-    const url = URL.createObjectURL(doc.fileObject);
-    setPreviewDocUrl(url);
+    const ext = (doc.fileName.split('.').pop() || '').toLowerCase();
+    const mimeMap: Record<string, string> = {
+      pdf: 'application/pdf',
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      png: 'image/png',
+      webp: 'image/webp',
+      gif: 'image/gif',
+      svg: 'image/svg+xml',
+      txt: 'text/plain',
+    };
+    const mimeType = (doc.fileObject && doc.fileObject.type) || mimeMap[ext] || 'application/octet-stream';
+
     setPreviewDocName(doc.fileName);
-    setPreviewDocMimeType(doc.fileObject.type);
+    setPreviewDocMimeType(mimeType);
+
+    if (doc.documentId) {
+      setPreviewLoading(true);
+      try {
+        const url = await getDocumentPreviewUrlGeneric(doc.documentId, mimeType);
+        setPreviewDocUrl(url);
+      } catch {
+        showToast(t('common.error', 'Error loading document preview'), 'error');
+      } finally {
+        setPreviewLoading(false);
+      }
+    } else if (doc.fileObject && doc.fileObject.size > 0) {
+      const url = URL.createObjectURL(doc.fileObject);
+      setPreviewDocUrl(url);
+    }
   };
 
   const closePreview = () => {
@@ -508,6 +619,7 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
       URL.revokeObjectURL(previewDocUrl);
       setPreviewDocUrl(null);
     }
+    setPreviewLoading(false);
   };
 
   const getUnmatchedEmpOptions = (docCompanyId: number | null): SelectOption[] => {
@@ -654,24 +766,35 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
                   {t('documents.assignedTo', 'Assigned to')}: <strong>{targetEmployeeName}</strong>
                 </div>
               )}
-              <label
-                style={{
+              {uploading ? (
+                <div style={{
                   display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                  height: 190, border: '2px dashed var(--border)', borderRadius: 12, cursor: 'pointer',
-                  transition: 'all 0.2s', background: 'var(--background)'
-                }}
-                onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--primary)'}
-                onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
-              >
-                <div style={{ background: 'rgba(2,132,199,0.1)', color: 'var(--primary)', padding: 12, borderRadius: 12, marginBottom: 12 }}>
-                  <IconUpload />
+                  height: 190, border: '2px dashed var(--primary)', borderRadius: 12, background: 'var(--background)', gap: 12
+                }}>
+                  <div style={{ fontSize: 32, animation: 'pulse 1s infinite' }}>📦</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--primary)' }}>Extracting archive files...</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Preparing files for configuration step</div>
                 </div>
-                <div style={{ fontSize: 15, fontWeight: 600 }}>{t('documents.chooseFile')} (Multiple files allowed)</div>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-                  ZIP (max 50MB) · PDF, JPG, PNG (max 10MB)
-                </div>
-                <input type="file" multiple hidden onChange={handleFileChange} accept=".zip,.rar,.7z,.pdf,.jpg,.jpeg,.png,.webp,application/zip,application/x-zip-compressed,application/rar,application/x-rar-compressed,application/x-7z-compressed,application/octet-stream" />
-              </label>
+              ) : (
+                <label
+                  style={{
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                    height: 190, border: '2px dashed var(--border)', borderRadius: 12, cursor: 'pointer',
+                    transition: 'all 0.2s', background: 'var(--background)'
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--primary)'}
+                  onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
+                >
+                  <div style={{ background: 'rgba(2,132,199,0.1)', color: 'var(--primary)', padding: 12, borderRadius: 12, marginBottom: 12 }}>
+                    <IconUpload />
+                  </div>
+                  <div style={{ fontSize: 15, fontWeight: 600 }}>{t('documents.chooseFile')} (Multiple files allowed)</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+                    ZIP (max 50MB) · PDF, JPG, PNG (max 10MB)
+                  </div>
+                  <input type="file" multiple hidden onChange={handleFileChange} accept=".zip,.rar,.7z,.pdf,.jpg,.jpeg,.png,.webp,application/zip,application/x-zip-compressed,application/rar,application/x-rar-compressed,application/x-7z-compressed,application/octet-stream" />
+                </label>
+              )}
             </div>
           ) : step === 2 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -1125,6 +1248,7 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
             <button
               onClick={() => setStep((step - 1) as any)}
               disabled={uploading}
+              data-testid="wizard-back-button"
               style={{
                 padding: '8px 18px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)',
                 color: 'var(--text-secondary)', cursor: uploading ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600,
@@ -1183,51 +1307,58 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
       </div>
 
       {/* Preview Modal Overlay (Stops bubbling to keep wizard open) */}
-      {previewDocUrl && (
+      {(previewDocUrl || previewLoading) && (
         <div onClick={e => e.stopPropagation()}>
           <ModalBackdrop onClose={closePreview} width={800}>
             <ModalHeader title={previewDocName} onClose={closePreview} />
             <div style={{ width: '100%', height: '75vh', background: 'var(--background)', borderRadius: 12, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              {['zip', 'rar', '7z'].some(ext => previewDocName.toLowerCase().endsWith(`.${ext}`)) ? (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: 32, textAlign: 'center' }}>
-                  <div style={{ fontSize: 48 }}>📦</div>
-                  <h4 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>
-                    {t('documents.previewArchiveTitle', 'Archive preview is not supported')}
-                  </h4>
-                  <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)', maxWidth: 400 }}>
-                    {t('documents.previewArchiveText', 'To view the contents of this archive, please download and extract the file.')}
-                  </p>
-                  <button
-                    onClick={() => {
-                      const link = document.createElement('a');
-                      link.href = previewDocUrl;
-                      link.setAttribute('download', previewDocName);
-                      document.body.appendChild(link);
-                      link.click();
-                      link.remove();
-                    }}
-                    style={{
-                      padding: '10px 20px', borderRadius: 8, border: 'none', background: 'var(--primary)',
-                      color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600, transition: 'all 0.2s',
-                      boxShadow: '0 4px 12px rgba(2,132,199,0.2)'
-                    }}
-                  >
-                    {t('documents.download', 'Download')}
-                  </button>
+              {previewLoading ? (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, color: 'var(--text-muted)' }}>
+                  <div style={{ fontSize: 32, animation: 'pulse 1s infinite' }}>📄</div>
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>{t('common.loading', 'Loading document preview...')}</div>
                 </div>
-              ) : previewDocMimeType?.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].some(ext => previewDocName.toLowerCase().endsWith(`.${ext}`)) ? (
-                <img
-                  src={previewDocUrl}
-                  style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
-                  alt={previewDocName}
-                />
-              ) : (
-                <iframe
-                  src={previewDocUrl}
-                  style={{ width: '100%', height: '100%', border: 'none' }}
-                  title={previewDocName}
-                />
-              )}
+              ) : previewDocUrl ? (
+                ['zip', 'rar', '7z'].some(ext => previewDocName.toLowerCase().endsWith(`.${ext}`)) ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: 32, textAlign: 'center' }}>
+                    <div style={{ fontSize: 48 }}>📦</div>
+                    <h4 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>
+                      {t('documents.previewArchiveTitle', 'Archive preview is not supported')}
+                    </h4>
+                    <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)', maxWidth: 400 }}>
+                      {t('documents.previewArchiveText', 'To view the contents of this archive, please download and extract the file.')}
+                    </p>
+                    <button
+                      onClick={() => {
+                        const link = document.createElement('a');
+                        link.href = previewDocUrl;
+                        link.setAttribute('download', previewDocName);
+                        document.body.appendChild(link);
+                        link.click();
+                        link.remove();
+                      }}
+                      style={{
+                        padding: '10px 20px', borderRadius: 8, border: 'none', background: 'var(--primary)',
+                        color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600, transition: 'all 0.2s',
+                        boxShadow: '0 4px 12px rgba(2,132,199,0.2)'
+                      }}
+                    >
+                      {t('documents.download', 'Download')}
+                    </button>
+                  </div>
+                ) : previewDocMimeType?.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].some(ext => previewDocName.toLowerCase().endsWith(`.${ext}`)) ? (
+                  <img
+                    src={previewDocUrl}
+                    style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                    alt={previewDocName}
+                  />
+                ) : (
+                  <iframe
+                    src={previewDocUrl}
+                    style={{ width: '100%', height: '100%', border: 'none' }}
+                    title={previewDocName}
+                  />
+                )
+              ) : null}
             </div>
           </ModalBackdrop>
         </div>

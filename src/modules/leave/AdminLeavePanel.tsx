@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { CalendarDays, CheckCheck, Clock3, FileText, Palmtree, Thermometer, Trash2, XCircle, User, Store, Shield, Calendar, Clock, Settings, Archive, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { getCompanies } from '../../api/companies';
 import {
   getLeaveRequests,
   getPendingLeaveApprovals,
@@ -1063,12 +1064,19 @@ export default function AdminLeavePanel() {
   const [dateTo,   setDateTo]       = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterType, setFilterType]     = useState('');
+  const [companyList, setCompanyList]   = useState<Array<{ id: number; name: string }>>([]);
+  const [filterCompanyId, setFilterCompanyId] = useState('');
   const [filterStoreId, setFilterStoreId] = useState('');
   const [search, setSearch]             = useState('');
 
   const [showFilterModal, setShowFilterModal] = useState(false);
 
+  useEffect(() => {
+    getCompanies().then(setCompanyList).catch(() => {});
+  }, []);
+
   // Temporary filter states
+  const [tempCompanyId, setTempCompanyId] = useState(filterCompanyId);
   const [tempStoreId, setTempStoreId] = useState(filterStoreId);
   const [tempStatus, setTempStatus] = useState(filterStatus);
   const [tempType, setTempType] = useState(filterType);
@@ -1076,6 +1084,7 @@ export default function AdminLeavePanel() {
   const [tempDateTo, setTempDateTo] = useState(dateTo);
 
   const openFilterModal = () => {
+    setTempCompanyId(filterCompanyId);
     setTempStoreId(filterStoreId);
     setTempStatus(filterStatus);
     setTempType(filterType);
@@ -1085,6 +1094,7 @@ export default function AdminLeavePanel() {
   };
 
   const applyFilters = () => {
+    setFilterCompanyId(tempCompanyId);
     setFilterStoreId(tempStoreId);
     setFilterStatus(tempStatus);
     setFilterType(tempType);
@@ -1094,6 +1104,7 @@ export default function AdminLeavePanel() {
   };
 
   const resetAllFilters = () => {
+    setTempCompanyId('');
     setTempStoreId('');
     setTempStatus('');
     setTempType('');
@@ -1103,13 +1114,14 @@ export default function AdminLeavePanel() {
 
   const activeFiltersCount = useMemo(() => {
     let count = 0;
+    if (filterCompanyId) count++;
     if (filterStatus) count++;
     if (filterType) count++;
     if (filterStoreId) count++;
     if (dateFrom) count++;
     if (dateTo) count++;
     return count;
-  }, [filterStatus, filterType, filterStoreId, dateFrom, dateTo]);
+  }, [filterCompanyId, filterStatus, filterType, filterStoreId, dateFrom, dateTo]);
 
   // ── Create modal ───────────────────────────────────────────────────────────
   const [createOpen, setCreateOpen]     = useState(false);
@@ -1251,6 +1263,10 @@ export default function AdminLeavePanel() {
       } = {};
       if (dateFrom)     params.dateFrom    = dateFrom;
       if (dateTo)       params.dateTo      = dateTo;
+      if (filterCompanyId) {
+        params.companyId = parseInt(filterCompanyId, 10);
+        (params as any).company_id = parseInt(filterCompanyId, 10);
+      }
       if (filterStatus && filterStatus !== 'pending' && filterStatus !== 'approved' && filterStatus !== 'rejected') {
         params.status = filterStatus as LeaveStatus;
       }
@@ -1294,6 +1310,23 @@ export default function AdminLeavePanel() {
             if (reqNorm !== filterNorm) return false;
           }
         }
+        if (filterCompanyId) {
+          const cidNum = parseInt(filterCompanyId, 10);
+          const targetCompName = companyList.find(c => String(c.id) === filterCompanyId)?.name;
+          const reqCid = (req as any).companyId ?? (req as any).company_id;
+          if (reqCid != null && reqCid > 0) {
+            if (reqCid !== cidNum) return false;
+          } else if (req.companyName && targetCompName) {
+            if (req.companyName !== targetCompName) return false;
+          } else if (req.storeId) {
+            const storeObj = stores.find((s: any) => s.id === req.storeId);
+            if (storeObj) {
+              if ((storeObj as any).companyId && (storeObj as any).companyId !== cidNum) return false;
+              if (targetCompName && storeObj.companyName && storeObj.companyName !== targetCompName) return false;
+            }
+          }
+        }
+        if (filterStoreId && req.storeId && String(req.storeId) !== filterStoreId) return false;
         if (filterType && req.leaveType !== filterType) return false;
         if (dateFrom && req.startDate < dateFrom) return false;
         if (dateTo && req.endDate > dateTo) return false;
@@ -1312,7 +1345,7 @@ export default function AdminLeavePanel() {
     } finally {
       setLoading(false);
     }
-  }, [dateFrom, dateTo, filterStatus, filterType, panelTab, t]);
+  }, [dateFrom, dateTo, filterStatus, filterType, filterCompanyId, filterStoreId, panelTab, companyList, stores, t]);
 
   useEffect(() => { fetchRequests(); }, [fetchRequests]);
 
@@ -3057,6 +3090,38 @@ export default function AdminLeavePanel() {
 
             {/* Body */}
             <div style={{ flex: 1, overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              {/* Company filter */}
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '8px' }}>
+                  {t('common.company', 'Company')}
+                </label>
+                <select
+                  value={tempCompanyId}
+                  onChange={(e) => {
+                    setTempCompanyId(e.target.value);
+                    setTempStoreId('');
+                  }}
+                  style={{
+                    width: '100%',
+                    height: 38,
+                    borderRadius: 8,
+                    border: '1px solid var(--border)',
+                    padding: '0 10px',
+                    background: 'var(--background)',
+                    color: 'var(--text)',
+                    fontSize: 13,
+                    outline: 'none',
+                  }}
+                >
+                  <option value="">{t('shifts.allCompanies', 'All Companies')}</option>
+                  {companyList.map((c) => (
+                    <option key={c.id} value={String(c.id)}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               {/* Store filter */}
               <div>
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '8px' }}>
@@ -3078,7 +3143,10 @@ export default function AdminLeavePanel() {
                   }}
                 >
                   <option value="">{t('common.all')} {t('common.store', 'store').toLowerCase()}</option>
-                  {stores.map((s) => (
+                  {(tempCompanyId
+                    ? stores.filter((s: any) => String(s.companyId) === tempCompanyId || s.companyName === companyList.find(c => String(c.id) === tempCompanyId)?.name)
+                    : stores
+                  ).map((s) => (
                     <option key={s.id} value={String(s.id)}>
                       {s.companyName ? `${s.name} (${s.companyName})` : s.name}
                     </option>

@@ -6,8 +6,9 @@ import { listShifts, Shift, copyWeek, exportShifts, importShifts, downloadImport
 import { getLeaveBlocks, LeaveBlock } from '../../api/leave';
 import { getTransferBlocks, TransferAssignment } from '../../api/transfers';
 import { getStores } from '../../api/stores';
+import { getCompanies } from '../../api/companies';
 import { createWindowDisplay, deleteWindowDisplay, listWindowDisplayActivities, StoreActivityType, updateWindowDisplay, WindowDisplayActivity } from '../../api/windowDisplay';
-import { Store } from '../../types';
+import { Store, Company } from '../../types';
 import ConfirmModal from '../../components/ui/ConfirmModal';
 import WeeklyCalendar from './WeeklyCalendar';
 import MonthlyCalendar from './MonthlyCalendar';
@@ -149,6 +150,8 @@ export default function ShiftsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stores, setStores] = useState<Store[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [companyFilter, setCompanyFilter] = useState<number | null>(null);
   const [storeFilter, setStoreFilter] = useState<number | null>(user?.storeId ?? null);
 
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -198,10 +201,11 @@ export default function ShiftsPage() {
   const canApproveWeek = Boolean(user && (user.isSuperAdmin || ['admin', 'hr', 'area_manager'].includes(user.role)));
   const canManageWindowDisplay = Boolean(user && (user.isSuperAdmin || ['admin', 'area_manager'].includes(user.role)));
 
-  // Load stores for admin/hr/area_manager/store_manager store filter/views
+  // Load stores and companies for admin/hr/area_manager/store_manager store & company filter/views
   useEffect(() => {
     if (canEdit) {
       getStores().then(setStores).catch(() => { });
+      getCompanies().then(setCompanies).catch(() => { });
     }
   }, [canEdit]);
 
@@ -260,6 +264,7 @@ export default function ShiftsPage() {
       const params: Record<string, any> = viewMode === 'month'
         ? { month: formatIsoMonth(currentDate) }
         : { week: formatIsoWeek(viewMode === 'day' ? getWeekStart(currentDate) : currentDate) };
+      if (companyFilter) params.company_id = companyFilter;
       if (storeFilter) params.store_id = storeFilter;
       const data = await listShifts(params);
       setShifts(data.shifts);
@@ -309,7 +314,7 @@ export default function ShiftsPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentDate, viewMode, storeFilter, t]);
+  }, [currentDate, viewMode, storeFilter, companyFilter, t]);
 
   useEffect(() => { fetchShifts(); }, [fetchShifts]);
 
@@ -831,27 +836,68 @@ export default function ShiftsPage() {
               </button>
             )}
 
-            {!isStoreManager && stores.length > 0 && (
+            {!isStoreManager && (companies.length > 0 || stores.length > 0) && (
               <div style={{
-                minWidth: isMobile ? '100%' : 180,
-                maxWidth: isMobile ? 'none' : 240,
-                flex: isMobile ? 1 : 'none'
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                width: isMobile ? '100%' : 'auto',
+                flexDirection: isMobile ? 'column' : 'row'
               }}>
-                <CustomSelect
-                  value={storeFilter ? String(storeFilter) : ''}
-                  onChange={(val) => setStoreFilter(val ? Number(val) : null)}
-                  placeholder={t('shifts.allStores', 'Tutti i negozi')}
-                  options={[
-                    { value: '', label: t('shifts.allStores', 'Tutti i negozi') },
-                    ...stores.map((s) => ({
-                      value: String(s.id),
-                      label: s.companyName ? `${s.name} (${s.companyName})` : s.name
-                    }))
-                  ]}
-                  searchable={true}
-                  isClearable={true}
-                  controlMinHeight={36}
-                />
+                {companies.length > 0 && (
+                  <div style={{
+                    minWidth: isMobile ? '100%' : 180,
+                    maxWidth: isMobile ? 'none' : 240,
+                    flex: isMobile ? 1 : 'none'
+                  }}>
+                    <CustomSelect
+                      value={companyFilter ? String(companyFilter) : ''}
+                      onChange={(val) => {
+                        const compId = val ? Number(val) : null;
+                        setCompanyFilter(compId);
+                        if (compId && storeFilter) {
+                          const isValidStore = stores.some(s => s.id === storeFilter && s.companyId === compId);
+                          if (!isValidStore) setStoreFilter(null);
+                        }
+                      }}
+                      placeholder={t('shifts.allCompanies', 'All Companies')}
+                      options={[
+                        { value: '', label: t('shifts.allCompanies', 'All Companies') },
+                        ...companies.map((c) => ({
+                          value: String(c.id),
+                          label: c.name
+                        }))
+                      ]}
+                      searchable={true}
+                      isClearable={true}
+                      controlMinHeight={36}
+                    />
+                  </div>
+                )}
+
+                {stores.length > 0 && (
+                  <div style={{
+                    minWidth: isMobile ? '100%' : 180,
+                    maxWidth: isMobile ? 'none' : 240,
+                    flex: isMobile ? 1 : 'none'
+                  }}>
+                    <CustomSelect
+                      value={storeFilter ? String(storeFilter) : ''}
+                      onChange={(val) => setStoreFilter(val ? Number(val) : null)}
+                      placeholder={t('shifts.allStores', 'Tutti i negozi')}
+                      options={[
+                        { value: '', label: t('shifts.allStores', 'Tutti i negozi') },
+                        ...(companyFilter ? stores.filter(s => s.companyId === companyFilter) : stores).map((s) => ({
+                          value: String(s.id),
+                          label: s.companyName ? `${s.name} (${s.companyName})` : s.name
+                        }))
+                      ]}
+                      searchable={true}
+                      isClearable={true}
+                      controlMinHeight={36}
+                    />
+                  </div>
+                )}
               </div>
             )}
 
