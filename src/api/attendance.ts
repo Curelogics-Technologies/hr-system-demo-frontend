@@ -49,6 +49,8 @@ export interface CheckinPayload {
 export interface AttendanceListParams {
   userId?: number;
   storeId?: number;
+  /** Cross-company filter, used by super-admin views. */
+  companyId?: number;
   dateFrom?: string;
   dateTo?: string;
   eventType?: EventType;

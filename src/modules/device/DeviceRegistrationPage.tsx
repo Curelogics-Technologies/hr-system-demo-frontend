@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Monitor, Key, Eye, EyeOff } from 'lucide-react';
+import { Monitor, Key, Eye, EyeOff, LogOut } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { registerDevice, checkDeviceRegistrationApi, CheckDeviceRegistrationResponse } from '../../api/device';
@@ -28,7 +28,7 @@ export default function DeviceRegistrationPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { user, refreshUser } = useAuth();
+  const { user, refreshUser, logout } = useAuth();
   const { showToast } = useToast();
   const { isMobile } = useBreakpoint();
 
@@ -127,8 +127,42 @@ export default function DeviceRegistrationPage() {
         color: '#fff',
       }}
     >
-      <div style={{ position: 'absolute', top: 16, right: 16 }}>
+      {/* Logout must be reachable here too. This screen is a dead end when the
+          wrong account is signed in — without it the only way out was clearing
+          browser data. The terminal screen has always offered it; this one did not. */}
+      <div style={{ position: 'absolute', top: 16, right: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
         <LanguageSwitcher variant="pill" />
+        <button
+          type="button"
+          onClick={logout}
+          title={t('nav.logout')}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            background: 'rgba(255,255,255,0.08)',
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: 999,
+            padding: '7px 14px',
+            fontSize: 12.5,
+            fontWeight: 600,
+            fontFamily: 'var(--font-body)',
+            color: '#fff',
+            cursor: 'pointer',
+            transition: 'background 0.15s, border-color 0.15s',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'rgba(220,38,38,0.9)';
+            e.currentTarget.style.borderColor = 'rgba(220,38,38,0.9)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'rgba(255,255,255,0.08)';
+            e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)';
+          }}
+        >
+          <LogOut size={14} />
+          {t('nav.logout')}
+        </button>
       </div>
       <div
         style={{

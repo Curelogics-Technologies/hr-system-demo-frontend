@@ -1,6 +1,7 @@
 const en = {
   // ─── Common ───────────────────────────────────────────────────────────────
   common: {
+    warning: 'Warning',
     createdAt: 'Created',
     createdBy: 'Created by',
     updatedAt: 'Last updated',

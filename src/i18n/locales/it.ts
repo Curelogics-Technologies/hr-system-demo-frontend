@@ -1,6 +1,7 @@
 const it = {
   // ─── Common ───────────────────────────────────────────────────────────────
   common: {
+    warning: 'Attenzione',
     createdAt: 'Creato il',
     createdBy: 'Creato da',
     updatedAt: 'Ultimo aggiornamento',

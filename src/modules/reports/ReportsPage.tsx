@@ -1403,8 +1403,8 @@ export function ReportsPage() {
           : `Report sent successfully to ${emails || 'recipients'}`,
         'success'
       );
-      void loadConfigurations();
-      void loadHistory();
+      // `load` already refreshes owners, configurations and history together.
+      void load();
     } catch (err: any) {
       console.error('Failed to send report:', err);
       showToast(err?.response?.data?.error ?? (isIt ? 'Impossibile inviare il report.' : 'Failed to send report.'), 'error');
