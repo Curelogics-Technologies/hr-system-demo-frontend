@@ -1,11 +1,137 @@
 import { UAParser } from 'ua-parser-js';
 
 export type DeviceFingerprintResult = {
-  // Deterministic fingerprint built from stable device/browser characteristics.
+  // Identity of this installation: `web-device-v2:<installId>[:<legacyProfileHash>]`.
   fingerprint: string;
-  // Raw metadata used to build the fingerprint (stored in DB as JSONB).
+  // Raw metadata describing the device (stored in DB as JSONB).
   metadata: Record<string, any>;
+  // Random per-installation id backing the fingerprint.
+  installId: string;
 };
+
+// ---------------------------------------------------------------------------
+// Per-installation device id
+// ---------------------------------------------------------------------------
+// The device identity MUST come from a value minted once and then persisted —
+// never from observable device characteristics. A profile-derived hash (model +
+// OS + browser version + screen + locale) is identical across two units of the
+// same hardware, so only one of them could ever hold a registration, and it also
+// changes on every browser update, silently locking a device out of its own
+// account. The install id has neither problem.
+
+const INSTALL_ID_STORAGE_KEY = 'hr_device_install_id';
+const IDB_NAME = 'hr_device_identity_db';
+const IDB_STORE = 'device_identity';
+const IDB_VERSION = 1;
+const IDB_RECORD_KEY = 'install_id';
+
+function generateInstallId(): string {
+  const bytes = new Uint8Array(16);
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function isValidInstallId(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-f0-9]{16,64}$/.test(value);
+}
+
+function readInstallIdFromLocalStorage(): string | null {
+  try {
+    const value = localStorage.getItem(INSTALL_ID_STORAGE_KEY);
+    return isValidInstallId(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeInstallIdToLocalStorage(installId: string): void {
+  try {
+    localStorage.setItem(INSTALL_ID_STORAGE_KEY, installId);
+  } catch {
+    /* storage disabled or full — IndexedDB mirror still applies */
+  }
+}
+
+function openIdentityDB(): Promise<IDBDatabase | null> {
+  return new Promise((resolve) => {
+    try {
+      if (typeof indexedDB === 'undefined') return resolve(null);
+      const request = indexedDB.open(IDB_NAME, IDB_VERSION);
+      request.onerror = () => resolve(null);
+      request.onblocked = () => resolve(null);
+      request.onsuccess = () => resolve(request.result);
+      request.onupgradeneeded = (event) => {
+        const db = (event.target as IDBOpenDBRequest).result;
+        if (!db.objectStoreNames.contains(IDB_STORE)) {
+          db.createObjectStore(IDB_STORE);
+        }
+      };
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+async function readInstallIdFromIDB(): Promise<string | null> {
+  const db = await openIdentityDB();
+  if (!db) return null;
+  return new Promise((resolve) => {
+    try {
+      const request = db.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).get(IDB_RECORD_KEY);
+      request.onsuccess = () => resolve(isValidInstallId(request.result) ? request.result : null);
+      request.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+async function writeInstallIdToIDB(installId: string): Promise<void> {
+  const db = await openIdentityDB();
+  if (!db) return;
+  await new Promise<void>((resolve) => {
+    try {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).put(installId, IDB_RECORD_KEY);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+      tx.onabort = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+}
+
+let installIdPromise: Promise<string> | null = null;
+
+/**
+ * Return this installation's device id, creating it on first use.
+ * Mirrored across localStorage and IndexedDB so clearing one of the two
+ * (which browsers do independently) does not lose the device identity.
+ */
+export function getDeviceInstallId(): Promise<string> {
+  if (installIdPromise) return installIdPromise;
+
+  installIdPromise = (async () => {
+    const fromLocalStorage = readInstallIdFromLocalStorage();
+    const fromIDB = await readInstallIdFromIDB();
+
+    // localStorage wins when both exist so the value stays stable if the two
+    // ever diverge; the loser is re-synced below.
+    const installId = fromLocalStorage ?? fromIDB ?? generateInstallId();
+
+    if (fromLocalStorage !== installId) writeInstallIdToLocalStorage(installId);
+    if (fromIDB !== installId) await writeInstallIdToIDB(installId);
+
+    return installId;
+  })();
+
+  return installIdPromise;
+}
 
 function fnv1aHex(input: string, seed: number): string {
   let h = 0x811c9dc5 ^ seed;
@@ -43,6 +169,14 @@ function normalizeObject(value: unknown): Record<string, any> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, any>) : {};
 }
 
+/**
+ * Hash of the device's observable characteristics.
+ *
+ * This is NOT an identity — it collides across identical hardware and changes on
+ * browser updates. It is kept for two reasons only: it is reported as metadata
+ * for the audit trail, and it lets the backend recognise a device that
+ * registered under the previous scheme so it does not have to re-register.
+ */
 async function computeDeviceProfileHash(metadata: Record<string, any>): Promise<string> {
   const root = normalizeObject(metadata);
   const browser = normalizeObject(root.browser);
@@ -133,17 +267,29 @@ export async function getDeviceFingerprint(): Promise<DeviceFingerprintResult> {
     } : null,
   };
 
-  const profileHash = await computeDeviceProfileHash(metadata);
+  const [installId, profileHash] = await Promise.all([
+    getDeviceInstallId(),
+    computeDeviceProfileHash(metadata),
+  ]);
+
   const stableMetadata = {
     ...metadata,
     stableDevice: {
+      source: 'web-device-v2',
+      installId,
+    },
+    // Retained for the audit trail and for backwards-compatible matching.
+    legacyDevice: {
       source: 'web-profile-v1',
       hash: profileHash,
     },
   };
 
   return {
-    fingerprint: `web-profile-v1:${profileHash}`,
+    // The legacy hash rides along so the backend can recognise — and silently
+    // upgrade — a registration created by the previous client version.
+    fingerprint: `web-device-v2:${installId}:${profileHash}`,
     metadata: stableMetadata,
+    installId,
   };
 }

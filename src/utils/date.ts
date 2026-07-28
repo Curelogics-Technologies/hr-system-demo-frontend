@@ -16,6 +16,28 @@ export function todayLocal(): string {
   return formatLocalDate(new Date());
 }
 
+/** Map an i18n language code to a BCP-47 locale for Intl formatting. */
+export function localeFor(language: string | undefined): string {
+  return language === 'en' ? 'en-GB' : 'it-IT';
+}
+
+/**
+ * Render a timestamp as a date and time, or `placeholder` when there is nothing
+ * to show. Records created before audit fields existed have no value.
+ */
+export function formatDateTime(value: string | null | undefined, locale: string, placeholder = '—'): string {
+  if (!value) return placeholder;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return placeholder;
+  return date.toLocaleString(locale, {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 /** Returns the ISO date string for Monday of the week containing the given date. */
 export function mondayOfWeek(date: Date): string {
   const d = new Date(date);

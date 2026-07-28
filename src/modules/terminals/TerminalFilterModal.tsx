@@ -17,7 +17,14 @@ interface Props {
 export interface FilterValues {
   company_ids: string[];
   store_ids: string[];
+  registration_states: string[];
 }
+
+const REGISTRATION_FILTER_OPTIONS: { value: string; labelKey: string; fallback: string }[] = [
+  { value: 'registered', labelKey: 'terminals.regRegistered', fallback: 'Registered' },
+  { value: 'pending', labelKey: 'terminals.regPending', fallback: 'Not registered' },
+  { value: 'reset_pending', labelKey: 'terminals.regResetPending', fallback: 'Awaiting re-registration' },
+];
 
 export function TerminalFilterModal({
   open,
@@ -63,8 +70,18 @@ export function TerminalFilterModal({
     const emptyFilters: FilterValues = {
       company_ids: [],
       store_ids: [],
+      registration_states: [],
     };
     setFilters(emptyFilters);
+  };
+
+  const toggleRegistrationState = (state: string) => {
+    setFilters((prev) => ({
+      ...prev,
+      registration_states: prev.registration_states.includes(state)
+        ? prev.registration_states.filter((s) => s !== state)
+        : [...prev.registration_states, state],
+    }));
   };
 
   const toggleCompany = (companyId: string) => {
@@ -98,9 +115,10 @@ export function TerminalFilterModal({
     }));
   };
 
-  const hasActiveFilters = 
+  const hasActiveFilters =
     filters.company_ids.length > 0 ||
-    filters.store_ids.length > 0;
+    filters.store_ids.length > 0 ||
+    filters.registration_states.length > 0;
 
   if (!open) return null;
 
@@ -389,6 +407,56 @@ export function TerminalFilterModal({
                   )}
                 </div>
               )}
+            </div>
+
+            {/* Registration state — the fastest way to find terminals that were
+                set up but never completed registration. */}
+            <div>
+              <div
+                style={{
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  color: 'var(--text-primary)',
+                  marginBottom: '8px',
+                }}
+              >
+                {t('terminals.colRegistration', 'Registration')}
+                {filters.registration_states.length > 0 && (
+                  <span style={{ fontSize: '11px', color: 'var(--accent)', fontWeight: 700, marginLeft: 6 }}>
+                    ({filters.registration_states.length})
+                  </span>
+                )}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {REGISTRATION_FILTER_OPTIONS.map((option) => {
+                  const selected = filters.registration_states.includes(option.value);
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => toggleRegistrationState(option.value)}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        padding: '8px 14px',
+                        borderRadius: '999px',
+                        fontSize: '12.5px',
+                        fontWeight: 600,
+                        fontFamily: 'var(--font-body)',
+                        cursor: 'pointer',
+                        border: `1.5px solid ${selected ? 'var(--primary)' : 'var(--border)'}`,
+                        background: selected ? 'var(--primary)' : 'var(--surface)',
+                        color: selected ? '#fff' : 'var(--text-secondary)',
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      {selected && <Check size={12} strokeWidth={3} />}
+                      {t(option.labelKey, option.fallback)}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>

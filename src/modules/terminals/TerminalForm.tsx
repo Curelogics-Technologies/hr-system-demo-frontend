@@ -8,6 +8,7 @@ import { createTerminal, updateTerminal, deleteTerminal, getStoresWithTerminalSt
 import { generateQrToken, QrTokenResponse } from '../../api/attendance';
 import { resetEmployeeDevice } from '../../api/employees';
 import { translateApiError } from '../../utils/apiErrors';
+import { formatDateTime, localeFor } from '../../utils/date';
 import { useToast } from '../../context/ToastContext';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -49,7 +50,8 @@ function SectionDivider({ label }: { label: string }) {
 }
 
 export function TerminalForm({ open = true, terminal, onSuccess, onCancel, onRefreshList }: TerminalFormProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const locale = localeFor(i18n.language);
   const { isMobile } = useBreakpoint();
   const { showToast } = useToast();
   
@@ -103,11 +105,13 @@ export function TerminalForm({ open = true, terminal, onSuccess, onCancel, onRef
   }, []);
 
   useEffect(() => {
-    setLocalTerminal(terminal || null);
-  }, [terminal]);
-
-  useEffect(() => {
     if (open) {
+      // Must be re-synced on every open, not only when the `terminal` prop
+      // changes: the list keeps its selection after closing, so re-opening the
+      // same terminal leaves the prop identical. Resetting it below on close
+      // without restoring it here left every `localTerminal`-guarded section
+      // (device status and record details) blank on the second open.
+      setLocalTerminal(terminal || null);
       setLoadingStores(true);
       getStoresWithTerminalStatus()
         .then(data => {
@@ -542,8 +546,45 @@ export function TerminalForm({ open = true, terminal, onSuccess, onCancel, onRef
                         <div style={{ fontSize: '11.5px', marginTop: '4px', opacity: 0.75 }}>
                           {t('deviceRegistration.notRegisteredDesc', 'This terminal is not bound to a device.')}
                         </div>
+                        <div style={{ fontSize: '11.5px', marginTop: '10px', opacity: 0.9, lineHeight: 1.5 }}>
+                          {t(
+                            'terminals.notRegisteredHint',
+                            'Credentials have been created, but nobody has signed in on the store device yet. Sign in on that device to complete registration.',
+                          )}
+                        </div>
                       </div>
                     )}
+
+                    {/* Record metadata — kept next to the device panel because
+                        support usually needs "when was this set up, and by whom?"
+                        together with "is it working?". */}
+                    <div style={{
+                      background: 'var(--surface)',
+                      borderRadius: 'var(--radius-lg)',
+                      border: '1px solid var(--border)',
+                      padding: '14px 16px',
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+                      gap: '12px 20px',
+                      fontSize: '12.5px',
+                      marginTop: '10px',
+                    }}>
+                      {[
+                        { label: t('common.createdAt', 'Created'), value: formatDateTime(localTerminal.createdAt, locale) },
+                        { label: t('common.createdBy', 'Created by'), value: localTerminal.createdByName || '—' },
+                        { label: t('common.updatedAt', 'Last updated'), value: formatDateTime(localTerminal.updatedAt, locale) },
+                        { label: t('common.updatedBy', 'Updated by'), value: localTerminal.updatedByName || '—' },
+                      ].map((item) => (
+                        <div key={item.label} style={{ display: 'flex', flexDirection: 'column', gap: '3px', minWidth: 0 }}>
+                          <span style={{ color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                            {item.label}
+                          </span>
+                          <span style={{ fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {item.value}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 

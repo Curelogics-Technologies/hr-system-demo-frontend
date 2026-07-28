@@ -86,7 +86,37 @@ const TABLE_NAME_TRANSLATIONS: Record<string, string> = {
   depositi: 'Stores Registry',
   ingressi: 'Daily Foot Traffic',
   artmaster: 'Products Master',
-  chiusure: 'Store Closures',
+  chiusure: 'Store Closures / Cash Closings',
+  // Best-effort names for other tables commonly found in an Italian fashion-retail
+  // ERP. Only used for display and only when the table actually exists, so an
+  // unused entry is harmless. Refine against the live schema when confirmed.
+  articoli: 'Products',
+  vendite: 'Sales',
+  venduto: 'Sales (Sold Items)',
+  scontrini: 'Receipts',
+  documenti: 'Sales Documents',
+  righe: 'Document Lines',
+  movimenti: 'Stock Movements',
+  giacenze: 'Inventory / Stock',
+  magazzino: 'Warehouse Stock',
+  inventario: 'Inventory Counts',
+  clienti: 'Customers',
+  fornitori: 'Suppliers',
+  ordini: 'Orders',
+  listini: 'Price Lists',
+  taglie: 'Sizes',
+  colori: 'Colours',
+  varianti: 'Product Variants',
+  famiglie: 'Merchandise Families',
+  reparti: 'Departments',
+  operatori: 'Operators / Salespeople',
+  venditori: 'Salespeople',
+  incassi: 'Takings / Payments',
+  pagamenti: 'Payments',
+  promozioni: 'Promotions',
+  resi: 'Returns',
+  fidelity: 'Loyalty Cards',
+  tessere: 'Loyalty Cards',
 };
 
 const TABLE_FIELD_TRANSLATIONS: Record<string, Record<string, string>> = {
@@ -290,6 +320,33 @@ const FIELD_TOKEN_TRANSLATIONS: Record<string, string> = {
   barcode: 'barcode',
   festivo: 'holiday',
   straordinario: 'exceptional',
+  vendita: 'sale',
+  vendite: 'sales',
+  venduto: 'sold',
+  cliente: 'customer',
+  clienti: 'customers',
+  operatore: 'operator',
+  venditore: 'salesperson',
+  cassa: 'register',
+  cassiere: 'cashier',
+  incasso: 'takings',
+  scontrino: 'receipt',
+  documento: 'document',
+  riga: 'line',
+  righe: 'lines',
+  sconto: 'discount',
+  giacenza: 'stock',
+  magazzino: 'warehouse',
+  scorta: 'stock',
+  collezione: 'collection',
+  variante: 'variant',
+  modello: 'model',
+  reso: 'return',
+  resi: 'returns',
+  matricola: 'serial_number',
+  ordine: 'order',
+  qta: 'quantity',
+  qty: 'quantity',
 };
 
 function loadDictionaryTranslations(): Record<string, string> {
@@ -338,6 +395,172 @@ function autoTranslateFieldToEnglish(rawField: string, tableName?: string): stri
   return tokens
     .map((token) => FIELD_TOKEN_TRANSLATIONS[token] ?? token)
     .join('_');
+}
+
+// ---------------------------------------------------------------------------
+// Field descriptions (local dictionary reference, English for the reviewer).
+// The backend catalog only carries descriptions for `depositi` and `ingressi`,
+// so every other table used to render "-" in the dictionary. These curated maps
+// plus the humanised-label fallback in `describeExternalField` guarantee that
+// every discovered column shows a meaningful English description.
+// NOTE: `chiusure` semantics (daily cash-closing vs. store-closed days) should be
+// confirmed against live rows — see the field notes below.
+// ---------------------------------------------------------------------------
+const TABLE_FIELD_DESCRIPTIONS: Record<string, Record<string, string>> = {
+  depositi: {
+    coddep: 'Unique external store code; primary key used to join foot-traffic, sales and closure rows.',
+    deposito: 'Store (point of sale) name as recorded in the external ERP.',
+    azienda: 'Owning company / brand label in the external system.',
+    listino: 'Default price list assigned to the store.',
+    indirizzo: 'Street address of the store.',
+    cap: 'Postal (CAP) code of the store.',
+    citta: 'City where the store is located.',
+    provincia: 'Italian province (sigla) of the store.',
+    regione: 'Italian region of the store.',
+    nazione: 'Country of the store.',
+    telefono: 'Store contact phone number.',
+    email: 'Store contact email address.',
+    gruppo: 'Store group / cluster the point of sale belongs to.',
+    tipo: 'Store type (e.g. flagship, outlet, franchising).',
+    zona: 'Commercial area / sales zone of the store.',
+    attivo: 'Whether the store is currently active in the ERP.',
+    data_apertura: 'Date the store was opened.',
+    data_chiusura: 'Date the store was closed (if dismissed).',
+    orario_apertura: 'Default daily opening time.',
+    orario_chiusura: 'Default daily closing time.',
+    codice_fiscale: 'Italian tax code (codice fiscale) of the store entity.',
+    piva: 'VAT registration number (Partita IVA) of the store entity.',
+    user: 'ERP user / source that created or last edited the store record.',
+  },
+  ingressi: {
+    id: 'Row identifier for the traffic record.',
+    deposito: 'External store code (joins to DEPOSITI.coddep).',
+    data: 'Calendar date of the foot-traffic reading.',
+    valore: 'People-counter value: number of visitors for the store on that date.',
+    ingressi: 'Number of entries (visitors) recorded by the people counter.',
+    uscite: 'Number of exits recorded by the people counter.',
+    ora: 'Hour of the reading (for intra-day counters).',
+    fascia: 'Time band / slot of the reading (e.g. 12:00-18:00).',
+    giorno: 'Day-of-week of the record.',
+    settimana: 'ISO week number of the record.',
+    mese: 'Month of the record.',
+    anno: 'Year of the record.',
+    promozione: 'Flags whether a promotion was running on that date.',
+    evento: 'Name of any event affecting traffic that day.',
+    note: 'Free-text notes on the traffic record.',
+    totale: 'Total visitors aggregated for the period.',
+    user: 'ERP user / source that produced the record.',
+    utente: 'ERP user / source that produced the record.',
+  },
+  artmaster: {
+    codart: 'Unique article (product) code.',
+    descart: 'Product description / commercial name.',
+    articolo: 'Product / article name.',
+    desart: 'Product description / commercial name.',
+    descrizione: 'Product description.',
+    famiglia: 'Merchandise family classification.',
+    sottofamiglia: 'Merchandise sub-family classification.',
+    reparto: 'Department the product belongs to.',
+    sottoreparto: 'Sub-department the product belongs to.',
+    linea: 'Product line / collection.',
+    marca: 'Brand of the product.',
+    stagione: 'Fashion season (e.g. SS/AW) the product belongs to.',
+    colore: 'Colour of the article variant.',
+    taglia: 'Size of the article variant.',
+    fornitore: 'Supplier of the product.',
+    codfor: 'Supplier code (joins to the supplier master).',
+    prezzo: 'Retail selling price.',
+    prezzo_lordo: 'Gross price (VAT included).',
+    prezzo_netto: 'Net price (VAT excluded).',
+    costo: 'Purchase / landed cost of the article.',
+    listino: 'Price list the article belongs to.',
+    iva: 'VAT rate applied to the product.',
+    barcode: 'Barcode used for scanning at POS.',
+    ean: 'EAN code of the article.',
+    um: 'Unit of measure.',
+    colli: 'Number of packages / cartons per unit.',
+    codsam: 'Sample code linked to the article.',
+    categoria: 'Product category.',
+    sottocategoria: 'Product sub-category.',
+    modello: 'Model / style code of the article.',
+    target: 'Commercial target segment of the product.',
+    gender: 'Target gender of the product (man/woman/unisex).',
+    attivo: 'Whether the article is active / sellable.',
+    note: 'Free-text notes on the article.',
+    user: 'ERP user / source that created the article.',
+  },
+  chiusure: {
+    id: 'Row identifier for the closure record.',
+    data: 'Business date of the closure.',
+    deposito: 'External store code (joins to DEPOSITI.coddep).',
+    coddep: 'External store code (joins to DEPOSITI.coddep).',
+    tipopagamento: 'Payment method for the amount (cash, card, voucher, …).',
+    importo: 'Monetary amount for the closure line (e.g. daily takings by payment type).',
+    chiuso: 'Whether the till / store was closed.',
+    chiusura: 'Closure flag / status of the till or store.',
+    causale: 'Accounting / operational reason code for the closure.',
+    motivo: 'Reason for the closure or adjustment.',
+    tipo: 'Type of closure (cash closing, holiday, exceptional, …).',
+    stato: 'Status of the closure record.',
+    ora_apertura: 'Opening time on the closure date.',
+    ora_chiusura: 'Closing time on the closure date.',
+    apertura: 'Opening reference for the closure.',
+    chiusura_da: 'Start of the closed period.',
+    chiusura_a: 'End of the closed period.',
+    giorno: 'Day-of-week of the record.',
+    settimana: 'ISO week number of the record.',
+    mese: 'Month of the record.',
+    anno: 'Year of the record.',
+    festivo: 'Marks whether the date is a public holiday.',
+    straordinario: 'Marks an exceptional (non-standard) closure.',
+    note: 'Free-text notes on the closure.',
+    user: 'ERP user / source that produced the record.',
+  },
+};
+
+// Descriptions that apply regardless of the table they appear in.
+const WHOLE_FIELD_DESCRIPTIONS: Record<string, string> = {
+  id: 'Primary-key row identifier.',
+  data: 'Date value of the record.',
+  user: 'ERP user / source that produced the record.',
+  utente: 'ERP user / source that produced the record.',
+  note: 'Free-text notes.',
+  attivo: 'Active / enabled flag.',
+  stato: 'Status of the record.',
+  tipo: 'Type / classification of the record.',
+  importo: 'Monetary amount.',
+  prezzo: 'Price value.',
+  costo: 'Cost value.',
+  iva: 'VAT rate or amount.',
+  quantita: 'Quantity.',
+  totale: 'Total value.',
+  sconto: 'Discount applied.',
+  barcode: 'Barcode used for scanning.',
+  ean: 'EAN code.',
+};
+
+// Turn an English snake_case label into a short readable sentence, so unknown
+// columns still get a sensible description instead of a bare "-".
+function humanizeEnglishLabel(label: string): string {
+  const words = (label ?? '').replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!words) return '';
+  return `${words.charAt(0).toUpperCase()}${words.slice(1)}.`;
+}
+
+function describeExternalField(tableName: string, fieldName: string, englishLabel: string): string {
+  const table = (tableName ?? '').trim().toLowerCase();
+  const lowered = (fieldName ?? '').trim().toLowerCase();
+  const normalized = normalizeFieldTranslationKey(fieldName);
+
+  const tableMap = TABLE_FIELD_DESCRIPTIONS[table];
+  if (tableMap?.[lowered]) return tableMap[lowered];
+  if (tableMap?.[normalized]) return tableMap[normalized];
+
+  if (WHOLE_FIELD_DESCRIPTIONS[lowered]) return WHOLE_FIELD_DESCRIPTIONS[lowered];
+  if (WHOLE_FIELD_DESCRIPTIONS[normalized]) return WHOLE_FIELD_DESCRIPTIONS[normalized];
+
+  const humanized = humanizeEnglishLabel(englishLabel || autoTranslateFieldToEnglish(fieldName, tableName));
+  return humanized || '—';
 }
 
 const EN = {
@@ -1244,11 +1467,12 @@ export default function ExternalAffluencePage() {
             ?? localeEnField
             ?? dictionaryTranslations[translationKey]
             ?? autoTranslateFieldToEnglish(column.columnName, table.tableName);
+          const enField = known?.englishLabel ?? fallbackEnField;
           return {
             itField: column.columnName,
-            enField: known?.englishLabel ?? fallbackEnField,
+            enField,
             type: column.dataType,
-            description: known?.description ?? '-',
+            description: known?.description ?? describeExternalField(table.tableName, column.columnName, enField),
           };
         }),
       };
@@ -1264,12 +1488,15 @@ export default function ExternalAffluencePage() {
         rowEstimate: null,
         totalSizePretty: '-',
         fieldCount: table.columns.length,
-        columns: table.columns.map((column) => ({
-          itField: column.field,
-          enField: getLocaleFieldLabel(table.table, column.field, 'en') ?? column.englishLabel,
-          type: column.type,
-          description: column.description,
-        })),
+        columns: table.columns.map((column) => {
+          const enField = getLocaleFieldLabel(table.table, column.field, 'en') ?? column.englishLabel;
+          return {
+            itField: column.field,
+            enField,
+            type: column.type,
+            description: column.description || describeExternalField(table.table, column.field, enField),
+          };
+        }),
       });
     }
 

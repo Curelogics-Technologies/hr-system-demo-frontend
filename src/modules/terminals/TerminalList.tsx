@@ -1,7 +1,12 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { getTerminals, Terminal } from '../../api/terminals';
+import {
+  getTerminals,
+  getTerminalOperationalState,
+  Terminal,
+  TerminalOperationalState,
+} from '../../api/terminals';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { UserRole, Store } from '../../types';
@@ -11,7 +16,7 @@ import { Input } from '../../components/ui/Input';
 import { Alert } from '../../components/ui/Alert';
 import { Pagination } from '../../components/ui/Pagination';
 import { TerminalForm } from './TerminalForm';
-import { Plus, ChevronRight, Filter, Search, X } from 'lucide-react';
+import { Plus, ChevronRight, Filter, Search, X, CheckCircle2, Clock, RotateCcw, Ban } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { useBreakpoint } from '../../hooks/useBreakpoint';
 import apiClient from '../../api/client';
@@ -34,6 +39,20 @@ const truncateWords = (str: string, max: number) => {
   const words = str.split(' ').filter(Boolean);
   if (words.length > max) return `${words.slice(0, max).join(' ')}...`;
   return str;
+};
+
+type BadgeVariant = 'accent' | 'primary' | 'info' | 'success' | 'warning' | 'neutral' | 'danger';
+
+const OPERATIONAL_BADGE: Record<TerminalOperationalState, {
+  variant: BadgeVariant;
+  labelKey: string;
+  fallback: string;
+  icon: typeof CheckCircle2;
+}> = {
+  operational: { variant: 'success', labelKey: 'terminals.stateOperational', fallback: 'Active', icon: CheckCircle2 },
+  pending_registration: { variant: 'warning', labelKey: 'terminals.statePendingRegistration', fallback: 'Setup incomplete', icon: Clock },
+  reset_pending: { variant: 'info', labelKey: 'terminals.stateResetPending', fallback: 'Reset pending', icon: RotateCcw },
+  disabled: { variant: 'neutral', labelKey: 'terminals.stateDisabled', fallback: 'Disabled', icon: Ban },
 };
 
 const ROLE_BADGE_VARIANT: Record<UserRole | string, 'accent' | 'primary' | 'info' | 'success' | 'warning' | 'neutral'> = {
@@ -78,6 +97,11 @@ export default function TerminalList() {
     [searchParams]
   );
   
+  const registrationStates = useMemo(() =>
+    searchParams.get('registration')?.split(',').filter(Boolean) ?? [],
+    [searchParams]
+  );
+
   const page = parseInt(searchParams.get('page') ?? '1', 10);
   const limit = 20;
 
@@ -88,10 +112,11 @@ export default function TerminalList() {
   const hasActiveFilters = !!(
     search ||
     storeIds.length > 0 ||
-    companyIds.length > 0
+    companyIds.length > 0 ||
+    registrationStates.length > 0
   );
 
-  const activeFilterTagsCount = (storeIds.length + companyIds.length);
+  const activeFilterTagsCount = (storeIds.length + companyIds.length + registrationStates.length);
 
   // Load companies
   useEffect(() => {
@@ -137,6 +162,7 @@ export default function TerminalList() {
       const response = await getTerminals({
         search,
         status: '',
+        registration: registrationStates.join(','),
         store_id: storeIds.join(','),
         company_id: companyIds.join(','),
         page,
@@ -151,7 +177,7 @@ export default function TerminalList() {
     } finally {
       setLoading(false);
     }
-  }, [search, storeIds.join(','), companyIds.join(','), page, limit, t]);
+  }, [search, storeIds.join(','), companyIds.join(','), registrationStates.join(','), page, limit, t]);
 
   useEffect(() => {
     fetchTerminals();
@@ -179,6 +205,12 @@ export default function TerminalList() {
           prev.set('store_ids', filters.store_ids.join(','));
         } else {
           prev.delete('store_ids');
+        }
+
+        if (filters.registration_states.length > 0) {
+          prev.set('registration', filters.registration_states.join(','));
+        } else {
+          prev.delete('registration');
         }
 
         prev.set('page', '1');
@@ -243,13 +275,26 @@ export default function TerminalList() {
       render: (row) => <Badge variant={ROLE_BADGE_VARIANT[row.role]}>{tRole(row.role)}</Badge>,
     },
     {
+      // A single badge for both signals. Account status and registration state
+      // are stored separately, but showing them as two badges next to the role
+      // badge was three tags in a row for one idea: can this terminal work?
+      // The operational state already encodes both — an enabled-but-unregistered
+      // terminal reads "Setup incomplete" rather than "Active".
       key: 'status',
       label: t('common.status'),
-      render: (row) => (
-        <Badge variant={row.status === 'active' ? 'success' : 'neutral'}>
-          {row.status === 'active' ? t('common.active') : t('common.inactive')}
-        </Badge>
-      ),
+      render: (row) => {
+        const state = getTerminalOperationalState(row);
+        const meta = OPERATIONAL_BADGE[state];
+        const Icon = meta.icon;
+        return (
+          <Badge variant={meta.variant}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <Icon size={12} />
+              {t(meta.labelKey, meta.fallback)}
+            </span>
+          </Badge>
+        );
+      },
     },
     {
       key: 'id',
@@ -457,6 +502,7 @@ export default function TerminalList() {
         initialFilters={{
           company_ids: companyIds,
           store_ids: storeIds,
+          registration_states: registrationStates,
         }}
         companyOptions={companyOptions}
         storeOptions={storeOptions}

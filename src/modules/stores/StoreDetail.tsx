@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import ReactCountryFlag from 'react-country-flag';
+import { formatDateTime } from '../../utils/date';
 import {
   Building2,
   MapPin,
@@ -1299,7 +1300,14 @@ export default function StoreDetail() {
               {store.phone && <InsightRow label={t('stores.phone', 'Phone')} value={store.phone} />}
               <InsightRow label={t('stores.timezone', 'Timezone')} value={storeTimezone} />
               <InsightRow label={t('stores.activeEmployees', 'Active employees')} value={`${activeEmployeeCount}${store.maxStaff != null ? ` / ${store.maxStaff}` : ''}`} />
-              <InsightRow label={t('stores.labelCreated', 'Created')} value={new Date(store.createdAt).toLocaleDateString(locale)} />
+              <InsightRow label={t('stores.labelCreated', 'Created')} value={formatDateTime(store.createdAt, locale)} />
+              {store.createdByName && (
+                <InsightRow label={t('common.createdBy', 'Created by')} value={store.createdByName} />
+              )}
+              <InsightRow label={t('common.updatedAt', 'Last updated')} value={formatDateTime(store.updatedAt, locale)} />
+              {store.updatedByName && (
+                <InsightRow label={t('common.updatedBy', 'Updated by')} value={store.updatedByName} />
+              )}
             </div>
           </div>
 
