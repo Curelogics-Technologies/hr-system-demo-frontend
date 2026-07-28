@@ -14,12 +14,13 @@ import {
   Settings, Download, Play, Pause, Trash2, FileText, CheckSquare, Square,
   Clock, Calendar, AlertTriangle, FileSignature, Users, UserCheck, 
   Sparkles, GraduationCap, Activity, FileCheck, Check, Info, UserPlus,
-  ChevronDown, ChevronRight, ChevronUp
+  ChevronDown, ChevronRight, ChevronUp, Send
 } from 'lucide-react';
 import {
   getReportOwners,
   getReportConfigurations,
   saveReportConfiguration,
+  sendReportNow,
   downloadLastReport,
   getReportHistory,
   downloadArchivedReport,
@@ -168,11 +169,12 @@ function Avatar({ name, filename, color }: { name: string; filename: string | nu
 // Report card
 // ---------------------------------------------------------------------------
 
-function ReportCard({ report, onToggle, onConfigure, onDownload, ownerName }: {
+function ReportCard({ report, onToggle, onConfigure, onDownload, onSendNow, ownerName }: {
   report: ReportRow;
   onToggle: () => void;
   onConfigure: () => void;
   onDownload: () => void;
+  onSendNow: () => void;
   ownerName: string;
 }) {
   const { t, i18n } = useTranslation();
@@ -276,6 +278,17 @@ function ReportCard({ report, onToggle, onConfigure, onDownload, ownerName }: {
             {active ? <Pause size={13} /> : <Play size={13} />}
             {active ? (isIt ? 'Pausa' : 'Pause') : (isIt ? 'Attiva' : 'Activate')}
           </button>
+
+          <button onClick={onSendNow} title={isIt ? 'Invia report via email ora' : 'Send report email now'} style={{
+            display: 'flex', alignItems: 'center', gap: 5,
+            padding: '6px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+            fontFamily: 'var(--font-body)', border: '1px solid var(--accent)', color: 'var(--accent)',
+            background: 'rgba(201,151,58,0.12)',
+            whiteSpace: 'nowrap', transition: 'all 0.15s',
+          }}>
+            <Send size={13} />
+            {isIt ? 'Invia Ora' : 'Send Now'}
+          </button>
           
           <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
             <button 
@@ -371,12 +384,13 @@ function ReportCard({ report, onToggle, onConfigure, onDownload, ownerName }: {
 // Owner row: avatar + name on the left, company/store on the right, reports below
 // ---------------------------------------------------------------------------
 
-function OwnerSection({ owner, reports, onToggle, onConfigure, onDownload }: {
+function OwnerSection({ owner, reports, onToggle, onConfigure, onDownload, onSendNow }: {
   owner: ReportOwner;
   reports: ReportRow[];
   onToggle: (r: ReportRow) => void;
   onConfigure: (r: ReportRow) => void;
   onDownload: (r: ReportRow) => void;
+  onSendNow: (r: ReportRow) => void;
 }) {
   const { i18n } = useTranslation();
   const { isMobile } = useBreakpoint();
@@ -440,6 +454,7 @@ function OwnerSection({ owner, reports, onToggle, onConfigure, onDownload }: {
             onToggle={() => onToggle(r)}
             onConfigure={() => onConfigure(r)}
             onDownload={() => onDownload(r)}
+            onSendNow={() => onSendNow(r)}
             ownerName={`${owner.name} · ${owner.scopeLabel}`}
           />
         ))}
@@ -1377,6 +1392,25 @@ export function ReportsPage() {
     }
   };
 
+  const handleSendNow = async (report: ReportRow) => {
+    try {
+      showToast(isIt ? 'Invio del report in corso...' : 'Sending report email...', 'info');
+      const res = await sendReportNow(report.reportId, companyId, report.ownerUserId);
+      const emails = res.sentTo ? res.sentTo.join(', ') : '';
+      showToast(
+        isIt
+          ? `Report inviato con successo a ${emails || 'destinatari'}`
+          : `Report sent successfully to ${emails || 'recipients'}`,
+        'success'
+      );
+      void loadConfigurations();
+      void loadHistory();
+    } catch (err: any) {
+      console.error('Failed to send report:', err);
+      showToast(err?.response?.data?.error ?? (isIt ? 'Impossibile inviare il report.' : 'Failed to send report.'), 'error');
+    }
+  };
+
   const handleDownloadArchived = async (item: ReportHistoryItem) => {
     try {
       const blob = await downloadArchivedReport(item.id, companyId);
@@ -1606,6 +1640,7 @@ export function ReportsPage() {
           onToggle={handleToggle}
           onConfigure={r => setEditing({ report: r, ownerName: `${owner.name} · ${owner.scopeLabel}` })}
           onDownload={handleDownload}
+          onSendNow={handleSendNow}
         />
       ))}
 

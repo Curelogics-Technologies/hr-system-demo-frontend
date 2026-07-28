@@ -23,6 +23,7 @@ interface Anomaly {
 interface Props {
   dateFrom: string;
   dateTo: string;
+  companyId?: number;
   storeId?: number;
   userId?: number;
   search?: string;
@@ -129,7 +130,7 @@ function getAvatarColor(name: string): string {
   return PALETTE[Math.abs(hash) % PALETTE.length];
 }
 
-export default function AnomalyList({ dateFrom, dateTo, storeId, userId, search, compact: propCompact }: Props) {
+export default function AnomalyList({ dateFrom, dateTo, companyId, storeId, userId, search, compact: propCompact }: Props) {
   const { t, i18n } = useTranslation();
   const locale = i18n.language === 'en' ? 'en-GB' : 'it-IT';
   const { isMobile, isTablet } = useBreakpoint();
@@ -168,8 +169,9 @@ export default function AnomalyList({ dateFrom, dateTo, storeId, userId, search,
         params: {
           date_from: dateFrom,
           date_to: dateTo,
-          ...(storeId != null ? { store_id: storeId } : {}),
-          ...(userId != null ? { user_id: userId } : {}),
+          ...(companyId != null && !isNaN(companyId) ? { company_id: companyId } : {}),
+          ...(storeId != null && !isNaN(storeId) ? { store_id: storeId } : {}),
+          ...(userId != null && !isNaN(userId) ? { user_id: userId } : {}),
           ...(search ? { search } : {}),
         },
       });
@@ -183,8 +185,8 @@ export default function AnomalyList({ dateFrom, dateTo, storeId, userId, search,
         storeName:     a.storeName,
         date:          a.date,
         anomalyType:   a.anomalyType,
-        severity:      a.severity,
-        details:       a.details,
+        severity:      a.severity ?? 'low',
+        details:       a.details ?? '',
         detailsKey:    a.detailsKey,
         detailsParams: a.detailsParams,
         checkinSource: a.checkinSource ?? null,
@@ -194,7 +196,7 @@ export default function AnomalyList({ dateFrom, dateTo, storeId, userId, search,
     } finally {
       setLoading(false);
     }
-  }, [dateFrom, dateTo, storeId, userId, search, t, rangeExceeds14Days]);
+  }, [dateFrom, dateTo, companyId, storeId, userId, search, t, rangeExceeds14Days]);
 
   useEffect(() => { fetchAnomalies(); }, [fetchAnomalies]);
 

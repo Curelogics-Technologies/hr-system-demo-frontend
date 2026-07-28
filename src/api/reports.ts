@@ -123,6 +123,15 @@ export async function downloadLastReport(reportId: string, companyId?: number, o
   return data;
 }
 
+export async function sendReportNow(reportId: string, companyId?: number, ownerUserId?: number): Promise<{ sentTo: string[] }> {
+  const { data } = await apiClient.post(
+    `/reports/configurations/${reportId}/send-now`,
+    { company_id: companyId, owner_user_id: ownerUserId },
+    { params: companyParams(companyId) }
+  );
+  return data.data;
+}
+
 export async function getReportHistory(
   companyId?: number,
   opts: { limit?: number; offset?: number } = {}

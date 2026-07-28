@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { getEmployees } from '../../api/employees';
 import { getStores } from '../../api/stores';
+import { getCompanies } from '../../api/companies';
 import { formatLocalDate } from '../../utils/date';
 import { DatePicker } from '../../components/ui/DatePicker';
 import { WeekPicker } from '../../components/ui/WeekPicker';
@@ -43,6 +44,8 @@ export default function AnomaliesPage() {
   const [dateFrom, setDateFrom]         = useState(weekAgo);
   const [dateTo, setDateTo]             = useState(today);
   const [filterSearch, setFilterSearch] = useState('');
+  const [companyList, setCompanyList]   = useState<Array<{ id: number; name: string }>>([]);
+  const [filterCompanyId, setFilterCompanyId] = useState('');
   const [filterStoreId, setFilterStoreId] = useState('');
   const [filterUserId, setFilterUserId]   = useState('');
   const [filterEmployees, setFilterEmployees] = useState<Array<{ id: number; name: string; surname: string; storeId: number | null }>>([]);
@@ -52,7 +55,12 @@ export default function AnomaliesPage() {
   const [showInfoModal, setShowInfoModal] = useState(false);
   const [compact, setCompact] = useState(false);
 
+  useEffect(() => {
+    getCompanies().then(setCompanyList).catch(() => {});
+  }, []);
+
   // Temporary filter states
+  const [tempCompanyId, setTempCompanyId] = useState(filterCompanyId);
   const [tempStoreId, setTempStoreId] = useState(filterStoreId);
   const [tempUserId, setTempUserId] = useState(filterUserId);
   const [tempDateFrom, setTempDateFrom] = useState(dateFrom);
@@ -60,6 +68,7 @@ export default function AnomaliesPage() {
 
   // Sync temp states on open
   const openFilterModal = () => {
+    setTempCompanyId(filterCompanyId);
     setTempStoreId(filterStoreId);
     setTempUserId(filterUserId);
     setTempDateFrom(dateFrom);
@@ -68,6 +77,7 @@ export default function AnomaliesPage() {
   };
 
   const applyFilters = () => {
+    setFilterCompanyId(tempCompanyId);
     setFilterStoreId(tempStoreId);
     setFilterUserId(tempUserId);
     setDateFrom(tempDateFrom);
@@ -76,6 +86,7 @@ export default function AnomaliesPage() {
   };
 
   const resetAllFilters = () => {
+    setTempCompanyId('');
     setTempStoreId('');
     setTempUserId('');
     setTempDateFrom(weekAgo);
@@ -84,12 +95,13 @@ export default function AnomaliesPage() {
 
   const activeFiltersCount = useMemo(() => {
     let count = 0;
+    if (filterCompanyId) count++;
     if (filterStoreId) count++;
     if (filterUserId) count++;
     if (dateFrom && dateFrom !== weekAgo) count++;
     if (dateTo && dateTo !== today) count++;
     return count;
-  }, [filterStoreId, filterUserId, dateFrom, dateTo, weekAgo, today]);
+  }, [filterCompanyId, filterStoreId, filterUserId, dateFrom, dateTo, weekAgo, today]);
 
   const filteredEmployeesForSelect = useMemo(() => {
     if (!tempStoreId) return filterEmployees;
@@ -314,6 +326,7 @@ export default function AnomaliesPage() {
       <AnomalyList
         dateFrom={dateFrom}
         dateTo={dateTo}
+        companyId={filterCompanyId ? parseInt(filterCompanyId, 10) : undefined}
         storeId={filterStoreId ? parseInt(filterStoreId, 10) : undefined}
         userId={filterUserId ? parseInt(filterUserId, 10) : undefined}
         search={filterSearch.trim() || undefined}
@@ -414,6 +427,33 @@ export default function AnomaliesPage() {
 
             {/* Body */}
             <div style={{ flex: 1, overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              {/* Company filter */}
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '8px' }}>
+                  {t('common.company', 'Company')}
+                </label>
+                <CustomSelect
+                  value={tempCompanyId || null}
+                  onChange={(val) => {
+                    const nextCompId = val ?? '';
+                    setTempCompanyId(nextCompId);
+                    setTempStoreId('');
+                    setTempUserId('');
+                    void loadFilterEmployees(undefined);
+                  }}
+                  options={[
+                    { value: '', label: t('shifts.allCompanies', 'All Companies') },
+                    ...companyList.map((c) => ({
+                      value: String(c.id),
+                      label: c.name,
+                    })),
+                  ]}
+                  placeholder={t('shifts.allCompanies', 'All Companies')}
+                  searchable={true}
+                  controlMinHeight={38}
+                />
+              </div>
+
               {/* Store filter */}
               <div>
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '8px' }}>
@@ -429,7 +469,10 @@ export default function AnomaliesPage() {
                   }}
                   options={[
                     { value: '', label: t('common.all', 'Tutti') + ' ' + t('common.store').toLowerCase() },
-                    ...filterStores.map((s) => ({
+                    ...(tempCompanyId
+                      ? filterStores.filter((s: any) => String(s.companyId) === tempCompanyId || s.companyName === companyList.find(c => String(c.id) === tempCompanyId)?.name)
+                      : filterStores
+                    ).map((s) => ({
                       value: String(s.id),
                       label: s.companyName ? `${s.name} (${s.companyName})` : s.name,
                     })),

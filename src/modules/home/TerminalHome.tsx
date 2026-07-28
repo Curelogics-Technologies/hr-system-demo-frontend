@@ -168,19 +168,33 @@ export const TerminalHome: React.FC<TerminalHomeProps> = ({ data }) => {
         <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.7)', maxWidth: 450, lineHeight: 1.5 }}>
           {t('deviceReset.terminalBlockedDesc', 'Questo dispositivo non è autorizzato per questo punto vendita. L\'accesso al terminale è consentito solo dal dispositivo originariamente registrato.')}
         </div>
-        <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', marginTop: 8 }}>
-          {t('deviceReset.terminalBlockedHint', 'Se hai sostituito il dispositivo, contatta un amministratore HR per effettuare il reset del terminale.')}
+        <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', marginTop: 8, maxWidth: 450, lineHeight: 1.5 }}>
+          {t('deviceReset.terminalBlockedSelfRecoverHint', 'Se questo è il dispositivo corretto del punto vendita, puoi riassociarlo confermando le credenziali del terminale.')}
         </div>
-        <button
-          onClick={logout}
-          style={{
-            padding: '11px 28px', borderRadius: 10, marginTop: 16,
-            background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)',
-            color: '#fff', cursor: 'pointer', fontFamily: 'var(--font-display)', fontWeight: 600
-          }}
-        >
-          {t('nav.logout')}
-        </button>
+        <div style={{ display: 'flex', gap: 12, marginTop: 16, flexWrap: 'wrap', justifyContent: 'center' }}>
+          {/* Recovery without waiting for an HR reset: the terminal re-confirms
+              its own credentials and re-binds to the device in front of it. */}
+          <button
+            onClick={() => navigate('/terminal')}
+            style={{
+              padding: '11px 28px', borderRadius: 10,
+              background: '#fff', border: '1px solid #fff',
+              color: '#0D2137', cursor: 'pointer', fontFamily: 'var(--font-display)', fontWeight: 700
+            }}
+          >
+            {t('deviceReset.reRegisterButton', 'Riassocia dispositivo')}
+          </button>
+          <button
+            onClick={logout}
+            style={{
+              padding: '11px 28px', borderRadius: 10,
+              background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)',
+              color: '#fff', cursor: 'pointer', fontFamily: 'var(--font-display)', fontWeight: 600
+            }}
+          >
+            {t('nav.logout')}
+          </button>
+        </div>
       </div>
     );
   }

@@ -1,6 +1,10 @@
 const en = {
   // ─── Common ───────────────────────────────────────────────────────────────
   common: {
+    createdAt: 'Created',
+    createdBy: 'Created by',
+    updatedAt: 'Last updated',
+    updatedBy: 'Updated by',
     save: 'Save',
     saving: 'Saving...',
     cancel: 'Cancel',
@@ -621,6 +625,15 @@ const en = {
   terminals: {
     title: 'Store Terminals',
     subtitle: 'Management and monitoring of fixed QR terminals',
+    colRegistration: 'Registration',
+    regRegistered: 'Registered',
+    regPending: 'Not registered',
+    regResetPending: 'Awaiting re-registration',
+    stateOperational: 'Active',
+    statePendingRegistration: 'Setup incomplete',
+    stateResetPending: 'Reset pending',
+    stateDisabled: 'Disabled',
+    notRegisteredHint: 'Credentials have been created, but nobody has signed in on the store device yet. Sign in on that device to complete registration.',
     colName: 'Terminal',
     colRole: 'Role',
     colCompany: 'Company',
@@ -1989,6 +2002,8 @@ const en = {
   },
 
   deviceReset: {
+    terminalBlockedSelfRecoverHint: 'If this is the correct store device, you can re-bind it by confirming the terminal credentials.',
+    reRegisterButton: 'Re-bind device',
     title: 'Device Management',
     subtitle: 'Manage employee and terminal registered devices, inspect binding parameters, and reset device access.',
     selectLabel: 'Employee',

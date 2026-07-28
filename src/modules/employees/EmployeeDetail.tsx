@@ -16,6 +16,7 @@ import {
 import { getAvatarUrl, getCompanyLogoUrl, getStoreLogoUrl } from '../../api/client';
 import { getTrainings, getMedicals, createTraining, updateTraining, createMedical, updateMedical } from '../../api/trainings';
 import { getApiErrorCode, translateApiError } from '../../utils/apiErrors';
+import { formatDateTime, localeFor } from '../../utils/date';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { Employee, EmployeeAssociationEntry, EmployeeAssociationsResponse, UserRole, Training, MedicalCheck, TrainingType } from '../../types';
@@ -1747,7 +1748,15 @@ export function EmployeeDetail() {
                   <InfoRow label={t('common.department')} value={employee.department ?? '—'} />
                   <InfoRow label={t('employees.companyField')} value={employee.companyName ?? '—'} />
                   <InfoRow label={t('common.store')} value={employee.storeName ?? '—'} />
-                  <InfoRow label={t('employees.supervisorField')} value={employee.supervisorName ?? '—'} last />
+                  <InfoRow label={t('employees.supervisorField')} value={employee.supervisorName ?? '—'} />
+                  {/* Record metadata — when the record was set up and by whom.
+                      Needed for support and troubleshooting. */}
+                  <InfoRow label={t('common.createdAt', 'Created')} value={formatDateTime(employee.createdAt, localeFor(i18n.language))} />
+                  {employee.createdByName && (
+                    <InfoRow label={t('common.createdBy', 'Created by')} value={employee.createdByName} />
+                  )}
+                  <InfoRow label={t('common.updatedAt', 'Last updated')} value={formatDateTime(employee.updatedAt, localeFor(i18n.language))} />
+                  <InfoRow label={t('common.updatedBy', 'Updated by')} value={employee.updatedByName ?? '—'} last />
                 </SectionPanel>
 
                 {/* Sensitive / contractual info */}

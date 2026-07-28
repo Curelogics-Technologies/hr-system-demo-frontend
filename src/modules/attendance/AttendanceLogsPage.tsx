@@ -7,6 +7,7 @@ import { listAttendanceEvents, AttendanceEvent, EventType, AttendanceListParams 
 import { listShifts, Shift } from '../../api/shifts';
 import { getEmployees } from '../../api/employees';
 import { getStores } from '../../api/stores';
+import { getCompanies } from '../../api/companies';
 import { getLeaveRequests, LeaveRequest } from '../../api/leave';
 import * as XLSX from 'xlsx';
 import { useOfflineSync } from '../../context/OfflineSyncContext';
@@ -527,7 +528,7 @@ export default function AttendanceLogsPage() {
       }
     });
     return [
-      { value: '', label: t('attendance.allCompanies', 'Tutte le Aziende') },
+      { value: '', label: t('shifts.allCompanies', 'All Companies') },
       ...Array.from(companiesMap.entries()).map(([compName, info]) => ({
         value: compName,
         label: compName,
@@ -654,15 +655,23 @@ export default function AttendanceLogsPage() {
 
   // Filter Modal & Temp States
   const [showFilterModal, setShowFilterModal] = useState(false);
+  const [companyList, setCompanyList] = useState<Array<{ id: number; name: string }>>([]);
+  const [filterCompanyId, setFilterCompanyId] = useState('');
+  const [tempCompanyId, setTempCompanyId] = useState('');
   const [tempStoreId, setTempStoreId] = useState('');
   const [tempUserId, setTempUserId] = useState('');
   const [tempDateFrom, setTempDateFrom] = useState('');
   const [tempDateTo, setTempDateTo] = useState('');
 
+  useEffect(() => {
+    getCompanies().then(setCompanyList).catch(() => {});
+  }, []);
+
   // Summary display limit (100 per page)
   const [summaryDisplayLimit, setSummaryDisplayLimit] = useState(100);
 
   const openFilterModal = () => {
+    setTempCompanyId(filterCompanyId);
     setTempStoreId(filterStoreId);
     setTempUserId(filterUserId);
     setTempDateFrom(dateFrom);
@@ -671,6 +680,13 @@ export default function AttendanceLogsPage() {
   };
 
   const applyFilters = () => {
+    setFilterCompanyId(tempCompanyId);
+    if (tempCompanyId) {
+      const selectedComp = companyList.find(c => String(c.id) === tempCompanyId);
+      if (selectedComp) setAnalyticsCompany(selectedComp.name);
+    } else {
+      setAnalyticsCompany('');
+    }
     setFilterStoreId(tempStoreId);
     setFilterUserId(tempUserId);
     setDateFrom(tempDateFrom);
@@ -804,12 +820,16 @@ export default function AttendanceLogsPage() {
       dateFrom: viewMode === 'analytics' ? analyticsDateFrom : dateFrom,
       dateTo:   viewMode === 'analytics' ? analyticsDateTo : dateTo,
     };
+    if (filterCompanyId) {
+      params.companyId = parseInt(filterCompanyId, 10);
+      (params as any).company_id = parseInt(filterCompanyId, 10);
+    }
     if (viewMode === 'logs' && eventType) params.eventType = eventType as EventType;
     if (viewMode === 'logs' && filterSearch.trim()) params.search = filterSearch.trim();
     if (storeId) params.storeId = parseInt(storeId, 10);
     if (userId) params.userId = parseInt(userId, 10);
     return params;
-  }, [viewMode, dateFrom, dateTo, eventType, filterSearch, filterStoreId, filterUserId, analyticsDateFrom, analyticsDateTo, analyticsStoreId, analyticsUserId]);
+  }, [viewMode, dateFrom, dateTo, eventType, filterSearch, filterStoreId, filterUserId, filterCompanyId, analyticsDateFrom, analyticsDateTo, analyticsStoreId, analyticsUserId]);
 
   const fetchEvents = useCallback(async () => {
     setLoading(true);
@@ -1126,8 +1146,38 @@ export default function AttendanceLogsPage() {
     return filtered;
   }, [events, shiftsList, leaveRequestsList, summaryPeriod, filterSearch, i18n.language, viewMode, dateFrom, dateTo, analyticsDateFrom, analyticsDateTo, summaryStatusFilter]);
 
+  const displayedEvents = useMemo(() => {
+    if (!filterCompanyId) return events;
+    const targetCid = parseInt(filterCompanyId, 10);
+    const targetCompName = companyList.find(c => String(c.id) === filterCompanyId)?.name;
+    return events.filter((ev: any) => {
+      if (ev.companyId === targetCid || ev.company_id === targetCid) return true;
+      if (targetCompName && ev.companyName === targetCompName) return true;
+      if (ev.storeId) {
+        const storeObj = filterStores.find(s => s.id === ev.storeId);
+        if (storeObj && (String((storeObj as any).companyId) === filterCompanyId || storeObj.companyName === targetCompName)) return true;
+      }
+      return false;
+    });
+  }, [events, filterCompanyId, companyList, filterStores]);
+
+  const displayedSummaryRows = useMemo(() => {
+    if (!filterCompanyId) return summaryRows;
+    const targetCid = parseInt(filterCompanyId, 10);
+    const targetCompName = companyList.find(c => String(c.id) === filterCompanyId)?.name;
+    return summaryRows.filter((r: any) => {
+      if (r.companyId === targetCid || r.company_id === targetCid) return true;
+      if (targetCompName && r.companyName === targetCompName) return true;
+      if (r.storeId) {
+        const storeObj = filterStores.find(s => s.id === r.storeId);
+        if (storeObj && (String((storeObj as any).companyId) === filterCompanyId || storeObj.companyName === targetCompName)) return true;
+      }
+      return false;
+    });
+  }, [summaryRows, filterCompanyId, companyList, filterStores]);
+
   const analyticsData = useMemo(() => {
-    let list = summaryRows;
+    let list = displayedSummaryRows;
     if (analyticsCompany) {
       const storeIdsInCompany = new Set(filterStores.filter(s => s.companyName === analyticsCompany).map(s => s.id));
       list = list.filter(r => r.storeId && storeIdsInCompany.has(r.storeId));
@@ -1162,9 +1212,6 @@ export default function AttendanceLogsPage() {
       sumAbsent += r.absentMinutes;
       shiftCount += r.shifts.length;
       employeeIds.add(r.userId);
-      // Pending / in-progress days aren't "due" yet, and cancelled shifts were never
-      // due at all — exclude all three from over/undertime so the buckets always
-      // reconcile with the net balance. No tolerance in analytics.
       if (r.status === 'pending' || r.status === 'in_progress' || r.status === 'cancelled') return;
       if (r.varianceMinutes > 0) sumOvertime += r.varianceMinutes;
       else if (r.varianceMinutes < 0) sumUndertime += Math.abs(r.varianceMinutes);
@@ -1185,7 +1232,7 @@ export default function AttendanceLogsPage() {
       netDiff: sumWorked - sumEffective,
       completionRate: sumEffective > 0 ? Math.round((sumWorked / sumEffective) * 100) : (sumWorked > 0 ? 100 : 0),
     };
-  }, [summaryRows, analyticsCompany, analyticsStoreId, analyticsUserId, analyticsDateFrom, analyticsDateTo, filterStores]);
+  }, [displayedSummaryRows, analyticsCompany, analyticsStoreId, analyticsUserId, analyticsDateFrom, analyticsDateTo, filterStores]);
 
   async function handleExport(format: 'csv' | 'xlsx') {
     try {
@@ -1388,29 +1435,31 @@ export default function AttendanceLogsPage() {
                 : t('attendance.viewAnalytics', 'Analisi Grafica & Confronto')
               }
             </h1>
-            {!loading && (
-              <div style={{ marginTop: 6, fontSize: 13, color: 'rgba(255,255,255,0.45)' }}>
-                {viewMode === 'logs' ? (
-                  <>
-                    <span style={{ color: 'var(--accent)', fontWeight: 700 }}>{total}</span>
-                    {' '}{t('attendance.logsHeroDesc', 'timbrature trovate')}
-                    {total > events.length && (
-                      <span> · {t('attendance.showing')} {events.length}</span>
-                    )}
-                  </>
-                ) : viewMode === 'summary' ? (
-                  <>
-                    <span style={{ color: 'var(--accent)', fontWeight: 700 }}>{summaryRows.slice(0, 500).length}</span>
-                    {' '}{t('attendance.summaryHeroDesc', 'riepiloghi dipendenti trovati')}
-                  </>
-                ) : (
-                  <>
-                    <span style={{ color: 'var(--accent)', fontWeight: 700 }}>{analyticsData.rows.length}</span>
-                    {' '}{t('attendance.analyticsHeroDesc', 'dipendenti analizzati')}
-                  </>
-                )}
-              </div>
-            )}
+            <div style={{ marginTop: 6, fontSize: 13, color: 'rgba(255,255,255,0.45)', minHeight: 20 }}>
+              {!loading && (
+                <>
+                  {viewMode === 'logs' ? (
+                    <>
+                      <span style={{ color: 'var(--accent)', fontWeight: 700 }}>{total}</span>
+                      {' '}{t('attendance.logsHeroDesc', 'timbrature trovate')}
+                      {total > events.length && (
+                        <span> · {t('attendance.showing')} {events.length}</span>
+                      )}
+                    </>
+                  ) : viewMode === 'summary' ? (
+                    <>
+                      <span style={{ color: 'var(--accent)', fontWeight: 700 }}>{summaryRows.slice(0, 500).length}</span>
+                      {' '}{t('attendance.summaryHeroDesc', 'riepiloghi dipendenti trovati')}
+                    </>
+                  ) : (
+                    <>
+                      <span style={{ color: 'var(--accent)', fontWeight: 700 }}>{analyticsData.rows.length}</span>
+                      {' '}{t('attendance.analyticsHeroDesc', 'dipendenti analizzati')}
+                    </>
+                  )}
+                </>
+              )}
+            </div>
           </div>
 
           {/* Header right: New Entry + Export buttons */}
@@ -2342,7 +2391,7 @@ export default function AttendanceLogsPage() {
           <>
           {isMobile ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {!loading && events.length === 0 ? (
+              {!loading && displayedEvents.length === 0 ? (
                 <div style={{
                   padding: '48px 24px', textAlign: 'center',
                   background: 'var(--surface)', borderRadius: 'var(--radius-lg)',
@@ -2355,7 +2404,7 @@ export default function AttendanceLogsPage() {
                   <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{dateFrom} → {dateTo}</div>
                 </div>
               ) : (
-                events.map((ev, idx) => {
+                displayedEvents.map((ev, idx) => {
                   const meta     = EVENT_META[ev.eventType] ?? EVENT_META.checkin;
                   const labelKey = EVENT_TYPE_LABEL_KEYS[ev.eventType] ?? 'attendance.checkin';
                   const srcBadge = SOURCE_BADGE[ev.source] ?? { label: ev.source.toUpperCase(), color: '#6b7280' };
@@ -2555,7 +2604,7 @@ export default function AttendanceLogsPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {events.map((ev, idx) => {
+                        {displayedEvents.map((ev, idx) => {
                           const meta     = EVENT_META[ev.eventType] ?? EVENT_META.checkin;
                           const labelKey = EVENT_TYPE_LABEL_KEYS[ev.eventType] ?? 'attendance.checkin';
                           const srcBadge = SOURCE_BADGE[ev.source] ?? { label: ev.source.toUpperCase(), color: '#6b7280' };
@@ -2732,14 +2781,14 @@ export default function AttendanceLogsPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {summaryRows.length === 0 ? (
+                        {displayedSummaryRows.length === 0 ? (
                           <tr>
                             <td colSpan={8} style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
                               {t('attendance.noSummaryData', 'Nessun dato di riepilogo disponibile per il periodo selezionato.')}
                             </td>
                           </tr>
                         ) : (
-                          summaryRows.slice(0, summaryDisplayLimit).map((row, idx) => {
+                          displayedSummaryRows.slice(0, summaryDisplayLimit).map((row, idx) => {
                             const vBadge = varianceDisplay(row, t, { applyTolerance: true, overtimeLimit, undertimeLimit });
                             const avatarUrl = getAvatarUrl(row.userAvatarFilename);
                             const initials = `${row.userName?.[0] ?? ''}${row.userSurname?.[0] ?? ''}`.toUpperCase();
@@ -3803,6 +3852,30 @@ export default function AttendanceLogsPage() {
 
             {/* Body */}
             <div style={{ flex: 1, overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              {/* Company filter */}
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '8px' }}>
+                  {t('common.company', 'Company')}
+                </label>
+                <CustomSelect
+                  value={tempCompanyId || null}
+                  onChange={(val) => {
+                    setTempCompanyId(val ?? '');
+                    setTempStoreId('');
+                    setTempUserId('');
+                  }}
+                  options={[
+                    { value: '', label: t('shifts.allCompanies', 'All Companies') },
+                    ...companyList.map(c => ({
+                      value: String(c.id),
+                      label: c.name
+                    }))
+                  ]}
+                  placeholder={t('shifts.allCompanies', 'All Companies')}
+                  searchable
+                />
+              </div>
+
               {/* Store filter */}
               <div>
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginBottom: '8px' }}>
@@ -3816,7 +3889,10 @@ export default function AttendanceLogsPage() {
                   }}
                   options={[
                     { value: '', label: t('common.all', 'Tutti') + ' ' + t('common.store').toLowerCase() },
-                    ...filterStores.map(s => ({
+                    ...(tempCompanyId
+                      ? filterStores.filter(s => String((s as any).companyId) === tempCompanyId || s.companyName === companyList.find(c => String(c.id) === tempCompanyId)?.name)
+                      : filterStores
+                    ).map(s => ({
                       value: String(s.id),
                       label: s.companyName ? `${s.name} (${s.companyName})` : s.name
                     }))
@@ -3905,6 +3981,7 @@ export default function AttendanceLogsPage() {
             >
               <button
                 onClick={() => {
+                  setTempCompanyId('');
                   setTempStoreId('');
                   setTempUserId('');
                   setTempDateFrom(defaultFrom);

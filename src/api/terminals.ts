@@ -1,12 +1,23 @@
 import apiClient from './client';
 import { UserRole } from '../types';
 
+/**
+ * Whether the terminal has completed device registration.
+ * Independent of `status`, which only controls whether the account can log in —
+ * a terminal can be `status: 'active'` while never having been registered.
+ */
+export type TerminalRegistrationState = 'pending' | 'reset_pending' | 'registered';
+
+/** What the terminal can actually do right now, combining both signals. */
+export type TerminalOperationalState = 'operational' | 'pending_registration' | 'reset_pending' | 'disabled';
+
 export interface Terminal {
   id: number;
   name: string;
   email: string;
   role: UserRole;
   status: 'active' | 'inactive';
+  registrationState: TerminalRegistrationState;
   companyId: number;
   storeId: number;
   companyName: string;
@@ -18,6 +29,21 @@ export interface Terminal {
   lastSeenIp: string | null;
   lastSeenAt: string | null;
   deviceResetPending: boolean;
+  createdAt: string | null;
+  updatedAt: string | null;
+  createdByName: string | null;
+  updatedByName: string | null;
+}
+
+/**
+ * Collapse account status + registration state into the single state that
+ * answers "can this terminal take attendance right now?".
+ */
+export function getTerminalOperationalState(terminal: Pick<Terminal, 'status' | 'registrationState'>): TerminalOperationalState {
+  if (terminal.status !== 'active') return 'disabled';
+  if (terminal.registrationState === 'pending') return 'pending_registration';
+  if (terminal.registrationState === 'reset_pending') return 'reset_pending';
+  return 'operational';
 }
 
 export interface ListTerminalsResponse {
@@ -36,6 +62,8 @@ export interface ListTerminalsResponse {
 export interface TerminalFilters {
   search?: string;
   status?: string;
+  /** Comma-separated TerminalRegistrationState values. */
+  registration?: string;
   company_id?: string;
   store_id?: string;
   page?: number;
@@ -46,6 +74,7 @@ export const getTerminals = async (filters: TerminalFilters = {}): Promise<ListT
   const params = new URLSearchParams();
   if (filters.search) params.append('search', filters.search);
   if (filters.status) params.append('status', filters.status);
+  if (filters.registration) params.append('registration', filters.registration);
   if (filters.company_id) params.append('company_id', filters.company_id);
   if (filters.store_id) params.append('store_id', filters.store_id);
   if (filters.page) params.append('page', filters.page.toString());
@@ -64,6 +93,7 @@ export interface StoreTerminalStatus {
   maxStaff: number;
   companyId: number;
   companyName: string;
+  /** A terminal account exists for this store, enabled or not. */
   hasTerminal: boolean;
 }
 

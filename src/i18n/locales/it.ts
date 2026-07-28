@@ -1,6 +1,10 @@
 const it = {
   // ─── Common ───────────────────────────────────────────────────────────────
   common: {
+    createdAt: 'Creato il',
+    createdBy: 'Creato da',
+    updatedAt: 'Ultimo aggiornamento',
+    updatedBy: 'Aggiornato da',
     save: 'Salva',
     saving: 'Salvataggio...',
     cancel: 'Annulla',
@@ -615,6 +619,15 @@ const it = {
   terminals: {
     title: 'Terminali di Negozio',
     subtitle: 'Gestione e monitoraggio dei terminali QR fissi',
+    colRegistration: 'Registrazione',
+    regRegistered: 'Registrato',
+    regPending: 'Non registrato',
+    regResetPending: 'In attesa di ri-registrazione',
+    stateOperational: 'Attivo',
+    statePendingRegistration: 'Configurazione incompleta',
+    stateResetPending: 'Reset in attesa',
+    stateDisabled: 'Disattivato',
+    notRegisteredHint: 'Le credenziali sono state create, ma nessuno ha ancora effettuato l\'accesso sul dispositivo del punto vendita. Accedi da quel dispositivo per completare la registrazione.',
     colName: 'Terminale',
     colRole: 'Ruolo',
     colCompany: 'Azienda',
@@ -1985,6 +1998,8 @@ const it = {
   },
 
   deviceReset: {
+    terminalBlockedSelfRecoverHint: 'Se questo è il dispositivo corretto del punto vendita, puoi riassociarlo confermando le credenziali del terminale.',
+    reRegisterButton: 'Riassocia dispositivo',
     title: 'Gestione Dispositivi',
     subtitle: 'Gestisci i dispositivi registrati di dipendenti e terminali, ispeziona i parametri di associazione e resetta l\'accesso del dispositivo.',
     selectLabel: 'Dipendente',

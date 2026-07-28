@@ -83,6 +83,11 @@ export interface Store {
   isActive: boolean;
   employeeCount?: number;
   createdAt: string;
+
+  // Record audit trail. Null on stores created before these were tracked.
+  updatedAt?: string | null;
+  createdByName?: string | null;
+  updatedByName?: string | null;
 }
 
 export interface StoreOperatingHour {
@@ -147,6 +152,12 @@ export interface Employee {
   deviceMetadata?: any;
   lastSeenIp?: string | null;
   lastSeenAt?: string | null;
+
+  // Record audit trail. Null on records created before these were tracked.
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  createdByName?: string | null;
+  updatedByName?: string | null;
 }
 
 export interface EmployeeAssociationEntry {
