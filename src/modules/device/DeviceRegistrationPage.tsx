@@ -364,41 +364,65 @@ export default function DeviceRegistrationPage() {
               <div style={{ marginTop: 14 }}>
                 {!lookupResult.found ? (
                   <Alert variant="warning" title={t('common.warning')}>
-                    {lookupResult.message || 'No registration details found.'}
+                    {isTerminal
+                      ? t('deviceRegistration.noTerminalForDevice', 'No terminal is registered on this device in this company. It is free to register.')
+                      : t('deviceRegistration.noOwnerForDevice', 'No account is registered on this device in this company. It is free to register.')}
                   </Alert>
-                ) : (
-                  <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 12 }}>
-                    <div style={{ fontWeight: 700, fontSize: 13, color: '#C9973A', marginBottom: 8 }}>
-                      {t('deviceRegistration.deviceOwnerInfo')}
+                ) : (() => {
+                  const d = lookupResult.details!;
+                  // A terminal is identified by its store, a person by their name.
+                  const heldBy = d.isTerminal
+                    ? [d.storeName, d.storeCode && `(${d.storeCode})`].filter(Boolean).join(' ')
+                    : `${d.name} ${d.surname}`.trim();
+                  const rows: Array<[string, string | null]> = [
+                    [d.isTerminal
+                      ? t('deviceRegistration.ownerTerminal', 'Terminal / Store')
+                      : t('deviceRegistration.ownerName'), heldBy],
+                    [t('deviceRegistration.ownerAccount', 'Account'), d.email],
+                    [t('deviceRegistration.ownerRole'), t(`roles.${d.role}`, d.role)],
+                    [t('deviceRegistration.ownerDate'), d.registeredAt],
+                    [t('deviceRegistration.ownerDevice', 'Device'), d.deviceModel],
+                    [t('deviceRegistration.ownerBrowser'), [d.browser, d.browserVersion].filter(Boolean).join(' ')],
+                    [t('deviceRegistration.ownerOs'), d.os],
+                    [t('deviceRegistration.ownerIp'), d.ipAddress],
+                  ];
+                  return (
+                    <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 12 }}>
+                      <div style={{ fontWeight: 700, fontSize: 13, color: '#C9973A', marginBottom: 8 }}>
+                        {d.isTerminal
+                          ? t('deviceRegistration.terminalOwnerInfo', 'Terminal currently using this device')
+                          : t('deviceRegistration.deviceOwnerInfo')}
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12.5 }}>
+                        {rows.map(([label, value], i) => (
+                          <div
+                            key={label}
+                            style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              gap: 12,
+                              borderBottom: i < rows.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none',
+                              paddingBottom: 4,
+                            }}
+                          >
+                            <span style={{ opacity: 0.7, whiteSpace: 'nowrap' }}>{label}:</span>
+                            <span style={{ fontWeight: 600, textAlign: 'right', wordBreak: 'break-word' }}>
+                              {value && value.trim() ? value : '—'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ marginTop: 12 }}>
+                        <Alert variant="info" title={t('deviceRegistration.whatNow', 'What to do next')}>
+                          {t(
+                            'deviceRegistration.ownerFoundHelp',
+                            'To use this device here instead, ask an administrator to reset the device binding on the account above, then register again. Otherwise register this terminal on its own device.',
+                          )}
+                        </Alert>
+                      </div>
                     </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12.5 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: 4 }}>
-                        <span style={{ opacity: 0.7 }}>{t('deviceRegistration.ownerName')}:</span>
-                        <span style={{ fontWeight: 600 }}>{lookupResult.details?.name} {lookupResult.details?.surname}</span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: 4 }}>
-                        <span style={{ opacity: 0.7 }}>{t('deviceRegistration.ownerRole')}:</span>
-                        <span style={{ fontWeight: 600, textTransform: 'capitalize' }}>{lookupResult.details?.role}</span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: 4 }}>
-                        <span style={{ opacity: 0.7 }}>{t('deviceRegistration.ownerDate')}:</span>
-                        <span style={{ fontWeight: 600 }}>{lookupResult.details?.registeredAt}</span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: 4 }}>
-                        <span style={{ opacity: 0.7 }}>{t('deviceRegistration.ownerIp')}:</span>
-                        <span style={{ fontWeight: 600 }}>{lookupResult.details?.ipAddress}</span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: 4 }}>
-                        <span style={{ opacity: 0.7 }}>{t('deviceRegistration.ownerBrowser')}:</span>
-                        <span style={{ fontWeight: 600 }}>{lookupResult.details?.browser}</span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 4 }}>
-                        <span style={{ opacity: 0.7 }}>{t('deviceRegistration.ownerOs')}:</span>
-                        <span style={{ fontWeight: 600 }}>{lookupResult.details?.os}</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
             )}
           </form>
