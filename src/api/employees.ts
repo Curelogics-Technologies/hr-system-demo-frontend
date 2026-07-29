@@ -89,3 +89,26 @@ export async function uploadEmployeeAvatar(id: number, file: File): Promise<{ av
 export async function deleteEmployeeAvatar(id: number): Promise<void> {
   await apiClient.delete(`/employees/${id}/avatar`);
 }
+
+export interface ImportTemplate {
+  id: number;
+  companyId: number;
+  name: string;
+  mappingJson: Record<string, string>;
+  createdAt: string;
+}
+
+export async function getImportTemplates(): Promise<ImportTemplate[]> {
+  const { data } = await apiClient.get('/employees/import-templates');
+  return data.data;
+}
+
+export async function saveImportTemplate(name: string, mappingJson: Record<string, string>): Promise<ImportTemplate> {
+  const { data } = await apiClient.post('/employees/import-templates', { name, mappingJson });
+  return data.data;
+}
+
+export async function deleteImportTemplate(id: number): Promise<void> {
+  await apiClient.delete(`/employees/import-templates/${id}`);
+}
+

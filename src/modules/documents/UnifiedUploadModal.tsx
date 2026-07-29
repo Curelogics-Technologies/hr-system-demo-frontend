@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
-import { uploadDocumentUnified, updateDocumentGeneric, deleteDocument, getDocumentPreviewUrlGeneric } from '../../api/documents';
+import { uploadDocumentUnified, updateDocumentGeneric, deleteDocument, getDocumentPreviewUrlGeneric, previewDocumentMatches, cleanupDraftDocuments, MatchPreviewEntry } from '../../api/documents';
 import { getEmployees } from '../../api/employees';
 import { Employee, Company } from '../../types';
 import { createPortal } from 'react-dom';
@@ -12,6 +13,23 @@ import CustomSelect, { SelectOption } from '../../components/ui/CustomSelect';
 import { getCompanies } from '../../api/companies';
 import { ModalBackdrop, ModalHeader } from './components/DocUtils';
 import { getAvatarUrl } from '../../api/client';
+import { formatEmployeeName } from '../../utils/employeeName';
+import { Trash2, Eye } from 'lucide-react';
+import { getCategories, DocumentCategory } from '../../api/documents';
+import {
+  FileTypeIcon,
+  formatStyleFor,
+  formatFileSize,
+  IconButton,
+  PersonAvatar,
+  CompanyAvatar,
+  RoleTag,
+  StatusTag,
+  TagTone,
+  buildCompanyOptions,
+  buildEmployeeOptions,
+  splitCategoryName,
+} from './components/DocumentUiKit';
 
 // ── Components & Icons ──
 
@@ -39,24 +57,70 @@ const IconChevronDown = () => (
   </svg>
 );
 
-const getFileExtensionIcon = (filename: string) => {
-  const ext = (filename.split('.').pop() || '').toLowerCase();
-  if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext)) {
-    return <span style={{ fontSize: 20, flexShrink: 0 }}>🖼️</span>;
+
+
+/**
+ * Turns a matcher reason code into something an HR operator can act on.
+ * These are the explanations shown in the "needs attention" panel, so they
+ * describe what to do rather than what the algorithm did.
+ */
+const describeMatchReason = (
+  reason: MatchReason | undefined,
+  suggestionCount: number,
+  t: TFunction<'translation', undefined>,
+): string => {
+  switch (reason) {
+    case 'duplicate_full_name':
+      return t('documents.reasonDuplicateName', 'Multiple employees share this exact full name — manual selection required');
+    case 'other_company':
+      return t('documents.reasonOtherCompany', 'Employee matched but belongs to a different company');
+    case 'surname_only':
+      return t('documents.reasonSurnameOnly', 'Surname matched, but first name is missing or non-matching');
+    case 'first_name_only':
+      return t('documents.reasonFirstNameOnly', 'First name matched, but surname is missing or non-matching');
+    case 'not_a_name':
+      return t('documents.reasonNotAName', 'Filename contains no recognized person names or tokens');
+    case 'no_candidate':
+      return t('documents.reasonNoCandidate', 'No matching employee roster entry found for this filename');
+    default:
+      return suggestionCount > 0
+        ? t('documents.reasonNeedsChoice', 'Partial match or multiple candidates — select from suggestions below')
+        : t('documents.reasonNoCandidate', 'No matching employee roster entry found for this filename');
   }
-  if (['pdf'].includes(ext)) {
-    return <span style={{ fontSize: 20, flexShrink: 0 }}>📄</span>;
-  }
-  if (['doc', 'docx'].includes(ext)) {
-    return <span style={{ fontSize: 20, flexShrink: 0 }}>📝</span>;
-  }
-  if (['xls', 'xlsx', 'csv'].includes(ext)) {
-    return <span style={{ fontSize: 20, flexShrink: 0 }}>📊</span>;
-  }
-  if (['zip', 'rar', '7z', 'gz'].includes(ext)) {
-    return <span style={{ fontSize: 20, flexShrink: 0 }}>📦</span>;
-  }
-  return <span style={{ fontSize: 20, flexShrink: 0 }}>📁</span>;
+};
+
+/** Two-or-three way toggle used for signature / visibility choices. */
+const SEGMENT_TONES = {
+  neutral: { border: '#64748B', bg: 'rgba(100,116,139,0.1)', fg: '#475569' },
+  success: { border: '#10B981', bg: 'rgba(16,185,129,0.1)', fg: '#059669' },
+  info: { border: '#0284C7', bg: 'rgba(2,132,199,0.1)', fg: '#0284C7' },
+  purple: { border: '#8B5CF6', bg: 'rgba(139,92,246,0.1)', fg: '#7C3AED' },
+} as const;
+
+const SegmentButton: React.FC<{
+  active: boolean;
+  tone?: keyof typeof SEGMENT_TONES;
+  onClick: () => void;
+  children: React.ReactNode;
+}> = ({ active, tone = 'info', onClick, children }) => {
+  const c = SEGMENT_TONES[tone];
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        flex: 1, padding: '8px 6px', borderRadius: 8, cursor: 'pointer',
+        border: active ? `1.5px solid ${c.border}` : '1px solid var(--border)',
+        background: active ? c.bg : 'var(--surface)',
+        color: active ? c.fg : 'var(--text-muted)',
+        fontSize: 12, fontWeight: 700, transition: 'all 0.2s',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+        minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+      }}
+    >
+      {children}
+    </button>
+  );
 };
 
 // ── Styles ──
@@ -90,6 +154,21 @@ const labelStyle: React.CSSProperties = {
 
 // ── Types ──
 
+/** Why the system did, or did not, assign a document to somebody. */
+export type MatchOutcome = 'assigned' | 'ambiguous' | 'unmatched';
+export type MatchReason =
+  | 'exact_full_name' | 'exact_full_name_concatenated' | 'unique_id'
+  | 'duplicate_full_name' | 'other_company'
+  | 'surname_only' | 'first_name_only' | 'no_candidate' | 'not_a_name';
+
+export interface MatchSuggestion {
+  id: number;
+  name: string;
+  surname: string;
+  companyId: number | null;
+  reason: MatchReason;
+}
+
 interface UploadFileItem {
   id: string;
   file: File;
@@ -103,6 +182,26 @@ interface UploadFileItem {
   documentId?: number;
   matched?: boolean;
   matchedEmployee?: any;
+  /**
+   * Real byte size. Files extracted from a ZIP never existed as a browser File,
+   * so the size comes from the server rather than from `file.size` - which is
+   * what used to render every extracted file as "0.00 MB".
+   */
+  sizeBytes?: number;
+  /** Category name applied to this document, if any. */
+  category?: string;
+}
+
+/** An entry the archive contained but we did not import. */
+interface SkippedItem {
+  fileName: string;
+  size: number;
+  reason: 'unsupported_format';
+}
+
+interface DuplicateItem {
+  fileName: string;
+  firstDocumentId: number;
 }
 
 interface UnmatchedItem {
@@ -113,6 +212,11 @@ interface UnmatchedItem {
   manualEmployeeId: number | null;
   companyId: number | null;
   isAutoMatched?: boolean;
+  sizeBytes?: number;
+  outcome?: MatchOutcome;
+  reason?: MatchReason;
+  suggestions?: MatchSuggestion[];
+  category?: string;
 }
 
 interface UploadedDocDetail {
@@ -145,23 +249,74 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
   const [files, setFiles] = useState<UploadFileItem[]>([]);
   const [uploading, setUploading] = useState(false);
 
+  // Per-file transfer progress for step 1, keyed by a transient upload key.
+  const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
+  const [currentUploadName, setCurrentUploadName] = useState<string>('');
+
+  // Archive entries we did not import, surfaced in the problem panel.
+  const [skippedFiles, setSkippedFiles] = useState<SkippedItem[]>([]);
+  const [duplicateFiles, setDuplicateFiles] = useState<DuplicateItem[]>([]);
+
+  // Clicking an entry in the problem panel highlights and scrolls to its row.
+  const [focusedDocId, setFocusedDocId] = useState<number | null>(null);
+  const focusedRowRef = useRef<HTMLDivElement | null>(null);
+
+  /**
+   * What each filename resolves to when matched against EVERY company the
+   * operator can see, keyed by file name. Company-independent, so it is
+   * computed once per file set and then reused: it drives both the "these look
+   * like another company's employees" warning and the per-company grouping of
+   * the document list.
+   */
+  const [globalMatches, setGlobalMatches] = useState<Map<string, MatchPreviewEntry>>(new Map());
+  const [analysedFileKey, setAnalysedFileKey] = useState<string>('');
+  const [analysing, setAnalysing] = useState(false);
+
+  /** Category applied to the batch; per-document overrides live on each item. */
+  const [globalCategory, setGlobalCategory] = useState<string>('');
+  const [categories, setCategories] = useState<DocumentCategory[]>([]);
+
   // Global Metadata
   const [globalRequiresSignature, setGlobalRequiresSignature] = useState(false);
   const [globalExpiresAt, setGlobalExpiresAt] = useState('');
   const [globalVisibility, setGlobalVisibility] = useState<'everyone' | 'hr'>('everyone');
   const [globalCompanyId, setGlobalCompanyId] = useState<number | null>(user?.companyId || null);
-
   // Manual Assignment (Step 3)
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loadingEmps, setLoadingEmps] = useState(false);
   const [unmatchedDocs, setUnmatchedDocs] = useState<UnmatchedItem[]>([]);
+
+  // Confirmation & Draft Cleanup Guard
+  const isConfirmedRef = useRef(false);
+  const filesRef = useRef(files);
+  filesRef.current = files;
+
+  const handleSafeClose = async () => {
+    if (!isConfirmedRef.current) {
+      const docIds = filesRef.current.filter(f => f.documentId).map(f => f.documentId!);
+      if (docIds.length > 0) {
+        await cleanupDraftDocuments(docIds);
+      }
+    }
+    onClose();
+  };
+
+  useEffect(() => {
+    return () => {
+      if (!isConfirmedRef.current) {
+        const docIds = filesRef.current.filter(f => f.documentId).map(f => f.documentId!);
+        if (docIds.length > 0) {
+          cleanupDraftDocuments(docIds);
+        }
+      }
+    };
+  }, []);
 
   // Companies List
   const [companies, setCompanies] = useState<Company[]>([]);
 
   // Uploaded Docs List (Step 4)
   const [uploadedDocs, setUploadedDocs] = useState<UploadedDocDetail[]>([]);
-  const [hoveredDocId, setHoveredDocId] = useState<number | null>(null);
 
   // Preview Modal States (Stable URLs, no blinking)
   const [previewDocUrl, setPreviewDocUrl] = useState<string | null>(null);
@@ -169,7 +324,6 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
   const [previewDocMimeType, setPreviewDocMimeType] = useState<string>('');
   const [previewLoading, setPreviewLoading] = useState<boolean>(false);
 
-  const isConfirmedRef = useRef(false);
   const uploadedDocsRef = useRef(uploadedDocs);
 
   const isHrOrAdmin = user && ['admin', 'hr'].includes(user.role);
@@ -196,6 +350,56 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
       setStep(1);
     }
   }, [uploadedDocs, step]);
+
+  // Bring the row picked in the problem panel into view.
+  useEffect(() => {
+    if (focusedDocId == null) return;
+    focusedRowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [focusedDocId]);
+
+  /**
+   * On step 2, work out whether the filenames actually belong to the selected
+   * company. Matching is run once with no company scope, so every candidate is
+   * visible; we then count where those people actually work.
+   */
+  useEffect(() => {
+    if (step !== 2 || files.length === 0) return;
+
+    // Keyed by file names and globalCompanyId so matching re-evaluates when company changes
+    const fileKey = `${files.map(f => f.file.name).join('|')}@comp:${globalCompanyId}`;
+    if (analysedFileKey === fileKey) return;
+
+    let cancelled = false;
+    const names = files.map(f => ({ documentId: f.documentId, fileName: f.file.name }));
+
+    setAnalysing(true);
+    previewDocumentMatches(names, globalCompanyId)
+      .then(entries => {
+        if (cancelled) return;
+        const next = new Map<string, MatchPreviewEntry>();
+        for (const entry of entries) next.set(entry.fileName, entry);
+        setGlobalMatches(next);
+        setAnalysedFileKey(fileKey);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setGlobalMatches(new Map());
+        setAnalysedFileKey(fileKey);
+      })
+      .finally(() => { if (!cancelled) setAnalysing(false); });
+
+    return () => { cancelled = true; };
+  }, [step, files, globalCompanyId, analysedFileKey]);
+
+  // Categories of the selected company, for the batch category selector.
+  useEffect(() => {
+    if (!globalCompanyId) { setCategories([]); return; }
+    let cancelled = false;
+    getCategories(false)
+      .then(all => { if (!cancelled) setCategories(all.filter(c => c.companyId === globalCompanyId)); })
+      .catch(() => { if (!cancelled) setCategories([]); });
+    return () => { cancelled = true; };
+  }, [globalCompanyId]);
 
   // Fetch initial data
   useEffect(() => {
@@ -237,22 +441,29 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
       }
     }
 
-    // Clean up previously uploaded files if user changes files
-    if (uploadedDocs.length > 0) {
-      uploadedDocs.forEach(d => {
-        deleteDocument(d.documentId).catch(() => {});
-      });
-      setUploadedDocs([]);
-    }
+    // Adding files must not destroy work already done. Anything previously
+    // selected stays; the operator removes files explicitly if they want to.
+    const inputEl = e.target;
+    setUploadProgress({});
 
     setUploading(true);
+    // Keep the progress panel on screen long enough to be read. A fast local
+    // upload otherwise flashes and disappears, which looks like nothing
+    // happened at all.
+    const startedAt = Date.now();
+    const MIN_PROGRESS_MS = 2000;
+
     const items: UploadFileItem[] = [];
+    const collectedSkipped: SkippedItem[] = [];
+    const collectedDuplicates: DuplicateItem[] = [];
     const defaultCompId = globalCompanyId || (associatedCompanies.length === 1 ? associatedCompanies[0].id : (user?.companyId || null));
 
     for (let i = 0; i < selectedFiles.length; i++) {
       const f = selectedFiles[i];
       const ext = f.name.substring(f.name.lastIndexOf('.')).toLowerCase();
       const isArchive = ['.zip', '.rar', '.7z'].includes(ext);
+      const progressKey = `${f.name}-${i}`;
+      setCurrentUploadName(f.name);
 
       if (isArchive) {
         try {
@@ -262,14 +473,19 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
             visibleToRoles: globalVisibility === 'hr' ? ['admin', 'hr'] : ['admin', 'hr', 'area_manager', 'store_manager', 'employee'],
             employeeId: targetEmployeeId,
             companyId: defaultCompId,
-            extractZip: true
+            extractZip: true,
+            onProgress: (percent) => setUploadProgress(prev => ({ ...prev, [progressKey]: percent }))
           });
+          setUploadProgress(prev => ({ ...prev, [progressKey]: 100 }));
 
           if (response && response.isZip && Array.isArray(response.files)) {
             for (const extFile of response.files) {
               items.push({
                 id: `zip-ext-${extFile.documentId}-${Date.now()}-${Math.random()}`,
+                // Placeholder File carrying the real name; the true byte size
+                // comes from the server via sizeBytes.
                 file: new File([], extFile.fileName),
+                sizeBytes: extFile.size ?? 0,
                 requiresSignature: globalRequiresSignature,
                 expiresAt: globalExpiresAt,
                 visibility: globalVisibility,
@@ -282,10 +498,13 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
                 matchedEmployee: extFile.employee
               });
             }
+            if (Array.isArray(response.skipped)) collectedSkipped.push(...response.skipped);
+            if (Array.isArray(response.duplicates)) collectedDuplicates.push(...response.duplicates);
           } else {
             items.push({
               id: `${f.name}-${i}-${Date.now()}`,
               file: f,
+              sizeBytes: f.size,
               requiresSignature: globalRequiresSignature,
               expiresAt: globalExpiresAt,
               visibility: globalVisibility,
@@ -297,12 +516,14 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
         } catch (err: any) {
           showToast(err?.message || `${t('documents.errorUpload')} (${f.name})`, 'error');
           setUploading(false);
+          setCurrentUploadName('');
           return;
         }
       } else {
         items.push({
           id: `${f.name}-${i}-${Date.now()}`,
           file: f,
+          sizeBytes: f.size,
           requiresSignature: globalRequiresSignature,
           expiresAt: globalExpiresAt,
           visibility: globalVisibility,
@@ -310,12 +531,53 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
           useGlobal: true,
           expanded: false
         });
+        setUploadProgress(prev => ({ ...prev, [progressKey]: 100 }));
       }
     }
 
-    setFiles(items);
+    const elapsed = Date.now() - startedAt;
+    if (elapsed < MIN_PROGRESS_MS) {
+      await new Promise(resolve => setTimeout(resolve, MIN_PROGRESS_MS - elapsed));
+    }
+
+    // Merge with anything already selected instead of replacing it, so
+    // "Add more files" adds rather than starts over.
+    setFiles(prev => [...prev, ...items]);
+    setSkippedFiles(prev => [...prev, ...collectedSkipped]);
+    setDuplicateFiles(prev => [...prev, ...collectedDuplicates]);
     setUploading(false);
+    setCurrentUploadName('');
+
+    // Allow re-selecting the same file after removing it.
+    inputEl.value = '';
+
+    if (items.length === 0) {
+      // Everything in the selection was unsupported - say so instead of moving
+      // on to an empty configuration step.
+      showToast(t('documents.allFilesSkipped', 'No supported documents were found in the selection.'), 'error');
+      return;
+    }
     setStep(2);
+  };
+
+  /** Remove one file from the selection, deleting it server-side if uploaded. */
+  const handleRemoveSelectedFile = async (item: UploadFileItem) => {
+    if (item.uploaded && item.documentId) {
+      try { await deleteDocument(item.documentId); } catch { /* already gone */ }
+      setUnmatchedDocs(prev => prev.filter(d => d.documentId !== item.documentId));
+      setUploadedDocs(prev => prev.filter(d => d.documentId !== item.documentId));
+    }
+    setFiles(prev => prev.filter(f => f.id !== item.id));
+  };
+
+  const handleClearSelection = async () => {
+    const uploadedIds = files.filter(f => f.uploaded && f.documentId).map(f => f.documentId!);
+    await Promise.all(uploadedIds.map(id => deleteDocument(id).catch(() => {})));
+    setFiles([]);
+    setUnmatchedDocs([]);
+    setUploadedDocs([]);
+    setSkippedFiles([]);
+    setDuplicateFiles([]);
   };
 
   // Global Settings Handlers
@@ -337,6 +599,15 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
   const handleGlobalCompany = (val: number | null) => {
     setGlobalCompanyId(val);
     setFiles(prev => prev.map(item => item.useGlobal ? { ...item, companyId: val } : item));
+    // A different company means a different employee pool and a different set
+    // of categories, so neither the previous fit analysis nor the chosen
+    // category can be carried over.
+    setGlobalCategory('');
+  };
+
+  const handleGlobalCategory = (val: string) => {
+    setGlobalCategory(val);
+    setFiles(prev => prev.map(item => item.useGlobal ? { ...item, category: val } : item));
   };
 
   // Individual Settings Handlers
@@ -380,6 +651,36 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
     const updatedFiles = [...files];
     const matchingList: UnmatchedItem[] = [];
 
+    // Re-match everything already on the server against the company currently
+    // selected. Grouped per company so each batch is matched in its own scope.
+    const freshMatches = new Map<number, MatchPreviewEntry>();
+    const alreadyUploaded = updatedFiles.filter(f => f.uploaded && f.documentId);
+    if (alreadyUploaded.length > 0) {
+      const byCompany = new Map<number | null, UploadFileItem[]>();
+      for (const item of alreadyUploaded) {
+        const list = byCompany.get(item.companyId) ?? [];
+        list.push(item);
+        byCompany.set(item.companyId, list);
+      }
+      try {
+        for (const [companyId, group] of byCompany) {
+          const entries = await previewDocumentMatches(
+            group.map(g => ({ documentId: g.documentId!, fileName: g.file.name })),
+            companyId
+          );
+          for (const entry of entries) {
+            if (entry.documentId != null) freshMatches.set(entry.documentId, entry);
+          }
+        }
+      } catch {
+        // A failed re-match must not silently fall back to a stale cross-company
+        // assignment - stop and let the operator retry.
+        showToast(t('documents.errorRematch', 'Could not verify employee matches. Please try again.'), 'error');
+        setUploading(false);
+        return;
+      }
+    }
+
     for (let i = 0; i < updatedFiles.length; i++) {
       const item = updatedFiles[i];
       try {
@@ -390,14 +691,23 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
         const existingDoc = unmatchedDocs.find(d => d.documentId === item.documentId);
         
         if (item.uploaded && item.documentId) {
-          const matchedEmpId = existingDoc ? existingDoc.manualEmployeeId : (item.matchedEmployee?.id || null);
+          // Files uploaded earlier (typically extracted from a ZIP) were matched
+          // against whatever company was selected at the time. If that changed in
+          // step 2, re-run the match now - company is a hard gate, so a stale
+          // result could otherwise assign across companies.
+          let refreshed = freshMatches.get(item.documentId);
+          const matchedEmpId = (existingDoc && existingDoc.manualEmployeeId !== null && existingDoc.manualEmployeeId !== undefined)
+            ? existingDoc.manualEmployeeId
+            : (refreshed?.employee?.id ?? (item.matchedEmployee?.id || null));
+
           await updateDocumentGeneric(item.documentId, {
             title: item.file.name,
             employee_id: matchedEmpId,
             requires_signature: item.requiresSignature,
             expires_at: item.expiresAt || null,
             visible_to_roles: visibleToRoles,
-            company_id: item.companyId
+            company_id: item.companyId,
+            category: item.category || globalCategory || null
           });
 
           const fileName = item.file.name;
@@ -412,7 +722,11 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
             fileExtension: extension,
             manualEmployeeId: matchedEmpId,
             companyId: item.companyId,
-            isAutoMatched: existingDoc ? existingDoc.isAutoMatched : !!(item.matched && item.matchedEmployee)
+            sizeBytes: item.sizeBytes,
+            outcome: refreshed?.outcome ?? (matchedEmpId ? 'assigned' : (item.matched ? 'assigned' : 'unmatched')),
+            reason: (refreshed?.reason as MatchReason) ?? undefined,
+            suggestions: (refreshed?.suggestions as MatchSuggestion[]) ?? [],
+            isAutoMatched: !!matchedEmpId
           });
         } else {
           const response = await uploadDocumentUnified(item.file, {
@@ -445,9 +759,15 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
                   fileExtension: extension,
                   manualEmployeeId: matchedEmpId,
                   companyId: item.companyId,
+                  sizeBytes: extFile.size ?? 0,
+                  outcome: extFile.outcome,
+                  reason: extFile.reason,
+                  suggestions: extFile.suggestions ?? [],
                   isAutoMatched: existingDoc ? existingDoc.isAutoMatched : !!isAutoMatched
                 });
               }
+              if (Array.isArray(response.skipped)) setSkippedFiles(prev => [...prev, ...response.skipped]);
+              if (Array.isArray(response.duplicates)) setDuplicateFiles(prev => [...prev, ...response.duplicates]);
             } else if (response.documentId) {
               updatedFiles[i] = {
                 ...item,
@@ -473,6 +793,10 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
                 fileExtension: extension,
                 manualEmployeeId: matchedEmpId,
                 companyId: item.companyId,
+                sizeBytes: response.size ?? item.file.size,
+                outcome: response.outcome,
+                reason: response.reason,
+                suggestions: response.suggestions ?? [],
                 isAutoMatched: existingDoc ? existingDoc.isAutoMatched : !!isAutoMatched
               });
             }
@@ -550,9 +874,11 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
     try {
       for (const item of unmatchedDocs) {
         const fullTitle = `${item.editableTitle}${item.fileExtension}`;
+        const sourceFile = files.find(f => f.documentId === item.documentId);
         await updateDocumentGeneric(item.documentId, {
           title: fullTitle,
           employee_id: item.manualEmployeeId || null,
+          category: item.category || sourceFile?.category || globalCategory || null,
           confirm: true,
           notify: true
         });
@@ -629,77 +955,432 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
       render: (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '2px 0' }}>
           <div style={{ width: 26, height: 26, borderRadius: '50%', background: 'rgba(201,151,58,0.15)', color: '#C9973A', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 11, flexShrink: 0 }}>⚠</div>
-          <div>
-            <div style={{ fontWeight: 600, fontSize: 13, color: '#C9973A' }}>{t('documents.unassigned', 'Unassigned')}</div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t('documents.unassignedDesc', 'No employee assigned')}</div>
-          </div>
+          <div style={{ fontWeight: 600, fontSize: 13, color: '#C9973A' }}>{t('documents.unassigned', 'Unassigned')}</div>
         </div>
-      )
+      ),
+      selectedRender: (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          <div style={{ width: 22, height: 22, borderRadius: '50%', background: 'rgba(201,151,58,0.15)', color: '#C9973A', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 10, flexShrink: 0 }}>⚠</div>
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#C9973A' }}>{t('documents.unassigned', 'Unassigned')}</span>
+        </div>
+      ),
     };
 
     const list = employees
       .filter(emp => !docCompanyId || emp.companyId === docCompanyId)
       .map(emp => {
-        const fullName = `${emp.name || ''} ${emp.surname || ''}`.trim();
-        const avatarUrl = emp.avatarFilename ? getAvatarUrl(emp.avatarFilename) : null;
-        const initials = `${(emp.name || '')[0] || ''}${(emp.surname || '')[0] || ''}`.toUpperCase() || 'U';
-
+        const fullName = formatEmployeeName(emp);
         return {
           value: String(emp.id),
-          label: fullName,
+          // Searchable by either name order and by payroll id.
+          label: [fullName, `${emp.surname ?? ""} ${emp.name ?? ""}`.trim(), emp.uniqueId ?? ""].join(" "),
+          // Full detail while choosing...
           render: (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '2px 0' }}>
-              {avatarUrl ? (
-                <img src={avatarUrl} alt={fullName} style={{ width: 26, height: 26, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
-              ) : (
-                <div style={{ width: 26, height: 26, borderRadius: '50%', background: 'var(--primary)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 10, flexShrink: 0 }}>
-                  {initials}
-                </div>
-              )}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "2px 0", width: "100%", minWidth: 0 }}>
+              <PersonAvatar name={emp.name} surname={emp.surname} avatarFilename={emp.avatarFilename} size={26} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fullName}</span>
+                <div style={{ fontWeight: 600, fontSize: 13, color: "var(--text-primary)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fullName}</span>
                   {emp.uniqueId && (
-                    <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: 'var(--background)', color: 'var(--text-muted)', flexShrink: 0 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: "1px 5px", borderRadius: 4, background: "var(--background)", color: "var(--text-muted)", flexShrink: 0 }}>
                       {emp.uniqueId}
                     </span>
                   )}
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {emp.role ? emp.role : ''}{emp.companyName ? ` · ${emp.companyName}` : ''}
+                <div style={{ fontSize: 11, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {t(`roles.${emp.role}`, emp.role)}{emp.companyName ? ` · ${emp.companyName}` : ""}
                 </div>
               </div>
             </div>
-          )
+          ),
+          // ...but once chosen, just the person. Their role is shown beside the
+          // field label and their company in the left rail, so repeating both
+          // here only makes the two fields different heights.
+          selectedRender: (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+              <PersonAvatar name={emp.name} surname={emp.surname} avatarFilename={emp.avatarFilename} size={22} />
+              <span style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fullName}</span>
+            </div>
+          ),
         };
       });
-
     return [unassigned, ...list];
   };
 
-  const modalWidth = 660;
+  // One width for every step. The dialog used to jump from 660 to 1080 when the
+  // matching step opened, which reads as a different window rather than the
+  // next step of the same one. Content adapts inside a fixed shell instead.
+  const modalWidth = isMobile ? 660 : 1020;
 
-  const matchedCount = files.filter(f => f.matched).length;
-  const unmatchedCount = files.filter(f => !f.matched).length;
 
-  const assignedDocs = unmatchedDocs.filter(doc => doc.isAutoMatched);
-  const unassignedDocs = unmatchedDocs.filter(doc => !doc.isAutoMatched);
+
+  // ── Derived progress / grouping for the matching workspace ──
+
+  const overallUploadPercent = (() => {
+    const values = Object.values(uploadProgress);
+    if (values.length === 0) return 0;
+    return Math.round(values.reduce((a, b) => a + b, 0) / values.length);
+  })();
+
+  /** How many documents currently have somebody assigned, auto or manual. */
+  const resolvedCount = unmatchedDocs.filter(d => d.manualEmployeeId != null).length;
+  const totalToAssign = unmatchedDocs.length;
+  const assignPercent = totalToAssign === 0 ? 0 : Math.round((resolvedCount / totalToAssign) * 100);
+
+  /**
+   * Employees detected in this batch, grouped by company. Answers "who did this
+   * archive turn out to be about, and are they all in the same company?".
+   */
+  const detectedByCompany = (() => {
+    const groups = new Map<number | null, { companyName: string; employees: Map<number, { employee: Employee; count: number }> }>();
+    for (const doc of unmatchedDocs) {
+      if (doc.manualEmployeeId == null) continue;
+      const emp = employees.find(e => e.id === doc.manualEmployeeId);
+      if (!emp) continue;
+      const companyId = emp.companyId ?? doc.companyId ?? null;
+      const companyName = companies.find(c => c.id === companyId)?.name
+        ?? t('documents.unknownCompany', 'Unknown company');
+      if (!groups.has(companyId)) groups.set(companyId, { companyName, employees: new Map() });
+      const group = groups.get(companyId)!;
+      const existing = group.employees.get(emp.id);
+      if (existing) existing.count += 1;
+      else group.employees.set(emp.id, { employee: emp, count: 1 });
+    }
+    return Array.from(groups.entries()).map(([companyId, g]) => ({
+      companyId,
+      companyName: g.companyName,
+      employees: Array.from(g.employees.values())
+        .sort((a, b) => formatEmployeeName(a.employee).localeCompare(formatEmployeeName(b.employee))),
+    }));
+  })();
+
+  const totalSelectedBytes = files.reduce((sum, f) => sum + (f.sizeBytes ?? f.file.size ?? 0), 0);
+
+  const companySelectOptions = useMemo<SelectOption[]>(
+    () => buildCompanyOptions(associatedCompanies, { ownerLabel: t('companies.owner', 'Owner') }),
+    [associatedCompanies, t],
+  );
+
+  const categoryOptions = useMemo<SelectOption[]>(
+    () => categories.map(cat => {
+      const parsed = splitCategoryName(cat.name);
+      return {
+        value: cat.name,
+        label: parsed.name,
+        render: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span aria-hidden style={{ fontSize: 15 }}>{parsed.icon}</span>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>{parsed.name}</span>
+          </span>
+        ),
+      };
+    }),
+    [categories],
+  );
+
+  /**
+   * Which company each file's name points at, regardless of what is currently
+   * selected. `null` means the name matched nobody anywhere.
+   */
+  const detectedCompanyForFile = (item: UploadFileItem): number | null => {
+    const entry = globalMatches.get(item.file.name);
+    if (!entry) return null;
+    if (entry.employee) return entry.employee.companyId;
+    // An exact name shared across companies comes back ambiguous. If every
+    // candidate happens to sit in one company we can still name it.
+    const strong = entry.suggestions.filter(
+      s => s.reason === 'exact_full_name' || s.reason === 'exact_full_name_concatenated' || s.reason === 'unique_id' || s.reason === 'other_company',
+    );
+    const unique = Array.from(new Set(strong.map(s => s.companyId).filter((c): c is number => c != null)));
+    return unique.length === 1 ? unique[0] : null;
+  };
+
+  /**
+   * Documents grouped by the company their filenames actually point at. This is
+   * what the operator needs to see when an archive turns out to span companies:
+   * the files themselves, under the company they belong to.
+   */
+  const documentsByDetectedCompany = (() => {
+    const groups = new Map<number | null, UploadFileItem[]>();
+    for (const item of files) {
+      const companyId = detectedCompanyForFile(item);
+      const list = groups.get(companyId) ?? [];
+      list.push(item);
+      groups.set(companyId, list);
+    }
+    return Array.from(groups.entries())
+      .map(([companyId, items]) => ({
+        companyId,
+        companyName: companyId == null
+          ? t('documents.noMatchGroup', 'No employee matched')
+          : (companies.find(c => c.id === companyId)?.name ?? t('documents.unknownCompany', 'Unknown company')),
+        isSelected: companyId === globalCompanyId,
+        canSwitchTo: companyId != null && associatedCompanies.some(c => c.id === companyId),
+        items,
+      }))
+      // Selected company first, then biggest groups, unmatched last.
+      .sort((a, b) => {
+        if (a.companyId === null) return 1;
+        if (b.companyId === null) return -1;
+        if (a.isSelected !== b.isSelected) return a.isSelected ? -1 : 1;
+        return b.items.length - a.items.length;
+      });
+  })();
+
+  /** True once the batch demonstrably concerns more than one company. */
+  const spansMultipleCompanies = documentsByDetectedCompany.filter(g => g.companyId != null).length > 1;
+
+  const matchStats = (() => {
+    let inSelected = 0;
+    const elsewhere = new Map<number, number>();
+    for (const item of files) {
+      const companyId = detectedCompanyForFile(item);
+      if (companyId == null) continue;
+      if (companyId === globalCompanyId) inSelected++;
+      else elsewhere.set(companyId, (elsewhere.get(companyId) ?? 0) + 1);
+    }
+    return {
+      total: files.length,
+      inSelected,
+      elsewhere: Array.from(elsewhere.entries())
+        .map(([companyId, count]) => ({
+          companyId,
+          companyName: companies.find(c => c.id === companyId)?.name ?? t('documents.unknownCompany', 'Unknown company'),
+          count,
+          canSwitchTo: associatedCompanies.some(c => c.id === companyId),
+        }))
+        .sort((a, b) => b.count - a.count),
+    };
+  })();
+
+  /**
+   * The tag shown on each document row: what settings it will actually be
+   * saved with. Replaces the old "use global" checkbox, which showed a control
+   * rather than an outcome.
+   */
+  const describeItemConfig = (item: UploadFileItem): { label: string; tone: TagTone; icon?: string; title?: string } => {
+    if (!item.companyId) {
+      return {
+        label: t('documents.tagNoCompany', 'No company'),
+        tone: 'danger',
+        icon: '⛔',
+        title: t('documents.tagNoCompanyHelp', 'Choose a company before continuing'),
+      };
+    }
+    if (item.useGlobal) {
+      return {
+        label: t('documents.tagBatch', 'Batch settings'),
+        tone: 'info',
+        title: t('documents.tagBatchHelp', 'Uses the settings above'),
+      };
+    }
+    return {
+      label: t('documents.tagCustom', 'Custom'),
+      tone: 'warning',
+      icon: '✎',
+      title: t('documents.tagCustomHelp', 'This document overrides the batch settings'),
+    };
+  };
+
+  /**
+   * Everything worth telling the operator before they continue: files without a
+   * company, formats we skipped, and - most importantly - filenames that look
+   * like they belong to a different company than the one selected.
+   */
+  const validationNotices = (() => {
+    const notices: Array<{
+      tone: 'info' | 'warning' | 'danger' | 'success';
+      title: string;
+      detail?: string;
+      action?: { label: string; onClick: () => void };
+    }> = [];
+
+    const missingCompany = files.filter(f => !f.companyId);
+    if (missingCompany.length > 0) {
+      notices.push({
+        tone: 'danger',
+        title: t('documents.noticeMissingCompanyTitle', '{{count}} document(s) have no company', { count: missingCompany.length }),
+        detail: t('documents.noticeMissingCompanyDetail', 'Pick a company above, or set one on each document, before continuing.'),
+      });
+    }
+
+    if (skippedFiles.length > 0) {
+      notices.push({
+        tone: 'warning',
+        title: t('documents.noticeSkippedTitle', '{{count}} file(s) were not imported', { count: skippedFiles.length }),
+        detail: t('documents.noticeSkippedDetail', 'Unsupported format: {{names}}. Remove them or upload a supported format.', {
+          names: skippedFiles.map(s => s.fileName).join(', '),
+        }),
+      });
+    }
+
+    if (duplicateFiles.length > 0) {
+      notices.push({
+        tone: 'warning',
+        title: t('documents.noticeDuplicateTitle', '{{count}} duplicate filename(s)', { count: duplicateFiles.length }),
+        detail: duplicateFiles.map(d => d.fileName).join(', '),
+      });
+    }
+
+    // The interesting one: this batch looks like somebody else's company.
+    if (!analysing && analysedFileKey !== '' && matchStats.total > 0) {
+      const { inSelected, elsewhere, total } = matchStats;
+      const strongest = elsewhere[0];
+      const elsewhereTotal = elsewhere.reduce((sum, e) => sum + e.count, 0);
+
+      const compBreakdownList: string[] = [];
+      const currentCompName = companies.find(c => c.id === globalCompanyId)?.name ?? 'Selected company';
+      if (inSelected > 0) {
+        compBreakdownList.push(`${inSelected} match ${currentCompName}`);
+      }
+      for (const e of elsewhere) {
+        compBreakdownList.push(`${e.count} match ${e.companyName}`);
+      }
+      const unmatchedCount = total - (inSelected + elsewhereTotal);
+      if (unmatchedCount > 0) {
+        compBreakdownList.push(`${unmatchedCount} unmatched`);
+      }
+
+      const overviewText = `Archive overview (${total} file(s)): ${compBreakdownList.join(' · ')}.`;
+
+      if (strongest && inSelected === 0) {
+        notices.push({
+          tone: 'warning',
+          title: t('documents.noticeWrongCompanyTitle', 'Filenames match {{company}} employees', { company: strongest.companyName }),
+          detail: `${overviewText} ${t('documents.noticeWrongCompanyHint', 'Switch company above or continue to manually assign documents in Step 3.')}`,
+          action: strongest.canSwitchTo
+            ? {
+                label: t('documents.switchCompany', 'Switch to {{company}}', { company: strongest.companyName }),
+                onClick: () => handleGlobalCompany(strongest.companyId),
+              }
+            : undefined,
+        });
+      } else if (elsewhereTotal > 0) {
+        notices.push({
+          tone: 'info',
+          title: t('documents.noticeMixedCompanyTitle', 'Archive contains documents spanning multiple companies'),
+          detail: overviewText,
+        });
+      } else if (inSelected > 0 && inSelected < total) {
+        notices.push({
+          tone: 'info',
+          title: t('documents.noticePartialMatchTitle', '{{matched}} of {{total}} files match employees of {{selected}}', {
+            matched: inSelected, total, selected: currentCompName
+          }),
+          detail: overviewText,
+        });
+      } else if (inSelected === total) {
+        notices.push({
+          tone: 'success',
+          title: t('documents.noticeAllMatchTitle', 'All {{count}} files match employees of {{selected}}', { count: total, selected: currentCompName }),
+          detail: overviewText,
+        });
+      }
+    }
+
+    return notices;
+  })();
+
+  const summaryCounts = {
+    assigned: uploadedDocs.filter(d => d.assignedEmployeeId != null).length,
+    unassigned: uploadedDocs.filter(d => d.assignedEmployeeId == null).length,
+    skipped: skippedFiles.length,
+    duplicates: duplicateFiles.length,
+  };
+
+  /**
+   * A concrete, name-level explanation on top of the generic reason - "matched
+   * the surname of Francesco Piscopo" tells an operator far more than "no exact
+   * match". Purely informational: it never changes what is assigned.
+   */
+  const explainSuggestions = (doc: UnmatchedItem): string | null => {
+    const suggestions = doc.suggestions ?? [];
+    if (suggestions.length === 0) return null;
+
+    const byReason = (reason: MatchReason) => suggestions.filter(s => s.reason === reason);
+    const nameOf = (s: MatchSuggestion) => formatEmployeeName(s);
+
+    const exact = suggestions.filter(s => s.reason === 'exact_full_name' || s.reason === 'exact_full_name_concatenated');
+    if (exact.length > 1) {
+      return t('documents.explainDuplicate', '{{count}} employees share this exact name: {{names}}', {
+        count: exact.length,
+        names: exact.slice(0, 3).map(nameOf).join(', '),
+      });
+    }
+
+    const otherCompany = byReason('other_company');
+    if (otherCompany.length > 0) {
+      const who = otherCompany[0];
+      const companyName = companies.find(c => c.id === who.companyId)?.name ?? t('documents.otherCompanyShort', 'another company');
+      return t('documents.explainOtherCompany', '{{name}} matches exactly, but works at {{company}}', {
+        name: nameOf(who), company: companyName,
+      });
+    }
+
+    const surnameOnly = byReason('surname_only');
+    if (surnameOnly.length > 0) {
+      return surnameOnly.length === 1
+        ? t('documents.explainSurnameOne', 'Same surname as {{name}}, different first name', { name: nameOf(surnameOnly[0]) })
+        : t('documents.explainSurnameMany', '{{count}} employees share this surname: {{names}}', {
+            count: surnameOnly.length, names: surnameOnly.slice(0, 3).map(nameOf).join(', '),
+          });
+    }
+
+    const firstNameOnly = byReason('first_name_only');
+    if (firstNameOnly.length > 0) {
+      return firstNameOnly.length === 1
+        ? t('documents.explainFirstNameOne', 'Same first name as {{name}}, different surname', { name: nameOf(firstNameOnly[0]) })
+        : t('documents.explainFirstNameMany', '{{count}} employees share this first name: {{names}}', {
+            count: firstNameOnly.length, names: firstNameOnly.slice(0, 3).map(nameOf).join(', '),
+          });
+    }
+
+    return null;
+  };
+
+  /** Everything the operator should look at before confirming. */
+  const problems = (() => {
+    const list: Array<{ kind: string; label: string; detail: string; extra?: string | null; documentId?: number }> = [];
+    for (const doc of unmatchedDocs) {
+      if (doc.manualEmployeeId != null) continue;
+      list.push({
+        kind: doc.outcome === 'ambiguous' ? 'ambiguous' : 'unmatched',
+        label: doc.fileName,
+        detail: describeMatchReason(doc.reason, doc.suggestions?.length ?? 0, t),
+        extra: explainSuggestions(doc),
+        documentId: doc.documentId,
+      });
+    }
+    for (const s of skippedFiles) {
+      list.push({ kind: 'skipped', label: s.fileName, detail: t('documents.reasonUnsupportedFormat', 'Unsupported format — not imported') });
+    }
+    for (const d of duplicateFiles) {
+      list.push({ kind: 'duplicate', label: d.fileName, detail: t('documents.reasonDuplicate', 'Appears more than once in the archive') });
+    }
+    return list;
+  })();
 
   return createPortal(
-    <div style={modalOverlayStyle} onClick={onClose}>
+    <div style={modalOverlayStyle} onClick={handleSafeClose}>
       <div style={{ ...modalContentStyle, maxWidth: modalWidth }} onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
               <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                STEP {step} OF 4
+                {t('documents.stepCounter', 'Step {{step}} of 4', { step })}
               </div>
               <h3 style={{ margin: '3px 0 0', fontSize: 18, fontWeight: 700, fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
-                {step === 1 ? 'Select & Upload Files' : step === 2 ? 'Configure Global & File Settings' : step === 3 ? 'Employee Matching' : 'Final Confirmation'}
+                {step === 1
+                  ? t('documents.stepTitleUpload', 'Select and upload files')
+                  : step === 2
+                    ? t('documents.stepTitleConfigure', 'Configure settings')
+                    : step === 3
+                      ? t('documents.stepTitleMatch', 'Match documents to employees')
+                      : t('documents.stepTitleConfirm', 'Review and confirm')}
               </h3>
             </div>
-            <button onClick={onClose} style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--background)', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}>✕</button>
+            <button onClick={handleSafeClose} style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--background)', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}>✕</button>
           </div>
           {/* Enhanced Step Indicator */}
           <div style={{
@@ -759,7 +1440,7 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
         {/* Content */}
         <div style={{ padding: '20px', flex: 1, overflowY: 'auto' }}>
           {step === 1 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 720, margin: '0 auto', width: '100%' }}>
               {targetEmployeeName && (
                 <div style={{ padding: '10px 14px', background: 'var(--background)', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--primary)' }} />
@@ -769,370 +1450,727 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
               {uploading ? (
                 <div style={{
                   display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                  height: 190, border: '2px dashed var(--primary)', borderRadius: 12, background: 'var(--background)', gap: 12
+                  height: 200, border: '2px dashed var(--primary)', borderRadius: 12, background: 'var(--background)', gap: 14, padding: '0 28px'
                 }}>
                   <div style={{ fontSize: 32, animation: 'pulse 1s infinite' }}>📦</div>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--primary)' }}>Extracting archive files...</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Preparing files for configuration step</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--primary)' }}>
+                    {overallUploadPercent < 100
+                      ? t('documents.uploadingFiles', 'Uploading files…')
+                      : t('documents.extractingArchive', 'Extracting and reading files…')}
+                  </div>
+                  {/* Real transfer percentage rather than an indeterminate spinner. */}
+                  <div style={{ width: '100%', maxWidth: 380 }}>
+                    <div style={{ height: 8, borderRadius: 999, background: 'var(--border)', overflow: 'hidden' }}>
+                      <div style={{
+                        width: `${overallUploadPercent}%`, height: '100%', borderRadius: 999,
+                        background: 'linear-gradient(90deg, var(--primary), #10B981)',
+                        transition: 'width 0.25s ease-out'
+                      }} />
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: 11, color: 'var(--text-muted)' }}>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 260 }}>
+                        {currentUploadName}
+                      </span>
+                      <span style={{ fontWeight: 700, color: 'var(--primary)' }}>{overallUploadPercent}%</span>
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <label
                   style={{
                     display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                    height: 190, border: '2px dashed var(--border)', borderRadius: 12, cursor: 'pointer',
+                    height: files.length > 0 ? 130 : 200,
+                    border: '2px dashed var(--border)', borderRadius: 12, cursor: 'pointer',
                     transition: 'all 0.2s', background: 'var(--background)'
                   }}
                   onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--primary)'}
                   onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
                 >
-                  <div style={{ background: 'rgba(2,132,199,0.1)', color: 'var(--primary)', padding: 12, borderRadius: 12, marginBottom: 12 }}>
+                  <div style={{ background: 'rgba(2,132,199,0.1)', color: 'var(--primary)', padding: files.length > 0 ? 8 : 12, borderRadius: 12, marginBottom: 10 }}>
                     <IconUpload />
                   </div>
-                  <div style={{ fontSize: 15, fontWeight: 600 }}>{t('documents.chooseFile')} (Multiple files allowed)</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-                    ZIP (max 50MB) · PDF, JPG, PNG (max 10MB)
+                  <div style={{ fontSize: files.length > 0 ? 13 : 15, fontWeight: 600 }}>
+                    {files.length > 0
+                      ? t('documents.addMoreFiles', 'Add more files')
+                      : t('documents.chooseFilesTitle', 'Choose files to upload')}
                   </div>
-                  <input type="file" multiple hidden onChange={handleFileChange} accept=".zip,.rar,.7z,.pdf,.jpg,.jpeg,.png,.webp,application/zip,application/x-zip-compressed,application/rar,application/x-rar-compressed,application/x-7z-compressed,application/octet-stream" />
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, textAlign: 'center', padding: '0 16px' }}>
+                    {t('documents.acceptedFormats', 'ZIP archives up to 50 MB · PDF, images and Office files up to 10 MB')}
+                  </div>
+                  <input type="file" multiple hidden onChange={handleFileChange} accept=".zip,.rar,.7z,.pdf,.jpg,.jpeg,.png,.webp,.gif,.tif,.tiff,.doc,.docx,.xls,.xlsx,.odt,.ods,.p7m,application/zip,application/x-zip-compressed,application/rar,application/x-rar-compressed,application/x-7z-compressed,application/octet-stream" />
                 </label>
+              )}
+
+              {/* Files already chosen stay visible and removable, so coming back
+                  to this step does not look like the selection was lost. */}
+              {files.length > 0 && !uploading && (
+                <div style={{ border: '1px solid var(--border)', borderRadius: 12, background: 'var(--background)', overflow: 'hidden' }}>
+                  <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)' }}>
+                      {t('documents.selectedFiles', 'Selected files')}
+                      <span style={{ marginLeft: 6, color: 'var(--primary)' }}>{files.length}</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>
+                        {formatFileSize(totalSelectedBytes)}
+                      </span>
+                      <button
+                        onClick={handleClearSelection}
+                        style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', padding: 0 }}
+                      >
+                        {t('documents.removeAll', 'Remove all')}
+                      </button>
+                    </div>
+                  </div>
+                  <div style={{ maxHeight: 240, overflowY: 'auto', padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {files.map(item => (
+                      <div
+                        key={item.id}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 10, padding: '7px 9px',
+                          borderRadius: 9, background: 'var(--surface)', border: '1px solid var(--border)'
+                        }}
+                      >
+                        <FileTypeIcon filename={item.file.name} size={30} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {item.file.name}
+                          </div>
+                          <div style={{ fontSize: 10.5, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span>{formatFileSize(item.sizeBytes ?? item.file.size)}</span>
+                            <span>·</span>
+                            <span>{formatStyleFor(item.file.name).label}</span>
+                          </div>
+                        </div>
+                        <IconButton
+                          title={t('common.remove', 'Remove')}
+                          tone="danger"
+                          onClick={() => handleRemoveSelectedFile(item)}
+                        >
+                          <Trash2 size={15} />
+                        </IconButton>
+                      </div>
+                    ))}
+                  </div>
+
+                  {skippedFiles.length > 0 && (
+                    <div style={{ padding: '9px 14px', borderTop: '1px solid var(--border)', background: 'rgba(245,158,11,0.07)' }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: '#B45309', marginBottom: 3 }}>
+                        {t('documents.skippedHeader', 'Not imported (unsupported format)')} · {skippedFiles.length}
+                      </div>
+                      <div style={{ fontSize: 10.5, color: '#B45309', lineHeight: 1.5 }}>
+                        {skippedFiles.map(s => s.fileName).join(', ')}
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           ) : step === 2 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-              {/* Global Settings Section */}
-              <div style={{ padding: '16px', background: 'var(--background)', borderRadius: 12, border: '1.5px solid var(--primary)', display: 'flex', flexDirection: 'column', gap: 14 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>GLOBAL SETTINGS (Applies to all documents)</div>
-
-                <div style={{ display: 'flex', gap: isMobile ? 16 : 20, flexDirection: isMobile ? 'column' : 'row' }}>
-                  <div style={{ flex: 1 }}>
-                    <label style={labelStyle}>{t('documents.requiresSignature')}</label>
-                    <div style={{ display: 'flex', gap: 10 }}>
-                      <button
-                        onClick={() => handleGlobalSignature(true)}
-                        style={{
-                          flex: 1, padding: '9px', borderRadius: 8,
-                          border: globalRequiresSignature ? '1.5px solid #10B981' : '1px solid var(--border)',
-                          background: globalRequiresSignature ? 'rgba(16,185,129,0.1)' : 'var(--surface)',
-                          color: globalRequiresSignature ? '#059669' : 'var(--text-muted)',
-                          fontSize: 13, fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
-                        }}
-                      >
-                        {globalRequiresSignature && <IconCheck />} {t('common.yes')}
-                      </button>
-                      <button
-                        onClick={() => handleGlobalSignature(false)}
-                        style={{
-                          flex: 1, padding: '9px', borderRadius: 8,
-                          border: !globalRequiresSignature ? '1.5px solid #64748B' : '1px solid var(--border)',
-                          background: !globalRequiresSignature ? 'rgba(100,116,139,0.1)' : 'var(--surface)',
-                          color: !globalRequiresSignature ? '#475569' : 'var(--text-muted)',
-                          fontSize: 13, fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
-                        }}
-                      >
-                        {!globalRequiresSignature && <IconCheck />} {t('common.no')}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div style={{ flex: 1 }}>
-                    <label style={labelStyle}>
-                      {t('documents.expiryDate')} <span style={{ color: 'var(--text-muted)', fontWeight: 400, textTransform: 'none' }}>(Optional)</span>
-                    </label>
-                    <DatePicker value={globalExpiresAt} onChange={handleGlobalExpiry} />
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', gap: isMobile ? 16 : 20, flexDirection: isMobile ? 'column' : 'row' }}>
-                  <div style={{ flex: 1 }}>
-                    <label style={labelStyle}>{t('documents.visibility')}</label>
-                    <div style={{ display: 'flex', gap: 12 }}>
-                      <button
-                        onClick={() => handleGlobalVisibility('everyone')}
-                        style={{
-                          flex: 1, padding: '9px', borderRadius: 8,
-                          border: globalVisibility === 'everyone' ? '1.5px solid #0284C7' : '1px solid var(--border)',
-                          background: globalVisibility === 'everyone' ? 'rgba(2,132,199,0.1)' : 'var(--surface)',
-                          color: globalVisibility === 'everyone' ? '#0284C7' : 'var(--text-muted)',
-                          fontSize: 13, fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8
-                        }}
-                      >
-                        {globalVisibility === 'everyone' && <IconCheck />} {t('documents.visibilityEveryone')}
-                      </button>
-                      <button
-                        onClick={() => handleGlobalVisibility('hr')}
-                        style={{
-                          flex: 1, padding: '9px', borderRadius: 8,
-                          border: globalVisibility === 'hr' ? '1.5px solid #8B5CF6' : '1px solid var(--border)',
-                          background: globalVisibility === 'hr' ? 'rgba(139,92,246,0.1)' : 'var(--surface)',
-                          color: globalVisibility === 'hr' ? '#7C3AED' : 'var(--text-muted)',
-                          fontSize: 13, fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8
-                        }}
-                      >
-                        {globalVisibility === 'hr' && <IconCheck />} {t('documents.visibilityHR')}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div style={{ flex: 1, position: 'relative', zIndex: 15 }}>
-                    <label style={labelStyle}>{t('companies.company', 'Company')} <span style={{ color: '#DC2626' }}>*</span></label>
-                    <CustomSelect
-                      value={globalCompanyId ? String(globalCompanyId) : null}
-                      onChange={(val) => handleGlobalCompany(val ? Number(val) : null)}
-                      options={associatedCompanies.map(c => ({ value: String(c.id), label: c.name }))}
-                      placeholder={t('companies.selectCompany', 'Select Company')}
-                    />
-                  </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {/* Company drives everything below it - which employees can be
+                  matched, which categories exist - so it sits on its own row. */}
+              <div style={{ padding: '14px 16px', background: 'var(--background)', border: '1.5px solid var(--primary)', borderRadius: 12 }}>
+                <label style={labelStyle}>
+                  {t('companies.company', 'Company')} <span style={{ color: '#DC2626' }}>*</span>
+                </label>
+                <CustomSelect
+                  value={globalCompanyId ? String(globalCompanyId) : null}
+                  onChange={(val) => handleGlobalCompany(val ? Number(val) : null)}
+                  options={companySelectOptions}
+                  placeholder={t('companies.selectCompany', 'Select Company')}
+                  isClearable={false}
+                  showCheck={false}
+                  highlightSelected
+                />
+                <div style={{
+                  fontSize: 12, fontWeight: 700, color: 'var(--primary)',
+                  marginTop: 10, padding: '8px 12px', borderRadius: 8,
+                  background: 'rgba(2,132,199,0.08)', border: '1px solid rgba(2,132,199,0.25)',
+                  display: 'flex', alignItems: 'center', gap: 7
+                }}>
+                  <span style={{ fontSize: 14 }}>ℹ</span>
+                  <span>{t('documents.companyScopeHint', 'Documents are matched only against employees of this company.')}</span>
                 </div>
               </div>
 
-              {/* Individual Document Settings Section */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    INDIVIDUAL DOCUMENTS ({files.length})
-                  </div>
-                  <button
-                    onClick={() => setStep(1)}
-                    style={{ background: 'none', border: 'none', color: 'var(--primary)', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}
-                  >
-                    + Add / Change Files
-                  </button>
-                </div>
-
-                {files.map(item => (
-                  <div key={item.id} style={{ background: 'var(--background)', borderRadius: 12, border: '1px solid var(--border)', overflow: item.expanded ? 'visible' : 'hidden', position: 'relative', zIndex: item.expanded ? 20 : 1 }}>
-                    <div
-                      onClick={() => toggleExpandItem(item.id)}
-                      style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', background: item.expanded ? 'var(--surface)' : 'transparent', borderRadius: item.expanded ? '12px 12px 0 0' : 12 }}
-                    >
-                      {getFileExtensionIcon(item.file.name)}
-                      <div style={{ flex: 1, overflow: 'hidden' }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {item.file.name}
+              {/* What the system noticed about this batch, before anything is
+                  written. Warnings never block - they inform. */}
+              {validationNotices.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {validationNotices.map((notice, idx) => {
+                    const palette = notice.tone === 'danger'
+                      ? { bg: 'rgba(220,38,38,0.08)', border: 'rgba(220,38,38,0.3)', fg: '#B91C1C', icon: '⛔' }
+                      : notice.tone === 'warning'
+                        ? { bg: 'rgba(245,158,11,0.09)', border: 'rgba(245,158,11,0.35)', fg: '#B45309', icon: '⚠' }
+                        : notice.tone === 'success'
+                          ? { bg: 'rgba(16,185,129,0.09)', border: 'rgba(16,185,129,0.3)', fg: '#15803D', icon: '✓' }
+                          : { bg: 'rgba(2,132,199,0.08)', border: 'rgba(2,132,199,0.3)', fg: '#0369A1', icon: 'ℹ' };
+                    return (
+                      <div
+                        key={idx}
+                        style={{
+                          padding: '10px 13px', borderRadius: 10, fontSize: 12.5,
+                          background: palette.bg, border: `1px solid ${palette.border}`, color: palette.fg,
+                          display: 'flex', alignItems: 'flex-start', gap: 9,
+                        }}
+                      >
+                        <span aria-hidden style={{ flexShrink: 0, fontSize: 14, lineHeight: 1.2 }}>{palette.icon}</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 700 }}>{notice.title}</div>
+                          {notice.detail && <div style={{ marginTop: 2, fontWeight: 500, lineHeight: 1.45 }}>{notice.detail}</div>}
                         </div>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-                          {(item.file.size / 1024 / 1024).toFixed(2)} MB · {item.useGlobal ? 'Using Global Settings' : 'Custom Settings'}
-                        </div>
+                        {notice.action && (
+                          <button
+                            onClick={notice.action.onClick}
+                            style={{
+                              flexShrink: 0, padding: '4px 10px', borderRadius: 7, cursor: 'pointer',
+                              border: `1px solid ${palette.border}`, background: 'var(--surface)',
+                              color: palette.fg, fontSize: 11, fontWeight: 700,
+                            }}
+                          >
+                            {notice.action.label}
+                          </button>
+                        )}
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <label onClick={e => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', fontWeight: 500, color: 'var(--text-secondary)' }}>
-                          <input
-                            type="checkbox"
-                            checked={item.useGlobal}
-                            onChange={e => toggleItemGlobal(item.id, e.target.checked)}
-                          />
-                          Use Global
-                        </label>
-                        <div style={{ transform: item.expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', display: 'flex', alignItems: 'center' }}>
-                          <IconChevronDown />
-                        </div>
-                      </div>
-                    </div>
-
-                    {item.expanded && (
-                      <div style={{ padding: '16px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 16, overflow: 'visible' }}>
-                        <div style={{ display: 'flex', gap: isMobile ? 16 : 20, flexDirection: isMobile ? 'column' : 'row' }}>
-                          <div style={{ flex: 1 }}>
-                            <label style={labelStyle}>{t('documents.requiresSignature')}</label>
-                            <div style={{ display: 'flex', gap: 10 }}>
-                              <button
-                                onClick={() => updateIndividualItem(item.id, { requiresSignature: true })}
-                                style={{
-                                  flex: 1, padding: '8px', borderRadius: 8,
-                                  border: item.requiresSignature ? '1.5px solid #10B981' : '1px solid var(--border)',
-                                  background: item.requiresSignature ? 'rgba(16,185,129,0.1)' : 'var(--surface)',
-                                  color: item.requiresSignature ? '#059669' : 'var(--text-muted)',
-                                  fontSize: 12, fontWeight: 700, cursor: 'pointer'
-                                }}
-                              >
-                                {t('common.yes')}
-                              </button>
-                              <button
-                                onClick={() => updateIndividualItem(item.id, { requiresSignature: false })}
-                                style={{
-                                  flex: 1, padding: '8px', borderRadius: 8,
-                                  border: !item.requiresSignature ? '1.5px solid #64748B' : '1px solid var(--border)',
-                                  background: !item.requiresSignature ? 'rgba(100,116,139,0.1)' : 'var(--surface)',
-                                  color: !item.requiresSignature ? '#475569' : 'var(--text-muted)',
-                                  fontSize: 12, fontWeight: 700, cursor: 'pointer'
-                                }}
-                              >
-                                {t('common.no')}
-                              </button>
-                            </div>
-                          </div>
-
-                          <div style={{ flex: 1 }}>
-                            <label style={labelStyle}>{t('documents.expiryDate')} <span style={{ color: 'var(--text-muted)', fontWeight: 400, textTransform: 'none' }}>(Optional)</span></label>
-                            <DatePicker
-                              value={item.expiresAt}
-                              onChange={val => updateIndividualItem(item.id, { expiresAt: val })}
-                            />
-                          </div>
-                        </div>
-
-                        <div style={{ display: 'flex', gap: isMobile ? 16 : 20, flexDirection: isMobile ? 'column' : 'row', overflow: 'visible' }}>
-                          <div style={{ flex: 1 }}>
-                            <label style={labelStyle}>{t('documents.visibility')}</label>
-                            <div style={{ display: 'flex', gap: 12 }}>
-                              <button
-                                onClick={() => updateIndividualItem(item.id, { visibility: 'everyone' })}
-                                style={{
-                                  flex: 1, padding: '8px', borderRadius: 8,
-                                  border: item.visibility === 'everyone' ? '1.5px solid #0284C7' : '1px solid var(--border)',
-                                  background: item.visibility === 'everyone' ? 'rgba(2,132,199,0.1)' : 'var(--surface)',
-                                  color: item.visibility === 'everyone' ? '#0284C7' : 'var(--text-muted)',
-                                  fontSize: 12, fontWeight: 700, cursor: 'pointer'
-                                }}
-                              >
-                                {t('documents.visibilityEveryone')}
-                              </button>
-                              <button
-                                onClick={() => updateIndividualItem(item.id, { visibility: 'hr' })}
-                                style={{
-                                  flex: 1, padding: '8px', borderRadius: 8,
-                                  border: item.visibility === 'hr' ? '1.5px solid #8B5CF6' : '1px solid var(--border)',
-                                  background: item.visibility === 'hr' ? 'rgba(139,92,246,0.1)' : 'var(--surface)',
-                                  color: item.visibility === 'hr' ? '#7C3AED' : 'var(--text-muted)',
-                                  fontSize: 12, fontWeight: 700, cursor: 'pointer'
-                                }}
-                              >
-                                {t('documents.visibilityHR')}
-                              </button>
-                            </div>
-                          </div>
-
-                          <div style={{ flex: 1, position: 'relative', zIndex: 30 }}>
-                            <label style={labelStyle}>{t('companies.company', 'Company')} <span style={{ color: '#DC2626' }}>*</span></label>
-                            <CustomSelect
-                              value={item.companyId ? String(item.companyId) : null}
-                              onChange={(val) => updateIndividualItem(item.id, { companyId: val ? Number(val) : null })}
-                              options={associatedCompanies.map(c => ({ value: String(c.id), label: c.name }))}
-                              placeholder={t('companies.selectCompany', 'Select Company')}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : step === 3 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-              {/* Guidance Message Banner */}
-              {unmatchedCount === 0 ? (
-                <div style={{ padding: '12px 16px', background: 'rgba(21,128,61,0.1)', border: '1px solid rgba(21,128,61,0.3)', borderRadius: 10, fontSize: 13, color: '#15803D', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ fontSize: 18 }}>✓</span>
-                  All {files.length} document(s) were automatically matched to company employees based on file names.
-                </div>
-              ) : matchedCount > 0 ? (
-                <div style={{ padding: '12px 16px', background: 'rgba(2,132,199,0.1)', border: '1px solid rgba(2,132,199,0.3)', borderRadius: 10, fontSize: 13, color: 'var(--primary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ fontSize: 18 }}>⚡</span>
-                  Auto-matching completed: {matchedCount} document(s) auto-matched to employees. {unmatchedCount} document(s) require manual assignment below.
-                </div>
-              ) : (
-                <div style={{ padding: '12px 16px', background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 10, fontSize: 13, color: '#B45309', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ fontSize: 18 }}>⚠️</span>
-                  No auto-match found for the uploaded documents. Please select an employee manually for each document below or leave as unassigned.
+                    );
+                  })}
                 </div>
               )}
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-                {/* ASSIGNED DOCUMENTS SECTION */}
-                {assignedDocs.length > 0 && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      ASSIGNED DOCUMENTS ({assignedDocs.length})
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
+                {/* Batch settings. These apply to every document unless a
+                    document overrides them below. */}
+                <div style={{ padding: '14px 16px', background: 'var(--background)', borderRadius: 12, border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 13 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    {t('documents.batchSettings', 'Settings for all documents')}
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 14 }}>
+                    <div>
+                      <label style={labelStyle}>{t('documents.requiresSignature')}</label>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <SegmentButton active={globalRequiresSignature} tone="success" onClick={() => handleGlobalSignature(true)}>
+                          {t('common.yes')}
+                        </SegmentButton>
+                        <SegmentButton active={!globalRequiresSignature} tone="neutral" onClick={() => handleGlobalSignature(false)}>
+                          {t('common.no')}
+                        </SegmentButton>
+                      </div>
                     </div>
 
-                    {assignedDocs.map((doc) => (
-                      <div key={doc.documentId} style={{ padding: 16, background: 'var(--background)', borderRadius: 12, border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 16 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          {getFileExtensionIcon(doc.fileName)}
-                          <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-primary)' }}>{doc.fileName}</div>
-                        </div>
+                    <div>
+                      <label style={labelStyle}>{t('documents.visibility')}</label>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <SegmentButton active={globalVisibility === 'everyone'} tone="info" onClick={() => handleGlobalVisibility('everyone')}>
+                          {t('documents.visibilityEveryone')}
+                        </SegmentButton>
+                        <SegmentButton active={globalVisibility === 'hr'} tone="purple" onClick={() => handleGlobalVisibility('hr')}>
+                          {t('documents.visibilityHR')}
+                        </SegmentButton>
+                      </div>
+                    </div>
 
-                        <div style={{ display: 'flex', gap: isMobile ? 16 : 12, flexDirection: isMobile ? 'column' : 'row' }}>
-                          <div style={{ flex: 1 }}>
-                            <label style={labelStyle}>{t('documents.fileName')}</label>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              <input
-                                value={doc.editableTitle}
-                                onChange={e => handleUnmatchedTitleChange(doc.documentId, e.target.value)}
-                                style={inputStyle}
-                              />
-                              <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 600 }}>{doc.fileExtension}</span>
-                            </div>
-                          </div>
+                    <div>
+                      <label style={labelStyle}>
+                        {t('documents.expiryDate')} <span style={{ color: 'var(--text-muted)', fontWeight: 400, textTransform: 'none' }}>({t('common.optional', 'optional')})</span>
+                      </label>
+                      <DatePicker value={globalExpiresAt} onChange={handleGlobalExpiry} />
+                    </div>
 
-                          <div style={{ flex: 1 }}>
-                            <label style={labelStyle}>{t('documents.assigned')}</label>
-                            <CustomSelect
-                              value={doc.manualEmployeeId ? String(doc.manualEmployeeId) : ''}
-                              onChange={(val) => handleUnmatchedEmpChange(doc.documentId, val ? Number(val) : null)}
-                              options={getUnmatchedEmpOptions(doc.companyId)}
-                              placeholder={t('documents.selectEmployee', 'Select Employee...')}
-                              disabled={loadingEmps}
-                              isClearable={true}
-                              searchable={true}
-                              menuMaxHeight={220}
-                            />
+                    <div style={{ position: 'relative', zIndex: 15 }}>
+                      <label style={labelStyle}>
+                        {t('documents.category', 'Category')} <span style={{ color: 'var(--text-muted)', fontWeight: 400, textTransform: 'none' }}>({t('common.optional', 'optional')})</span>
+                      </label>
+                      <CustomSelect
+                        value={globalCategory || null}
+                        onChange={(val) => handleGlobalCategory(val ?? '')}
+                        options={categoryOptions}
+                        placeholder={categories.length === 0
+                          ? t('documents.noCategoriesForCompany', 'No categories for this company')
+                          : t('documents.selectCategory', 'Select a category')}
+                        disabled={!globalCompanyId || categories.length === 0}
+                        isClearable
+                        showCheck={false}
+                        highlightSelected
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Documents, grouped by the company their names point at.
+                    A single-company batch renders as one plain list. */}
+                <div style={{ border: '1px solid var(--border)', borderRadius: 12, background: 'var(--background)', overflow: 'hidden' }}>
+                  <div style={{ padding: '11px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)' }}>
+                      {t('documents.documentsHeader', 'Documents')}
+                      <span style={{ marginLeft: 6, color: 'var(--primary)' }}>{files.length}</span>
+                      {analysing && (
+                        <span style={{ marginLeft: 8, fontWeight: 500, textTransform: 'none', letterSpacing: 0, color: 'var(--text-muted)' }}>
+                          · {t('documents.analysing', 'checking names…')}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => setStep(1)}
+                      style={{ background: 'none', border: 'none', color: 'var(--primary)', fontSize: 11.5, cursor: 'pointer', fontWeight: 700 }}
+                    >
+                      + {t('documents.addOrChangeFiles', 'Add / change files')}
+                    </button>
+                  </div>
+
+                  <div style={{ maxHeight: 400, overflowY: 'auto', padding: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {documentsByDetectedCompany.map(group => (
+                      <div key={String(group.companyId)}>
+                        {/* Only label the groups when there is more than one -
+                            a single-company batch needs no heading at all. */}
+                        {(spansMultipleCompanies || (group.companyId == null && documentsByDetectedCompany.length > 1)) && (
+                          <div style={{
+                            display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7, padding: '6px 8px',
+                            borderRadius: 8,
+                            background: group.isSelected ? 'rgba(16,185,129,0.09)' : group.companyId == null ? 'var(--surface)' : 'rgba(245,158,11,0.08)',
+                            border: `1px solid ${group.isSelected ? 'rgba(16,185,129,0.3)' : group.companyId == null ? 'var(--border)' : 'rgba(245,158,11,0.3)'}`,
+                          }}>
+                            {group.companyId != null
+                              ? <CompanyAvatar company={companies.find(c => c.id === group.companyId)} size={20} />
+                              : <span aria-hidden style={{ fontSize: 14 }}>❓</span>}
+                            <span style={{
+                              flex: 1, minWidth: 0, fontSize: 12, fontWeight: 700,
+                              color: group.isSelected ? '#15803D' : group.companyId == null ? 'var(--text-muted)' : '#B45309',
+                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                            }}>
+                              {group.companyName}
+                              {group.isSelected && ` · ${t('documents.selectedCompanyTag', 'selected')}`}
+                            </span>
+                            <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 999, background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
+                              {group.items.length}
+                            </span>
+                            {!group.isSelected && group.canSwitchTo && (
+                              <button
+                                onClick={() => handleGlobalCompany(group.companyId)}
+                                style={{
+                                  flexShrink: 0, padding: '2px 9px', borderRadius: 6, cursor: 'pointer',
+                                  border: '1px solid rgba(245,158,11,0.4)', background: 'var(--surface)',
+                                  color: '#B45309', fontSize: 10.5, fontWeight: 700,
+                                }}
+                              >
+                                {t('documents.useThisCompany', 'Use this company')}
+                              </button>
+                            )}
                           </div>
+                        )}
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {group.items.map(item => {
+                            const config = describeItemConfig(item);
+                            const detected = globalMatches.get(item.file.name);
+                            return (
+                              <div
+                                key={item.id}
+                                style={{
+                                  borderRadius: 10, border: '1px solid var(--border)', background: 'var(--surface)',
+                                  overflow: item.expanded ? 'visible' : 'hidden',
+                                  position: 'relative', zIndex: item.expanded ? 20 : 1,
+                                }}
+                              >
+                                <div
+                                  onClick={() => toggleExpandItem(item.id)}
+                                  style={{ padding: '9px 11px', display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}
+                                >
+                                  <FileTypeIcon filename={item.file.name} size={32} />
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      {item.file.name}
+                                    </div>
+                                    <div style={{ fontSize: 10.5, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                                      <span>{formatFileSize(item.sizeBytes ?? item.file.size)}</span>
+                                      {detected?.employee && (
+                                        <>
+                                          <span>·</span>
+                                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                            {formatEmployeeName(detected.employee)}
+                                          </span>
+                                        </>
+                                      )}
+                                      {!detected?.employee && detected?.outcome === 'ambiguous' && (
+                                        <>
+                                          <span>·</span>
+                                          <span style={{ color: '#B45309' }}>{t('documents.severalMatch', 'several people match')}</span>
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {/* A tag says what settings this document ended up
+                                      with. The old "use global" checkbox asked the
+                                      operator to manage state instead of showing it. */}
+                                  <StatusTag tone={config.tone} icon={config.icon} title={config.title}>
+                                    {config.label}
+                                  </StatusTag>
+                                  <div style={{ transform: item.expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', display: 'flex', alignItems: 'center', color: 'var(--text-muted)' }}>
+                                    <IconChevronDown />
+                                  </div>
+                                </div>
+
+                                {item.expanded && (
+                                  <div style={{ padding: '13px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 13, background: 'var(--background)' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                                      <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>
+                                        {item.useGlobal
+                                          ? t('documents.followingBatchSettings', 'Following the batch settings')
+                                          : t('documents.overridingBatchSettings', 'Overriding the batch settings')}
+                                      </span>
+                                      {!item.useGlobal && (
+                                        <button
+                                          onClick={() => toggleItemGlobal(item.id, true)}
+                                          style={{ background: 'none', border: 'none', color: 'var(--primary)', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
+                                        >
+                                          {t('documents.resetToBatch', 'Reset to batch settings')}
+                                        </button>
+                                      )}
+                                    </div>
+
+                                    <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 13 }}>
+                                      <div>
+                                        <label style={labelStyle}>{t('documents.requiresSignature')}</label>
+                                        <div style={{ display: 'flex', gap: 8 }}>
+                                          <SegmentButton active={item.requiresSignature} tone="success" onClick={() => updateIndividualItem(item.id, { requiresSignature: true, useGlobal: false })}>
+                                            {t('common.yes')}
+                                          </SegmentButton>
+                                          <SegmentButton active={!item.requiresSignature} tone="neutral" onClick={() => updateIndividualItem(item.id, { requiresSignature: false, useGlobal: false })}>
+                                            {t('common.no')}
+                                          </SegmentButton>
+                                        </div>
+                                      </div>
+
+                                      <div>
+                                        <label style={labelStyle}>{t('documents.visibility')}</label>
+                                        <div style={{ display: 'flex', gap: 8 }}>
+                                          <SegmentButton active={item.visibility === 'everyone'} tone="info" onClick={() => updateIndividualItem(item.id, { visibility: 'everyone', useGlobal: false })}>
+                                            {t('documents.visibilityEveryone')}
+                                          </SegmentButton>
+                                          <SegmentButton active={item.visibility === 'hr'} tone="purple" onClick={() => updateIndividualItem(item.id, { visibility: 'hr', useGlobal: false })}>
+                                            {t('documents.visibilityHR')}
+                                          </SegmentButton>
+                                        </div>
+                                      </div>
+
+                                      <div>
+                                        <label style={labelStyle}>{t('documents.expiryDate')}</label>
+                                        <DatePicker
+                                          value={item.expiresAt}
+                                          onChange={val => updateIndividualItem(item.id, { expiresAt: val, useGlobal: false })}
+                                        />
+                                      </div>
+
+                                      <div style={{ position: 'relative', zIndex: 30 }}>
+                                        <label style={labelStyle}>{t('companies.company', 'Company')} <span style={{ color: '#DC2626' }}>*</span></label>
+                                        <CustomSelect
+                                          value={item.companyId ? String(item.companyId) : null}
+                                          onChange={(val) => updateIndividualItem(item.id, { companyId: val ? Number(val) : null, useGlobal: false })}
+                                          options={companySelectOptions}
+                                          placeholder={t('companies.selectCompany', 'Select Company')}
+                                          isClearable={false}
+                                          showCheck={false}
+                                          highlightSelected
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     ))}
                   </div>
-                )}
+                </div>
+              </div>
+            </div>
+          ) : step === 3 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {/* Assignment progress: the one number that tells an operator
+                  where they stand, in words rather than jargon. */}
+              <div style={{ padding: '12px 16px', background: 'var(--background)', border: '1px solid var(--border)', borderRadius: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 8, flexWrap: 'wrap' }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
+                    {t('documents.assignProgress', '{{done}} of {{total}} documents assigned', { done: resolvedCount, total: totalToAssign })}
+                  </div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: problems.length > 0 ? '#B45309' : '#15803D' }}>
+                    {problems.length > 0
+                      ? t('documents.needAttentionCount', '{{count}} need your attention', { count: problems.length })
+                      : t('documents.allResolved', 'Nothing left to review')}
+                  </div>
+                </div>
+                <div style={{ height: 10, borderRadius: 999, background: 'var(--border)', overflow: 'hidden' }}>
+                  <div style={{
+                    width: `${assignPercent}%`, height: '100%', borderRadius: 999,
+                    background: assignPercent === 100
+                      ? 'linear-gradient(90deg, #10B981, #15803D)'
+                      : 'linear-gradient(90deg, var(--primary), #10B981)',
+                    transition: 'width 0.35s cubic-bezier(0.16, 1, 0.3, 1)'
+                  }} />
+                </div>
+              </div>
 
-                {/* UNASSIGNED DOCUMENTS SECTION */}
-                {unassignedDocs.length > 0 && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      UNASSIGNED DOCUMENTS ({unassignedDocs.length})
-                    </div>
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1fr) 280px',
+                gap: 14,
+                alignItems: 'start'
+              }}>
+                {/* ── MAIN: the documents grouped by company ── */}
+                <div style={{ border: '1px solid var(--border)', borderRadius: 12, background: 'var(--background)', overflow: 'hidden' }}>
+                  <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)' }}>
+                    {t('documents.documentsHeader', 'Documents')} ({unmatchedDocs.length})
+                  </div>
+                  <div style={{ maxHeight: 440, overflowY: 'auto', padding: 10, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    {Array.from(new Map(unmatchedDocs.map(d => [d.companyId ?? null, companies.find(c => c.id === d.companyId)?.name ?? t('documents.unknownCompany', 'Unknown Company')])).entries()).map(([compKeyId, compKeyName]) => {
+                      const groupDocs = unmatchedDocs.filter(d => (d.companyId ?? null) === compKeyId);
+                      const groupCompanyObj = compKeyId ? companies.find(c => c.id === compKeyId) : null;
+                      const hasMultipleCompanyGroups = new Set(unmatchedDocs.map(d => d.companyId)).size > 1;
 
-                    {unassignedDocs.map((doc) => (
-                      <div key={doc.documentId} style={{ padding: 16, background: 'var(--background)', borderRadius: 12, border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 16 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          {getFileExtensionIcon(doc.fileName)}
-                          <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-primary)' }}>{doc.fileName}</div>
-                        </div>
-
-                        <div style={{ display: 'flex', gap: isMobile ? 16 : 12, flexDirection: isMobile ? 'column' : 'row' }}>
-                          <div style={{ flex: 1 }}>
-                            <label style={labelStyle}>{t('documents.fileName')}</label>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              <input
-                                value={doc.editableTitle}
-                                onChange={e => handleUnmatchedTitleChange(doc.documentId, e.target.value)}
-                                style={inputStyle}
-                              />
-                              <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 600 }}>{doc.fileExtension}</span>
+                      return (
+                        <div key={String(compKeyId)} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          {hasMultipleCompanyGroups && (
+                            <div style={{
+                              display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
+                              borderRadius: 8, background: 'rgba(2,132,199,0.08)', border: '1px solid rgba(2,132,199,0.25)',
+                              fontSize: 12, fontWeight: 700, color: 'var(--primary)'
+                            }}>
+                              <CompanyAvatar company={groupCompanyObj} size={20} />
+                              <span>{compKeyName}</span>
+                              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginLeft: 'auto' }}>
+                                {groupDocs.length} {t('documents.documentsCount', 'document(s)')}
+                              </span>
                             </div>
-                          </div>
+                          )}
+                          {groupDocs.map(doc => {
+                            const isResolved = doc.manualEmployeeId != null;
+                            const isFocused = focusedDocId === doc.documentId;
+                            const assignedEmployee = doc.manualEmployeeId != null
+                              ? employees.find(e => e.id === doc.manualEmployeeId)
+                              : undefined;
+                            return (
+                              <div
+                                key={doc.documentId}
+                                ref={isFocused ? focusedRowRef : undefined}
+                                style={{
+                                  padding: 10, borderRadius: 10, background: 'var(--surface)',
+                                  border: `1px solid ${isFocused ? 'var(--primary)' : isResolved ? 'rgba(16,185,129,0.35)' : 'rgba(245,158,11,0.4)'}`,
+                                  boxShadow: isFocused ? '0 0 0 3px rgba(2,132,199,0.15)' : 'none',
+                                  transition: 'border-color 0.2s, box-shadow 0.2s'
+                                }}
+                              >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                                  <FileTypeIcon filename={doc.fileName} size={32} />
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      {doc.fileName}
+                                    </div>
+                                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{formatFileSize(doc.sizeBytes)}</div>
+                                  </div>
+                                  <StatusTag
+                                    tone={isResolved ? 'success' : 'warning'}
+                                    icon={isResolved ? (doc.isAutoMatched ? '⚡' : '✓') : '⚠'}
+                                  >
+                                    {isResolved
+                                      ? (doc.isAutoMatched ? t('documents.badgeAuto', 'Auto') : t('documents.badgeManual', 'Manual'))
+                                      : t('documents.badgeUnassigned', 'Unassigned')}
+                                  </StatusTag>
+                                </div>
 
-                          <div style={{ flex: 1 }}>
-                            <label style={labelStyle}>{t('documents.assigned')}</label>
-                            <CustomSelect
-                              value={doc.manualEmployeeId ? String(doc.manualEmployeeId) : ''}
-                              onChange={(val) => handleUnmatchedEmpChange(doc.documentId, val ? Number(val) : null)}
-                              options={getUnmatchedEmpOptions(doc.companyId)}
-                              placeholder={t('documents.selectEmployee', 'Select Employee...')}
-                              disabled={loadingEmps}
-                              isClearable={true}
-                              searchable={true}
-                              menuMaxHeight={220}
-                            />
-                          </div>
+                                <div style={{ height: 1, background: 'var(--border)', margin: '9px 0' }} />
+
+                                <div style={{ display: 'flex', gap: 9, flexDirection: isMobile ? 'column' : 'row', alignItems: 'stretch' }}>
+                                  <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, minHeight: 17 }}>
+                                      <label style={{ ...labelStyle, marginBottom: 0 }}>{t('documents.fileName')}</label>
+                                      {doc.reason && isResolved && (
+                                        <span style={{ fontSize: 9.5, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                          {doc.reason === 'unique_id'
+                                            ? t('documents.matchedById', 'Matched by ID')
+                                            : doc.isAutoMatched
+                                              ? t('documents.matchedByName', 'Matched by name')
+                                              : t('documents.chosenManually', 'Chosen manually')}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div
+                                      style={{
+                                        marginTop: 6, display: 'flex', alignItems: 'center',
+                                        border: '1px solid var(--border)', borderRadius: 8,
+                                        background: 'var(--background)', height: 38, overflow: 'hidden',
+                                      }}
+                                    >
+                                      <input
+                                        value={doc.editableTitle}
+                                        onChange={e => handleUnmatchedTitleChange(doc.documentId, e.target.value)}
+                                        style={{
+                                          flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent',
+                                          padding: '0 10px', fontSize: 13, color: 'var(--text-primary)', fontFamily: 'inherit',
+                                        }}
+                                      />
+                                      <span
+                                        style={{
+                                          flexShrink: 0, padding: '0 10px', fontSize: 11.5, fontWeight: 700,
+                                          color: 'var(--text-muted)', background: 'var(--surface)',
+                                          borderLeft: '1px solid var(--border)', height: '100%',
+                                          display: 'inline-flex', alignItems: 'center',
+                                        }}
+                                      >
+                                        {doc.fileExtension}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, minHeight: 17 }}>
+                                      <label style={{ ...labelStyle, marginBottom: 0 }}>{t('documents.assigned')}</label>
+                                      {assignedEmployee && (
+                                        <RoleTag role={assignedEmployee.role} label={t(`roles.${assignedEmployee.role}`, assignedEmployee.role)} />
+                                      )}
+                                    </div>
+                                    <div style={{ marginTop: 6 }}>
+                                      <CustomSelect
+                                        value={doc.manualEmployeeId ? String(doc.manualEmployeeId) : ''}
+                                        onChange={(val) => handleUnmatchedEmpChange(doc.documentId, val ? Number(val) : null)}
+                                        options={getUnmatchedEmpOptions(doc.companyId)}
+                                        placeholder={t('documents.selectEmployee', 'Select Employee...')}
+                                        disabled={loadingEmps}
+                                        isClearable={true}
+                                        searchable={true}
+                                        showCheck={false}
+                                        highlightSelected
+                                        menuMaxHeight={220}
+                                        controlMinHeight={38}
+                                      />
+                                    </div>
+                                    {assignedEmployee && (() => {
+                                      const normFile = doc.fileName.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+                                      const normName = (assignedEmployee.name || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+                                      const normSurname = (assignedEmployee.surname || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+                                      const fileTokens = normFile.split(/[^a-z0-9]+/);
+                                      const nameMatches = normName.length >= 2 && fileTokens.some(t => t.includes(normName) || normName.includes(t));
+                                      const surnameMatches = normSurname.length >= 2 && fileTokens.some(t => t.includes(normSurname) || normSurname.includes(t));
+
+                                      let warningMsg = '';
+                                      if (assignedEmployee.companyId && doc.companyId && assignedEmployee.companyId !== doc.companyId) {
+                                        const comp = companies.find(c => c.id === assignedEmployee.companyId);
+                                        warningMsg = t('documents.warningOtherCompany', 'This person belongs to {{company}}', { company: comp?.name ?? 'a different company' });
+                                      } else if (nameMatches && !surnameMatches) {
+                                        warningMsg = t('documents.warningFirstMatchSurnameDiffers', 'First name matches, but surname differs');
+                                      } else if (surnameMatches && !nameMatches) {
+                                        warningMsg = t('documents.warningSurnameMatchFirstNameDiffers', 'Surname matches, but first name differs');
+                                      } else if (!nameMatches && !surnameMatches) {
+                                        warningMsg = t('documents.warningManualMismatch', 'Name differs from filename');
+                                      }
+                                      const isMismatch = warningMsg !== '';
+                                      if (!isMismatch) return null;
+                                      return (
+                                        <div style={{ marginTop: 6, fontSize: 10.5, color: '#B91C1C', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 5, padding: '4px 7px', background: 'rgba(220,38,38,0.09)', borderRadius: 6, border: '1px solid rgba(220,38,38,0.25)' }}>
+                                          <span>⚠️</span>
+                                          <span>{warningMsg}</span>
+                                        </div>
+                                      );
+                                    })()}
+                                  </div>
+                                </div>
+
+                                {!isResolved && (
+                                  <div style={{ marginTop: 9, paddingTop: 8, borderTop: '1px dashed var(--border)' }}>
+                                    <div style={{ fontSize: 11, color: '#B45309', fontWeight: 600, marginBottom: (doc.suggestions?.length ?? 0) > 0 ? 6 : 0, display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                                      <span aria-hidden style={{ flexShrink: 0 }}>⚠</span>
+                                      <span>{describeMatchReason(doc.reason, doc.suggestions?.length ?? 0, t)}</span>
+                                    </div>
+                                    {(doc.suggestions?.length ?? 0) > 0 && (
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                                        <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                          {t('documents.didYouMean', 'Did you mean')}
+                                        </span>
+                                        {doc.suggestions!.slice(0, 4).map(s => (
+                                          <button
+                                            key={s.id}
+                                            onClick={() => handleUnmatchedEmpChange(doc.documentId, s.id)}
+                                            title={describeMatchReason(s.reason as MatchReason, 0, t)}
+                                            style={{
+                                              display: 'inline-flex', alignItems: 'center', gap: 5,
+                                              padding: '3px 9px 3px 4px', borderRadius: 999, cursor: 'pointer',
+                                              border: '1px solid var(--border)', background: 'var(--background)',
+                                              color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600
+                                            }}
+                                          >
+                                            <PersonAvatar
+                                              name={s.name}
+                                              surname={s.surname}
+                                              avatarFilename={employees.find(e => e.id === s.id)?.avatarFilename}
+                                              size={18}
+                                            />
+                                            {formatEmployeeName(s)}
+                                            {s.companyId !== doc.companyId && (
+                                              <span style={{ color: '#B45309' }}>
+                                                · {companies.find(c => c.id === s.companyId)?.name ?? t('documents.otherCompanyShort', 'other company')}
+                                              </span>
+                                            )}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* ── RIGHT: everything that needs a human decision ── */}
+                <div style={{ border: '1px solid var(--border)', borderRadius: 12, background: 'var(--background)', overflow: 'hidden' }}>
+                  <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span>{t('documents.needsAttention', 'Needs attention')}</span>
+                    {problems.length > 0 && (
+                      <span style={{ fontSize: 10, fontWeight: 800, padding: '1px 7px', borderRadius: 999, background: 'rgba(245,158,11,0.15)', color: '#B45309' }}>
+                        {problems.length}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ maxHeight: 420, overflowY: 'auto', padding: 8 }}>
+                    {problems.length === 0 ? (
+                      <div style={{ padding: '12px 6px', fontSize: 12, color: '#15803D', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 16 }}>✓</span>
+                        {t('documents.noProblems', 'Everything is assigned and nothing was skipped.')}
                       </div>
+                    ) : problems.map((p, idx) => (
+                      <button
+                        key={`${p.kind}-${p.label}-${idx}`}
+                        onClick={() => p.documentId != null && setFocusedDocId(p.documentId)}
+                        style={{
+                          width: '100%', textAlign: 'left', display: 'block', marginBottom: 6,
+                          padding: '8px 9px', borderRadius: 8, border: '1px solid var(--border)',
+                          background: 'var(--surface)', cursor: p.documentId != null ? 'pointer' : 'default'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                          <span style={{ fontSize: 12 }}>
+                            {p.kind === 'skipped' ? '⊘' : p.kind === 'duplicate' ? '⧉' : '⚠'}
+                          </span>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {p.label}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 10.5, color: 'var(--text-muted)', lineHeight: 1.4 }}>{p.detail}</div>
+                        {p.extra && (
+                          <div style={{ fontSize: 10.5, color: '#B45309', lineHeight: 1.4, marginTop: 3, fontWeight: 600 }}>
+                            {p.extra}
+                          </div>
+                        )}
+                      </button>
                     ))}
                   </div>
-                )}
+                </div>
               </div>
             </div>
           ) : step === 4 ? (
@@ -1143,92 +2181,129 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
                 {t('documents.confirmTitle', 'Review and confirm document upload details')}
               </div>
 
+              {/* Plain-language outcome of the whole batch. Deliberately states
+                  what was NOT done as prominently as what was. */}
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)', gap: 10 }}>
+                {[
+                  { key: 'assigned', value: summaryCounts.assigned, label: t('documents.summaryAssigned', 'Assigned'), color: '#15803D', bg: 'rgba(21,128,61,0.1)' },
+                  { key: 'unassigned', value: summaryCounts.unassigned, label: t('documents.summaryUnassigned', 'Left unassigned'), color: '#B45309', bg: 'rgba(245,158,11,0.1)' },
+                  { key: 'skipped', value: summaryCounts.skipped, label: t('documents.summarySkipped', 'Skipped'), color: 'var(--text-muted)', bg: 'var(--background)' },
+                  { key: 'duplicates', value: summaryCounts.duplicates, label: t('documents.summaryDuplicates', 'Duplicates'), color: 'var(--text-muted)', bg: 'var(--background)' },
+                ].map(card => (
+                  <div key={card.key} style={{ padding: '10px 12px', borderRadius: 10, background: card.bg, border: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: card.color, lineHeight: 1.1 }}>{card.value}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 600 }}>{card.label}</div>
+                  </div>
+                ))}
+              </div>
+
+              {summaryCounts.skipped > 0 && (
+                <div style={{ padding: '10px 14px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--background)' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                    {t('documents.skippedHeader', 'Not imported (unsupported format)')}
+                  </div>
+                  {skippedFiles.map(s => (
+                    <div key={s.fileName} style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>⊘ {s.fileName}</div>
+                  ))}
+                </div>
+              )}
+
+              {summaryCounts.unassigned > 0 && (
+                <div style={{ padding: '10px 14px', borderRadius: 10, border: '1px solid rgba(245,158,11,0.3)', background: 'rgba(245,158,11,0.08)' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#B45309', marginBottom: 4 }}>
+                    {t('documents.unassignedHeader', 'These stay unassigned until someone matches them')}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: '#B45309' }}>
+                    {t('documents.unassignedHelp', 'They will not appear in any employee\'s personal area and no signature will be requested.')}
+                  </div>
+                </div>
+              )}
+
               {/* Uploaded Documents List */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                {uploadedDocs.map(doc => {
-                  const isHovered = hoveredDocId === doc.documentId;
-                  return (
-                    <div
-                      key={doc.documentId}
-                      onMouseEnter={() => setHoveredDocId(doc.documentId)}
-                      onMouseLeave={() => setHoveredDocId(null)}
-                      style={{
-                        borderRadius: 12, border: '1px solid var(--border)',
-                        background: 'var(--surface)', overflow: 'hidden', display: 'flex', flexDirection: 'column'
-                      }}
-                    >
-                      {/* Document Row Header */}
+              <div style={{ border: '1px solid var(--border)', borderRadius: 12, background: 'var(--background)', overflow: 'hidden' }}>
+                <div style={{ padding: '10px 13px', borderBottom: '1px solid var(--border)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)' }}>
+                  {t('documents.documentsHeader', 'Documents')}
+                  <span style={{ marginLeft: 6, color: 'var(--primary)' }}>{uploadedDocs.length}</span>
+                </div>
+                <div style={{ maxHeight: 380, overflowY: 'auto', padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {uploadedDocs.map(doc => {
+                    const assignedEmployee = doc.assignedEmployeeId != null
+                      ? employees.find(e => e.id === doc.assignedEmployeeId)
+                      : undefined;
+                    const company = companies.find(c => c.id === doc.companyId);
+                    return (
                       <div
+                        key={doc.documentId}
                         style={{
-                          padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12,
-                          background: 'var(--background)', borderBottom: '1px solid var(--border-light)',
-                          position: 'relative'
+                          borderRadius: 10, border: '1px solid var(--border)', background: 'var(--surface)',
+                          padding: '9px 11px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
                         }}
                       >
-                        {getFileExtensionIcon(doc.fileName)}
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        <FileTypeIcon filename={doc.fileName} size={32} />
+
+                        <div style={{ flex: '1 1 190px', minWidth: 0 }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {doc.fileName}
+                          </div>
+                          <div style={{ fontSize: 10.5, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 5, marginTop: 1 }}>
+                            <CompanyAvatar company={company} size={14} />
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.companyName}</span>
                           </div>
                         </div>
 
-                        {/* Action buttons */}
-                        <div style={{ display: 'flex', gap: 8 }}>
-                          <button
-                            onClick={() => openPreview(doc)}
-                            style={{
-                              padding: '5px 12px', borderRadius: 6, border: '1px solid var(--border)',
-                              background: 'var(--surface)', color: 'var(--text-primary)', cursor: 'pointer',
-                              fontSize: 12, fontWeight: 600, transition: 'all 0.15s'
-                            }}
-                          >
-                            {t('common.view', 'View')}
-                          </button>
-                          <button
-                            onClick={() => handleRemoveDocument(doc.documentId)}
-                            style={{
-                              padding: '5px 12px', borderRadius: 6, border: '1px solid rgba(220,38,38,0.3)',
-                              background: 'rgba(220,38,38,0.06)', color: '#DC2626', cursor: 'pointer',
-                              fontSize: 12, fontWeight: 600, transition: 'all 0.15s'
-                            }}
-                          >
-                            {t('common.delete', 'Remove')}
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Details Content */}
-                      <div style={{ padding: '12px 16px', display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center', justifyContent: 'space-between' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Company:</span>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>{doc.companyName}</span>
-                        </div>
-
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Assigned To:</span>
-                          {doc.assignedEmployeeId ? (
-                            <span style={{ fontSize: 11, padding: '3px 10px', borderRadius: 999, background: 'rgba(0,45,91,0.06)', color: 'var(--primary)', fontWeight: 700, border: '1px solid rgba(0,45,91,0.1)' }}>
-                              👤 {doc.assignedEmployeeName}
-                            </span>
+                        {/* Who it goes to. An unassigned document is called out
+                            rather than shown as an empty cell. */}
+                        <div style={{ flex: '1 1 170px', minWidth: 0, display: 'flex', alignItems: 'center', gap: 7 }}>
+                          {assignedEmployee ? (
+                            <>
+                              <PersonAvatar
+                                name={assignedEmployee.name}
+                                surname={assignedEmployee.surname}
+                                avatarFilename={assignedEmployee.avatarFilename}
+                                size={24}
+                              />
+                              <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {formatEmployeeName(assignedEmployee)}
+                              </span>
+                              <RoleTag role={assignedEmployee.role} label={t(`roles.${assignedEmployee.role}`, assignedEmployee.role)} />
+                            </>
                           ) : (
-                            <span style={{ fontSize: 11, padding: '3px 10px', borderRadius: 999, background: 'rgba(201,151,58,0.12)', color: '#C9973A', fontWeight: 700 }}>
-                              ⚠ Unassigned
-                            </span>
+                            <StatusTag tone="warning" icon="⚠">
+                              {t('documents.badgeUnassigned', 'Unassigned')}
+                            </StatusTag>
                           )}
                         </div>
 
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Signature:</span>
-                          {doc.requiresSignature ? (
-                            <span style={{ fontSize: 11, padding: '3px 10px', borderRadius: 999, background: 'rgba(201,151,58,0.12)', color: '#C9973A', fontWeight: 700 }}>Required</span>
-                          ) : (
-                            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Not Required</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
+                          {doc.requiresSignature && (
+                            <StatusTag tone="info" icon="✍" title={t('documents.requiresSignature')}>
+                              {t('documents.signatureRequiredShort', 'Signature')}
+                            </StatusTag>
+                          )}
+                          {doc.visibility === 'hr' && (
+                            <StatusTag tone="neutral" icon="🔒" title={t('documents.visibility')}>
+                              {t('documents.visibilityHR')}
+                            </StatusTag>
+                          )}
+                          {doc.expiresAt && (
+                            <StatusTag tone="neutral" icon="⏳" title={t('documents.expiryDate')}>
+                              {doc.expiresAt}
+                            </StatusTag>
                           )}
                         </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0, marginLeft: 'auto' }}>
+                          <IconButton title={t('common.view', 'View')} tone="primary" onClick={() => openPreview(doc)}>
+                            <Eye size={15} />
+                          </IconButton>
+                          <IconButton title={t('common.remove', 'Remove')} tone="danger" onClick={() => handleRemoveDocument(doc.documentId)}>
+                            <Trash2 size={15} />
+                          </IconButton>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
             </div>
           ) : null}
@@ -1260,7 +2335,7 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
           ) : <div />}
 
           {step === 1 ? (
-            <button onClick={onClose} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+            <button onClick={handleSafeClose} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
               {t('common.cancel', 'Cancel')}
             </button>
           ) : step === 2 ? (

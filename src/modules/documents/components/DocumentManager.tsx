@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { CheckSquare } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
 import { useToast } from '../../../context/ToastContext';
 import {
@@ -8,6 +9,7 @@ import {
   getEmployeeDocuments,
   getDocumentsGeneric,
   getDeletedDocuments,
+  permanentlyDeleteDocument,
   getCategories,
   EmployeeDocument,
   DocumentCategory
@@ -42,6 +44,9 @@ export const DocumentManager: React.FC<DocumentManagerProps> = ({
 
   const [myDocs, setMyDocs] = useState<EmployeeDocument[]>([]);
   const [teamDocs, setTeamDocs] = useState<EmployeeDocument[]>([]);
+  const [trashDocs, setTrashDocs] = useState<EmployeeDocument[]>([]);
+  const [showEmptyTrashModal, setShowEmptyTrashModal] = useState(false);
+  const [emptyingTrash, setEmptyingTrash] = useState(false);
   const [categories, setCategories] = useState<DocumentCategory[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,6 +54,12 @@ export const DocumentManager: React.FC<DocumentManagerProps> = ({
   const [searchParams] = useSearchParams();
   const searchParamVal = searchParams.get('search') || '';
   const [search, setSearch] = useState(searchParamVal);
+  const [activeTab, setActiveTab] = useState<'my' | 'team'>('team');
+  const [selectionMode, setSelectionMode] = useState(false);
+
+  useEffect(() => {
+    setSelectionMode(false);
+  }, [view, activeTab]);
 
   useEffect(() => {
     if (searchParamVal) {
@@ -61,7 +72,6 @@ export const DocumentManager: React.FC<DocumentManagerProps> = ({
   const [showUpload, setShowUpload] = useState(false);
   const [showCategories, setShowCategories] = useState(false);
   const [editDoc, setEditDoc] = useState<any | null>(null);
-  const [activeTab, setActiveTab] = useState<'my' | 'team'>('team');
 
   const canManage = ['admin', 'hr'].includes(user?.role || '');
   const isEmployee = user?.role === 'employee';
@@ -69,9 +79,11 @@ export const DocumentManager: React.FC<DocumentManagerProps> = ({
 
   const showTeamTab = !isEmployee && !isStoreManager && !employeeId && permissions?.team_documents === true;
 
-  const docs = showTeamTab
+  const activeDocs = showTeamTab
     ? (activeTab === 'my' ? myDocs : teamDocs)
     : myDocs;
+
+  const docs = view === 'trash' ? trashDocs : activeDocs;
 
   useEffect(() => {
     if ((isStoreManager || (permissions && permissions.team_documents === false)) && activeTab === 'team') {
@@ -101,44 +113,48 @@ export const DocumentManager: React.FC<DocumentManagerProps> = ({
 
       let fetchedMy: EmployeeDocument[] = [];
       let fetchedTeam: EmployeeDocument[] = [];
+      let fetchedTrash: EmployeeDocument[] = [];
 
       const hasTeamPerm = permissions?.team_documents === true && !isStoreManager;
 
-      if (view === 'trash') {
-        if (!isEmployee && !employeeId) {
-          if (hasTeamPerm) {
-            const [my, team] = await Promise.all([
-              getDeletedDocuments(employeeId, 'my'),
-              getDeletedDocuments(employeeId, 'team')
-            ]);
-            fetchedMy = my;
-            fetchedTeam = team;
-          } else {
-            fetchedMy = await getDeletedDocuments(employeeId, 'my');
-          }
-        } else {
-          fetchedMy = await getDeletedDocuments(employeeId);
-        }
+      if (employeeId) {
+        const [my, trash] = await Promise.all([
+          getEmployeeDocuments(employeeId),
+          getDeletedDocuments(employeeId)
+        ]);
+        fetchedMy = my;
+        fetchedTrash = trash;
+      } else if (isEmployee) {
+        const [my, trash] = await Promise.all([
+          getMyDocuments(),
+          getDeletedDocuments(undefined, 'my')
+        ]);
+        fetchedMy = my;
+        fetchedTrash = trash;
       } else {
-        if (employeeId) {
-          fetchedMy = await getEmployeeDocuments(employeeId);
-        } else if (isEmployee) {
-          fetchedMy = await getMyDocuments();
+        if (hasTeamPerm) {
+          const [my, team, trashMy, trashTeam] = await Promise.all([
+            getDocumentsGeneric('my'),
+            getDocumentsGeneric('team'),
+            getDeletedDocuments(undefined, 'my'),
+            getDeletedDocuments(undefined, 'team')
+          ]);
+          fetchedMy = my;
+          fetchedTeam = team;
+          fetchedTrash = Array.from(new Map([...trashMy, ...trashTeam].map(d => [d.id, d])).values());
         } else {
-          if (hasTeamPerm) {
-            const [my, team] = await Promise.all([
-              getDocumentsGeneric('my'),
-              getDocumentsGeneric('team')
-            ]);
-            fetchedMy = my;
-            fetchedTeam = team;
-          } else {
-            fetchedMy = await getDocumentsGeneric('my');
-          }
+          const [my, trash] = await Promise.all([
+            getDocumentsGeneric('my'),
+            getDeletedDocuments(undefined, 'my')
+          ]);
+          fetchedMy = my;
+          fetchedTrash = trash;
         }
       }
+
       setMyDocs(fetchedMy);
       setTeamDocs(fetchedTeam);
+      setTrashDocs(fetchedTrash);
     } catch (err) {
       console.error('Error loading documents:', err);
       showToastRef.current(tRef.current('documents.errorLoad'), 'error');
@@ -150,7 +166,6 @@ export const DocumentManager: React.FC<DocumentManagerProps> = ({
     isEmployee,
     isStoreManager,
     user?.companyId,
-    view,
     permissions?.team_documents,
     authLoading
   ]);
@@ -568,13 +583,71 @@ export const DocumentManager: React.FC<DocumentManagerProps> = ({
                   }}>
                   <IconTrash />
                   {t('documents.archivedTrash', 'Archived / Trash')}
+                  <span style={{
+                    background: view === 'trash' ? 'var(--primary)' : 'rgba(0,0,0,0.06)',
+                    color: view === 'trash' ? '#fff' : 'var(--text-muted)',
+                    padding: '1px 6px',
+                    borderRadius: 10,
+                    fontSize: 11,
+                    fontWeight: 700
+                  }}>
+                    {getFilteredCount(trashDocs)}
+                  </span>
                 </button>
               )}
             </div>
           </div>
 
-          {/* Right Side Controls: Selected Company Admin Pill & Relocated Category Dropdown (Filtered by Company) */}
+          {/* Right Side Controls: Select Multiple, Empty Trash, Admin Pill & Category Dropdown */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', width: isMobile ? '100%' : 'auto' }}>
+            {canManage && (
+              <button
+                onClick={() => setSelectionMode(!selectionMode)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '6px 14px',
+                  borderRadius: 8,
+                  border: selectionMode ? '1px solid var(--primary)' : '1px solid var(--border)',
+                  background: selectionMode ? 'rgba(2,132,199,0.08)' : 'var(--surface)',
+                  color: selectionMode ? 'var(--primary)' : 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  transition: 'all 0.15s'
+                }}
+              >
+                <CheckSquare size={14} />
+                {selectionMode ? t('documents.cancelSelection', 'Cancel selection') : t('documents.selectMultiple', 'Select multiple')}
+              </button>
+            )}
+
+            {view === 'trash' && canManage && (
+              <button
+                onClick={() => setShowEmptyTrashModal(true)}
+                disabled={trashDocs.length === 0}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '6px 14px',
+                  borderRadius: 8,
+                  border: '1px solid rgba(220,38,38,0.3)',
+                  background: 'rgba(220,38,38,0.06)',
+                  color: '#DC2626',
+                  cursor: trashDocs.length === 0 ? 'not-allowed' : 'pointer',
+                  opacity: trashDocs.length === 0 ? 0.5 : 1,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  transition: 'all 0.15s'
+                }}
+              >
+                <IconTrash />
+                {t('documents.emptyTrash', 'Svuota Cestino')}
+              </button>
+            )}
+
             {selectedCompany?.ownerName && (
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 8,
@@ -631,11 +704,11 @@ export const DocumentManager: React.FC<DocumentManagerProps> = ({
               <DocumentsTable
                 docs={filteredDocs}
                 categories={categories}
-                canManage={canManage}
-                isEmployee={isEmployee}
                 onRefresh={load}
-                onEdit={setEditDoc}
+                onEditDoc={setEditDoc}
                 isTrash={view === 'trash'}
+                selectionMode={selectionMode}
+                setSelectionMode={setSelectionMode}
               />
             )}
           </div>
@@ -653,6 +726,52 @@ export const DocumentManager: React.FC<DocumentManagerProps> = ({
       )}
       {showCategories && <CategoriesModal onClose={() => setShowCategories(false)} />}
       {editDoc && <EditDocumentModal doc={editDoc} onClose={() => setEditDoc(null)} onSuccess={load} />}
+
+      {/* ── Svuota Cestino Confirmation Modal ───────────────────────────── */}
+      {showEmptyTrashModal && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1200, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(13,33,55,0.48)', backdropFilter: 'blur(3px)' }}>
+          <div style={{ background: 'var(--surface)', borderRadius: 16, width: 'min(440px, 92vw)', padding: 24, boxShadow: '0 20px 50px rgba(0,0,0,0.25)', border: '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 10, background: 'rgba(220,38,38,0.1)', color: '#DC2626', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <IconTrash />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>{t('documents.emptyTrashConfirmTitle', 'Svuota Cestino')}</h3>
+                <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>{t('documents.emptyTrashWarning', 'Azione irreversibile')}</p>
+              </div>
+            </div>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, margin: '0 0 20px' }}>
+              {t('documents.emptyTrashPrompt', 'Sei sicuro di voler svuotare il cestino? Tutti i {{count}} documenti verranno eliminati permanentemente dal database.', { count: trashDocs.length })}
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button onClick={() => setShowEmptyTrashModal(false)} disabled={emptyingTrash} style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                {t('common.cancel', 'Annulla')}
+              </button>
+              <button
+                onClick={async () => {
+                  setEmptyingTrash(true);
+                  try {
+                    for (const doc of trashDocs) {
+                      await permanentlyDeleteDocument(doc.id, (doc as any).sourceTable || (doc as any).source || 'employee_documents');
+                    }
+                    showToast(t('documents.trashEmptiedSuccess', 'Cestino svuotato con successo'), 'success');
+                    setShowEmptyTrashModal(false);
+                    load();
+                  } catch {
+                    showToast(t('documents.errorEmptyTrash', 'Errore durante lo svuotamento del cestino'), 'error');
+                  } finally {
+                    setEmptyingTrash(false);
+                  }
+                }}
+                disabled={emptyingTrash}
+                style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: '#DC2626', color: '#fff', fontSize: 12, fontWeight: 700, cursor: emptyingTrash ? 'not-allowed' : 'pointer' }}
+              >
+                {emptyingTrash ? t('common.loading', 'Eliminazione...') : t('documents.confirmEmptyTrash', 'Svuota Ora')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

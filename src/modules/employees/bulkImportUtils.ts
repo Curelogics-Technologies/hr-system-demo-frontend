@@ -3,6 +3,26 @@ import { TFunction } from 'i18next';
 import { createEmployee } from '../../api/employees';
 import { Employee, Company, Store, UserRole } from '../../types';
 
+/* ── Header Normalization Helper ────────────────────────────────────────── */
+export function normalizeHeader(raw: string): string {
+  if (!raw) return '';
+  let str = String(raw).trim();
+  // Strip parenthetical text e.g. "Nome (completo)" -> "Nome"
+  str = str.replace(/\([^)]*\)/g, '');
+  // Replace hyphens, underscores, slashes, dots with spaces
+  str = str.replace(/[-_.\/]/g, ' ');
+  // Collapse multiple spaces & lowercase
+  return str.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+export function matchHeaderToField(rawHeader: string): string | undefined {
+  if (!rawHeader) return undefined;
+  const norm = normalizeHeader(rawHeader);
+  if (COLUMN_MAP[norm]) return COLUMN_MAP[norm];
+  const directNorm = rawHeader.trim().toLowerCase();
+  return COLUMN_MAP[directNorm];
+}
+
 /* ── Column header → API field mapping ─────────────────────────────────── */
 export const COLUMN_MAP: Record<string, string> = {
   // English
@@ -11,31 +31,46 @@ export const COLUMN_MAP: Record<string, string> = {
   'email': 'email',
   'role': 'role',
   'company': 'companyName',
+  'company name': 'companyName',
   'store': 'storeName',
+  'store name': 'storeName',
+  'workplace': 'storeName',
+  'work location': 'storeName',
   'supervisor': 'supervisorName',
   'department': 'department',
   'temporary password': 'password',
   'hire date': 'hireDate',
   'contract end': 'contractEndDate',
+  'contract end date': 'contractEndDate',
+  'contract expiry': 'contractEndDate',
   'work schedule': 'workingType',
   'weekly hours': 'weeklyHours',
   'personal email': 'personalEmail',
   'date of birth': 'dateOfBirth',
+  'birth date': 'dateOfBirth',
   'nationality': 'nationality',
   'gender': 'gender',
   'iban': 'iban',
   'country': 'country',
   'state': 'state',
+  'province': 'state',
   'city': 'city',
   'address': 'address',
   'postal code': 'cap',
+  'zip code': 'cap',
+  'cap': 'cap',
   'company phone numbers': 'phone',
+  'phone': 'phone',
+  'mobile': 'phone',
   'marital status': 'maritalStatus',
   'first aid': 'firstAidFlag',
+  'first aider': 'firstAidFlag',
   'contract type': 'contractType',
   'probation period': 'probationMonths',
   'termination date': 'terminationDate',
   'termination type': 'terminationType',
+  'employment status': 'status',
+  'status': 'status',
 
   // Italian
   'nome': 'name',
@@ -45,21 +80,31 @@ export const COLUMN_MAP: Record<string, string> = {
   'società': 'companyName',
   'societa': 'companyName',
   'impresa': 'companyName',
+  'nome azienda': 'companyName',
   'negozio': 'storeName',
   'punto vendita': 'storeName',
   'filiale': 'storeName',
   'sede': 'storeName',
+  'luogo di lavoro': 'storeName',
+  'luogo lavoro': 'storeName',
   'supervisore': 'supervisorName',
   'responsabile': 'supervisorName',
   'dipartimento': 'department',
   'reparto': 'department',
   'password temporanea': 'password',
+  'password': 'password',
   'data di assunzione': 'hireDate',
   'data assunzione': 'hireDate',
   'fine contratto': 'contractEndDate',
+  'data fine contratto': 'contractEndDate',
+  'scadenza contratto': 'contractEndDate',
   'orario di lavoro': 'workingType',
+  'orario lavoro': 'workingType',
+  'tipo orario': 'workingType',
   'ore settimanali': 'weeklyHours',
   'email personale': 'personalEmail',
+  'mail personale': 'personalEmail',
+  'posta elettronica personale': 'personalEmail',
   'data di nascita': 'dateOfBirth',
   'data nascita': 'dateOfBirth',
   'nazionalità': 'nationality',
@@ -68,39 +113,50 @@ export const COLUMN_MAP: Record<string, string> = {
   'sesso': 'gender',
   'nazione': 'country',
   'paese': 'country',
-  'stato': 'state',
-  'provincia': 'state',
+  'stato': 'status', // Fixed: Italian 'Stato' = Attivo/Inattivo status!
+  'stato dipendente': 'status',
+  'stato lavorativo': 'status',
+  'provincia': 'state', // Italian province = state
   'città': 'city',
   'citta': 'city',
   'indirizzo': 'address',
-  'cap': 'cap',
   'codice postale': 'cap',
   'numeri di telefono aziendali': 'phone',
   'telefono aziendale': 'phone',
   'telefono': 'phone',
+  'cellulare': 'phone',
   'stato civile': 'maritalStatus',
   'primo soccorso': 'firstAidFlag',
+  'primo soccorritore': 'firstAidFlag',
   'tipo di contratto': 'contractType',
   'tipo contratto': 'contractType',
   'periodo di prova': 'probationMonths',
   'data di cessazione': 'terminationDate',
   'data cessazione': 'terminationDate',
+  'data di risoluzione': 'terminationDate',
+  'data risoluzione': 'terminationDate',
   'tipo di cessazione': 'terminationType',
   'tipo cessazione': 'terminationType',
+  'tipo risoluzione': 'terminationType',
 };
 
 const ROLE_VALUES: UserRole[] = ['admin', 'hr', 'area_manager', 'store_manager', 'employee'];
 
 const WORKING_TYPE_MAP: Record<string, string> = {
-  'full time': 'full_time', 'full_time': 'full_time', 'fulltime': 'full_time',
-  'part time': 'part_time', 'part_time': 'part_time', 'parttime': 'part_time',
-  'part-time': 'part_time', 'full-time': 'full_time',
+  'full time': 'full_time', 'full_time': 'full_time', 'fulltime': 'full_time', 'full-time': 'full_time',
+  'part time': 'part_time', 'part_time': 'part_time', 'parttime': 'part_time', 'part-time': 'part_time',
+  'tempo pieno': 'full_time', 'tempo parziale': 'part_time',
 };
 
 const GENDER_MAP: Record<string, string> = {
-  'm': 'M', 'male': 'M', 'maschile': 'M',
-  'f': 'F', 'female': 'F', 'femminile': 'F',
+  'm': 'M', 'male': 'M', 'maschile': 'M', 'maschio': 'M', 'uomo': 'M',
+  'f': 'F', 'female': 'F', 'femminile': 'F', 'femmina': 'F', 'donna': 'F',
   'other': 'other', 'altro': 'other',
+};
+
+const STATUS_MAP: Record<string, string> = {
+  'attivo': 'active', 'active': 'active',
+  'inattivo': 'inactive', 'inactive': 'inactive', 'disattivato': 'inactive',
 };
 
 const MARITAL_VALUES = [
@@ -226,13 +282,13 @@ export async function processRow(
   // 1. Map columns
   const mapped: Record<string, string> = {};
   for (const [header, value] of Object.entries(data)) {
-    const key = COLUMN_MAP[header.trim().toLowerCase()];
+    const key = matchHeaderToField(header);
     if (key) mapped[key] = String(value ?? '').trim();
   }
 
   // 2. Required fields validation
   if (!mapped.name) {
-    const hasHeader = Object.keys(data).some(h => COLUMN_MAP[h.trim().toLowerCase()] === 'name');
+    const hasHeader = Object.keys(data).some(h => matchHeaderToField(h) === 'name');
     return { 
       rowIndex, 
       success: false, 
@@ -242,7 +298,7 @@ export async function processRow(
     };
   }
   if (!mapped.surname) {
-    const hasHeader = Object.keys(data).some(h => COLUMN_MAP[h.trim().toLowerCase()] === 'surname');
+    const hasHeader = Object.keys(data).some(h => matchHeaderToField(h) === 'surname');
     return { 
       rowIndex, 
       success: false, 
@@ -252,7 +308,7 @@ export async function processRow(
     };
   }
   if (!mapped.email) {
-    const hasHeader = Object.keys(data).some(h => COLUMN_MAP[h.trim().toLowerCase()] === 'email');
+    const hasHeader = Object.keys(data).some(h => matchHeaderToField(h) === 'email');
     return { 
       rowIndex, 
       success: false, 
@@ -271,7 +327,7 @@ export async function processRow(
 
   // Required personal email
   if (!mapped.personalEmail) {
-    const hasHeader = Object.keys(data).some(h => COLUMN_MAP[h.trim().toLowerCase()] === 'personalEmail');
+    const hasHeader = Object.keys(data).some(h => matchHeaderToField(h) === 'personalEmail');
     return { 
       rowIndex, 
       success: false, 
@@ -290,7 +346,7 @@ export async function processRow(
 
   // Required company
   if (!mapped.companyName) {
-    const hasHeader = Object.keys(data).some(h => COLUMN_MAP[h.trim().toLowerCase()] === 'companyName');
+    const hasHeader = Object.keys(data).some(h => matchHeaderToField(h) === 'companyName');
     return { 
       rowIndex, 
       success: false, 
@@ -302,7 +358,7 @@ export async function processRow(
 
   // Required store
   if (!mapped.storeName) {
-    const hasHeader = Object.keys(data).some(h => COLUMN_MAP[h.trim().toLowerCase()] === 'storeName');
+    const hasHeader = Object.keys(data).some(h => matchHeaderToField(h) === 'storeName');
     return { 
       rowIndex, 
       success: false, 
@@ -369,6 +425,7 @@ export async function processRow(
   // 7. Dropdown fields
   const workingType = mapped.workingType ? (WORKING_TYPE_MAP[mapped.workingType.toLowerCase()] || null) : null;
   const gender = mapped.gender ? (GENDER_MAP[mapped.gender.toLowerCase()] || null) : null;
+  const status = mapped.status ? (STATUS_MAP[mapped.status.toLowerCase()] || 'active') : 'active';
   const maritalStatus = mapped.maritalStatus ? matchDropdown(mapped.maritalStatus, MARITAL_VALUES) : null;
   const contractType = mapped.contractType ? matchDropdown(mapped.contractType, CONTRACT_TYPE_VALUES) : null;
   const terminationType = mapped.terminationType ? matchDropdown(mapped.terminationType, TERMINATION_TYPE_VALUES) : null;
@@ -379,6 +436,7 @@ export async function processRow(
     surname: mapped.surname,
     email: mapped.email,
     role,
+    status,
     uniqueId: generateUniqueId(),
     password: mapped.password || generateTempPassword(),
     storeId,
@@ -484,3 +542,47 @@ export function exportEmployeesToExcel(employees: Employee[], filename = 'employ
 
   XLSX.writeFile(workbook, filename);
 }
+
+/**
+ * Generates and downloads a pre-populated Excel template with standard Italian headers.
+ */
+export function downloadImportTemplateExcel(filename = 'modello_importazione_dipendenti.xlsx'): void {
+  const sampleData = [
+    {
+      'Nome (completo)': 'Mario',
+      'Cognome (completo)': 'Rossi',
+      'E-mail': 'mario.rossi@azienda.it',
+      'Ruolo': 'employee',
+      'Azienda': 'FUSARO UOMO',
+      'Luogo di lavoro': 'Store Roma',
+      'Supervisore': 'Marco Verdi',
+      'Dipartimento': 'Vendite',
+      'Data assunzione': '2024-01-15',
+      'Scadenza contratto': '2025-01-14',
+      'Orario di lavoro': 'Tempo Pieno',
+      'Ore settimanali': 40,
+      'Email personale': 'mario.rossi.personale@email.it',
+      'Data nascita': '1990-05-20',
+      'Nazionalità': 'Italiana',
+      'Genere': 'Maschio',
+      'Stato': 'Attivo',
+      'Provincia': 'RM',
+      'Città': 'Roma',
+      'Indirizzo': 'Via del Corso 100',
+      'CAP': '00186',
+      'Telefono': '+393331234567',
+      'IBAN': 'IT60X0542811101000000123456',
+      'Primo soccorritore': 'Sì',
+      'Stato civile': 'Celibe',
+      'Tipo contratto': 'Tempo Determinato',
+    }
+  ];
+
+  const worksheet = XLSX.utils.json_to_sheet(sampleData);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Dipendenti');
+  worksheet['!cols'] = Array(26).fill({ wch: 22 });
+
+  XLSX.writeFile(workbook, filename);
+}
+

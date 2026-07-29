@@ -5,6 +5,8 @@ export interface SelectOption<T = any> {
   value: string;
   label: string;
   render?: React.ReactNode;
+  /** Compact form shown once selected; falls back to `render`, then `label`. */
+  selectedRender?: React.ReactNode;
   data?: T;
 }
 
@@ -18,6 +20,8 @@ interface CustomSelectProps {
   isClearable?: boolean;
   searchable?: boolean;
   highlightSelected?: boolean;
+  /** Hide the trailing check on the selected row (the row is already tinted). */
+  showCheck?: boolean;
   searchPlaceholder?: string;
   noOptionsMessage?: string;
   menuMaxHeight?: number;
@@ -34,6 +38,7 @@ export default function CustomSelect({
   isClearable = true,
   searchable = true,
   highlightSelected = false,
+  showCheck = true,
   searchPlaceholder = 'Search...',
   noOptionsMessage = 'No options found',
   menuMaxHeight = 280,
@@ -105,7 +110,7 @@ export default function CustomSelect({
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {selectedOption ? (selectedOption.render || selectedOption.label) : placeholder}
+          {selectedOption ? (selectedOption.selectedRender ?? selectedOption.render ?? selectedOption.label) : placeholder}
         </div>
         <div style={{ display: 'flex', alignItems: 'center' }}>
           {isClearable && selectedOption && !disabled ? (
@@ -187,7 +192,7 @@ export default function CustomSelect({
                   }}
                 >
                   <div style={{ flex: 1 }}>{opt.render || opt.label}</div>
-                  {opt.value === value && <Check size={16} color="#9A6808" />}
+                  {showCheck && opt.value === value && <Check size={16} color="#9A6808" />}
                 </div>
               ))
             )}

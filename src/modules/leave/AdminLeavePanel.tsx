@@ -38,6 +38,7 @@ import { translateApiError } from '../../utils/apiErrors';
 import { Store as StoreModel } from '../../types';
 import { useBreakpoint } from '../../hooks/useBreakpoint';
 import { useToast } from '../../context/ToastContext';
+import { formatEmployeeName, matchesEmployeeName } from '../../utils/employeeName';
 
 // ── Status badge ───────────────────────────────────────────────────────────
 
@@ -306,9 +307,8 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
     if (!searchQuery.trim()) return employees;
     const query = searchQuery.toLowerCase();
     return employees.filter(emp => {
-      const fullName = `${emp.name} ${emp.surname}`.toLowerCase();
-      const reverseName = `${emp.surname} ${emp.name}`.toLowerCase();
-      return fullName.includes(query) || reverseName.includes(query);
+      // Either name order finds the person; display order stays name-first.
+      return matchesEmployeeName(emp, query);
     });
   }, [employees, searchQuery]);
 
@@ -673,11 +673,11 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
                           flexShrink: 0,
                         }}>
                           {avatarUrl ? (
-                            <img src={avatarUrl} alt={`${emp.surname ?? ''} ${emp.name ?? ''}`.trim()} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            <img src={avatarUrl} alt={formatEmployeeName(emp)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                           ) : initials}
                         </span>
                         <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {emp.surname} {emp.name}
+                          {formatEmployeeName(emp)}
                         </span>
                       </div>
                     </td>
@@ -733,7 +733,7 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
                   {t('leave.balance_set_title')}
                 </h2>
                 <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-secondary)' }}>
-                  {editTarget.surname} {editTarget.name}
+                  {formatEmployeeName(editTarget)}
                 </p>
               </div>
               <button
@@ -1673,7 +1673,7 @@ export default function AdminLeavePanel() {
     ? null
     : empList.find((emp) => emp.id === selectedCreateEmployeeId) ?? null;
   const selectedCreateEmployeeFullName = selectedCreateEmployee
-    ? `${selectedCreateEmployee.surname} ${selectedCreateEmployee.name}`.trim()
+    ? formatEmployeeName(selectedCreateEmployee)
     : '';
   const selectedCreateEmployeeRoleLabel = selectedCreateEmployee
     ? t(`roles.${selectedCreateEmployee.role}`, selectedCreateEmployee.role)
@@ -2498,7 +2498,7 @@ export default function AdminLeavePanel() {
                         <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--text-muted)' }}>{t('common.loading')}</div>
                       ) : (
                         empList.map((emp) => {
-                          const fullName = `${emp.surname} ${emp.name}`.trim();
+                          const fullName = formatEmployeeName(emp);
                           const roleLabel = t(`roles.${emp.role}`, emp.role);
                           const avatarUrl = getAvatarUrl(emp.avatarFilename);
                           const initials = `${emp.name?.[0] ?? ''}${emp.surname?.[0] ?? ''}`.toUpperCase() || 'U';
