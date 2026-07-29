@@ -13,6 +13,7 @@ import { DatePicker } from '../../components/ui/DatePicker';
 import { TimePicker } from '../../components/ui/TimePicker';
 import { Badge } from '../../components/ui/Badge';
 import { Store as StoreIcon, Clock, AlertTriangle, AlertCircle } from 'lucide-react';
+import { matchesEmployeeName } from '../../utils/employeeName';
 
 interface ShiftPattern {
   dayOfWeek: number;
@@ -313,10 +314,9 @@ export default function ShiftDrawer({
     const normalizedEmployeeQuery = employeeQuery.trim().toLowerCase();
     if (normalizedEmployeeQuery) {
       return list.filter((emp) => {
-        const fullName = `${emp.name} ${emp.surname}`.toLowerCase();
         return (
-          fullName.includes(normalizedEmployeeQuery)
-          || `${emp.surname} ${emp.name}`.toLowerCase().includes(normalizedEmployeeQuery)
+          // Matches either name order; the row itself still renders name-first.
+          matchesEmployeeName(emp, normalizedEmployeeQuery)
           || emp.email.toLowerCase().includes(normalizedEmployeeQuery)
           || emp.role.toLowerCase().includes(normalizedEmployeeQuery)
         );

@@ -17,29 +17,44 @@ import { IconDownload, IconPen, IconTrash, IconRestore, mimeIcon, IconEye, Modal
 import ConfirmModal from '../../../components/ui/ConfirmModal';
 import { Pagination } from '../../../components/ui/Pagination';
 import { useBreakpoint } from '../../../hooks/useBreakpoint';
+import { PersonAvatar, IconButton, FileTypeIcon, StatusTag } from './DocumentUiKit';
+import { CheckSquare } from 'lucide-react';
 
 interface DocumentsTableProps {
   docs: EmployeeDocument[];
   categories: DocumentCategory[];
-  canManage: boolean;
-  isEmployee: boolean;
   onRefresh: () => void;
-  onEdit?: (doc: any) => void;
   isTrash?: boolean;
+  onEditDoc?: (doc: EmployeeDocument) => void;
+  selectionMode?: boolean;
+  setSelectionMode?: (val: boolean) => void;
 }
 
 export const DocumentsTable: React.FC<DocumentsTableProps> = ({ 
   docs, 
   categories, 
-  canManage, 
-  isEmployee, 
   onRefresh, 
-  onEdit, 
-  isTrash 
+  isTrash = false,
+  onEditDoc,
+  selectionMode: externalSelectionMode,
+  setSelectionMode: externalSetSelectionMode,
 }) => {
-  const { user } = useAuth();
   const { t, i18n } = useTranslation();
+  const { user } = useAuth();
   const { showToast } = useToast();
+  const { isMobile } = useBreakpoint();
+
+  const canManage = ['super_admin', 'admin', 'hr'].includes(user?.role || '');
+  const isEmployee = user?.role === 'employee';
+
+  const [internalSelectionMode, setInternalSelectionMode] = useState(false);
+  const selectionMode = externalSelectionMode !== undefined ? externalSelectionMode : internalSelectionMode;
+  const setSelectionMode = externalSetSelectionMode || setInternalSelectionMode;
+
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+
   const [signingDoc, setSigningDoc] = useState<any | null>(null);
   const [deletingDoc, setDeletingDoc] = useState<any | null>(null);
   const [deletingPermanentDoc, setDeletingPermanentDoc] = useState<any | null>(null);
@@ -53,8 +68,29 @@ export const DocumentsTable: React.FC<DocumentsTableProps> = ({
   const [previewLoadingId, setPreviewLoadingId] = useState<number | null>(null);
   const [openMenuId, setOpenMenuId] = useState<number | null>(null);
   const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
-  const { isMobile } = useBreakpoint();
   const pageSize = 10;
+
+  const handleBulkRestore = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setBulkDeleting(true);
+    let failed = 0;
+    for (const id of ids) {
+      try {
+        const targetDoc = docs.find(d => d.id === id);
+        const source = (targetDoc as any)?.source || 'employee_documents';
+        await restoreDocument(id, source);
+      } catch { failed++; }
+    }
+    setBulkDeleting(false);
+    setSelectedIds(new Set());
+    if (failed > 0) {
+      showToast(t('documents.bulkRestorePartialFail', 'Restored with {{failed}} errors', { failed }), 'error');
+    } else {
+      showToast(t('documents.bulkRestoreSuccess', 'Selected documents restored successfully'), 'success');
+    }
+    onRefresh();
+  };
 
   useEffect(() => {
     const handleScrollOrResize = () => {
@@ -86,15 +122,71 @@ export const DocumentsTable: React.FC<DocumentsTableProps> = ({
     }
   };
 
-  // Reset to page 1 when the set of document IDs changes (e.g. search or filter)
+  // Keep the current page valid as the list changes. Snapping back to page 1
+  // on every refresh means deleting a row on page 3 throws the operator back to
+  // the start; only clamp when the current page no longer exists.
+  useEffect(() => {
+    const pages = Math.max(1, Math.ceil(docs.length / pageSize));
+    setCurrentPage(prev => Math.min(prev, pages));
+  }, [docs.length, pageSize]);
+
+  // A genuine change of filter or search does reset to the first page. Detected
+  // by the *set* of ids changing rather than merely its length.
   const prevDocIdsRef = useRef<string>('');
   useEffect(() => {
-    const docIdsString = JSON.stringify(docs.map(d => `${d.id}_${d.title}`));
-    if (prevDocIdsRef.current !== docIdsString) {
-      prevDocIdsRef.current = docIdsString;
-      setCurrentPage(1);
+    const ids = docs.map(d => d.id).sort((a, b) => a - b).join(',');
+    if (prevDocIdsRef.current === '') { prevDocIdsRef.current = ids; return; }
+    if (prevDocIdsRef.current !== ids) {
+      const previous = new Set(prevDocIdsRef.current.split(',').filter(Boolean));
+      const next = docs.map(d => String(d.id));
+      // Rows only removed => a delete, keep the page. Anything else => reset.
+      const onlyRemovals = next.every(id => previous.has(id));
+      prevDocIdsRef.current = ids;
+      if (!onlyRemovals) setCurrentPage(1);
     }
   }, [docs]);
+
+  // Leaving selection mode, or the row set changing, must not leave stale ids.
+  useEffect(() => {
+    if (!selectionMode) { setSelectedIds(new Set()); return; }
+    setSelectedIds(prev => {
+      const alive = new Set(docs.map(d => d.id));
+      const next = new Set(Array.from(prev).filter(id => alive.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [selectionMode, docs]);
+
+  const toggleSelected = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setBulkDeleting(true);
+    let failed = 0;
+    for (const id of ids) {
+      try {
+        // Same call as a single delete, so bulk removal is a soft delete and
+        // lands in the archive exactly like one-by-one deletion.
+        await deleteDocument(id);
+      } catch { failed++; }
+    }
+    setBulkDeleting(false);
+    setConfirmBulkDelete(false);
+    setSelectedIds(new Set());
+    setSelectionMode(false);
+    if (failed > 0) {
+      showToast(t('documents.bulkDeletePartial', '{{done}} moved to archive, {{failed}} could not be deleted', { done: ids.length - failed, failed }), 'error');
+    } else {
+      showToast(t('documents.bulkDeleteDone', '{{count}} document(s) moved to the archive', { count: ids.length }), 'success');
+    }
+    onRefresh();
+  };
 
   function formatDate(iso: string | null | undefined): string {
     if (!iso) return '—';
@@ -234,12 +326,96 @@ export const DocumentsTable: React.FC<DocumentsTableProps> = ({
     );
   }
 
+  const allOnPageSelected = currentDocs.length > 0 && currentDocs.every((d: any) => selectedIds.has(d.id));
+  const canBulkSelect = canManage;
+
   return (
     <>
+    {/* Bulk actions bar. Hidden until the operator opts in, so the normal
+        one-document-at-a-time flow stays uncluttered. */}
+    {canBulkSelect && selectionMode && (
+      <div style={{
+        padding: '8px 16px', borderBottom: '1px solid var(--border)', background: 'var(--background)',
+        display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', minHeight: 44,
+      }}>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={allOnPageSelected}
+            onChange={(e) => {
+              const ids = currentDocs.map((d: any) => d.id);
+              setSelectedIds(prev => {
+                const next = new Set(prev);
+                if (e.target.checked) ids.forEach((id: number) => next.add(id));
+                else ids.forEach((id: number) => next.delete(id));
+                return next;
+              });
+            }}
+          />
+          {t('documents.selectAllOnPage', 'Select all on this page')}
+        </label>
+        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--primary)' }}>
+          {t('documents.nSelected', '{{count}} selected', { count: selectedIds.size })}
+        </span>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button
+            onClick={() => { setSelectionMode(false); setSelectedIds(new Set()); }}
+            style={{ padding: '5px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
+          >
+            {t('common.cancel', 'Cancel')}
+          </button>
+          {isTrash ? (
+            <>
+              <button
+                onClick={handleBulkRestore}
+                disabled={selectedIds.size === 0 || bulkDeleting}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 12px', borderRadius: 8,
+                  border: '1px solid rgba(16,185,129,0.3)', background: 'rgba(16,185,129,0.08)', color: '#059669',
+                  cursor: selectedIds.size === 0 || bulkDeleting ? 'not-allowed' : 'pointer',
+                  opacity: selectedIds.size === 0 || bulkDeleting ? 0.5 : 1, fontSize: 12, fontWeight: 700,
+                }}
+              >
+                <IconRestore /> {bulkDeleting ? t('common.loading') : t('documents.restoreSelected', 'Restore selected')}
+              </button>
+              <button
+                onClick={() => setConfirmBulkDelete(true)}
+                disabled={selectedIds.size === 0 || bulkDeleting}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 12px', borderRadius: 8,
+                  border: '1px solid rgba(220,38,38,0.3)', background: 'rgba(220,38,38,0.06)', color: '#DC2626',
+                  cursor: selectedIds.size === 0 || bulkDeleting ? 'not-allowed' : 'pointer',
+                  opacity: selectedIds.size === 0 || bulkDeleting ? 0.5 : 1, fontSize: 12, fontWeight: 700,
+                }}
+              >
+                <IconTrash /> {bulkDeleting ? t('common.loading') : t('documents.deletePermanentlySelected', 'Permanently delete selected')}
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => setConfirmBulkDelete(true)}
+              disabled={selectedIds.size === 0 || bulkDeleting}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 12px', borderRadius: 8,
+                border: '1px solid rgba(220,38,38,0.3)', background: 'rgba(220,38,38,0.06)', color: '#DC2626',
+                cursor: selectedIds.size === 0 || bulkDeleting ? 'not-allowed' : 'pointer',
+                opacity: selectedIds.size === 0 || bulkDeleting ? 0.5 : 1, fontSize: 12, fontWeight: 700,
+              }}
+            >
+              <IconTrash /> {bulkDeleting ? t('common.loading') : t('documents.moveToArchive', 'Move to archive')}
+            </button>
+          )}
+        </div>
+      </div>
+    )}
+
     <div style={{ overflowX: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, fontFamily: 'var(--font-body)' }}>
         <thead>
           <tr style={{ background: '#0d2137' }}>
+            {canBulkSelect && selectionMode && (
+              <th style={{ padding: '12px 8px 12px 16px', width: 34 }} />
+            )}
             <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 700, color: 'rgba(255,255,255,0.92)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '1.2px' }}>
               {t('documents.fileName')}
             </th>
@@ -273,9 +449,19 @@ export const DocumentsTable: React.FC<DocumentsTableProps> = ({
               onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-warm)')}
               onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
             >
+              {canBulkSelect && selectionMode && (
+                <td style={{ padding: '12px 8px 12px 16px' }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(doc.id)}
+                    onChange={() => toggleSelected(doc.id)}
+                    aria-label={t('documents.selectDocument', 'Select document')}
+                  />
+                </td>
+              )}
               <td style={{ padding: '12px 16px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ fontSize: 18, flexShrink: 0 }}>{mimeIcon(doc.mimeType || doc.mime_type)}</span>
+                  <FileTypeIcon filename={doc.fileName || doc.title || ''} size={28} />
                   <span style={{ color: 'var(--text-primary)', fontWeight: 700, fontSize: 13, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {doc.fileName || doc.title}
                   </span>
@@ -283,15 +469,34 @@ export const DocumentsTable: React.FC<DocumentsTableProps> = ({
               </td>
               {(!isEmployee) && (
                 <td style={{ padding: '12px 16px' }}>
-                  {doc.employeeName || doc.employee_name ? (
-                    <span style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 700 }}>
-                      {doc.employeeName || doc.employee_name}
-                    </span>
-                  ) : (
-                    <span style={{ fontSize: 11, padding: '3px 10px', borderRadius: 999, background: 'rgba(201,151,58,0.12)', color: '#C9973A', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                      ⚠ {t('documents.unassigned')}
-                    </span>
-                  )}
+                  {(() => {
+                    const empName = (doc.employeeName ?? doc.employee_name ?? '').trim();
+                    const empSurname = (doc.employeeSurname ?? doc.employee_surname ?? '').trim();
+                    const fullEmpName = `${empName} ${empSurname}`.trim() || empName;
+                    const hasEmp = Boolean(doc.employeeId || doc.employee_id) && Boolean(fullEmpName);
+
+                    if (hasEmp) {
+                      return (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                          <PersonAvatar
+                            name={empName}
+                            surname={empSurname}
+                            avatarFilename={doc.employeeAvatarFilename ?? doc.employee_avatar_filename}
+                            size={26}
+                          />
+                          <span style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {fullEmpName}
+                          </span>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <span style={{ fontSize: 11.5, color: 'var(--text-muted)', fontWeight: 500 }}>
+                        {t('documents.unassigned', 'Non assegnato')}
+                      </span>
+                    );
+                  })()}
                 </td>
               )}
               <td style={{ padding: '12px 16px', color: 'var(--text-secondary)' }}>
@@ -368,11 +573,28 @@ export const DocumentsTable: React.FC<DocumentsTableProps> = ({
                     </>
                   ) : (
                     <>
-                      <button 
+                      {/* Preview is the action operators reach for most, so on a
+                          wide screen it gets its own button next to the menu. */}
+                      {!isMobile && (
+                        <button
+                          onClick={() => handlePreview(doc)}
+                          title={t('common.preview', 'Preview')}
+                          disabled={previewLoadingId === doc.id}
+                          style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)',
+                            background: 'var(--surface)', color: 'var(--text-secondary)',
+                            cursor: previewLoadingId === doc.id ? 'wait' : 'pointer',
+                          }}
+                        >
+                          {previewLoadingId === doc.id ? '…' : <IconEye />}
+                        </button>
+                      )}
+                      <button
                         onClick={(e) => handleToggleMenu(e, doc.id)}
                         title={t('common.actions', 'Actions')}
-                        style={{ 
-                          display: 'flex', alignItems: 'center', justifyContent: 'center', 
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
                           width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', 
                           background: openMenuId === doc.id ? 'var(--background)' : 'var(--surface)', 
                           color: 'var(--text-secondary)', cursor: 'pointer' 
@@ -404,9 +626,9 @@ export const DocumentsTable: React.FC<DocumentsTableProps> = ({
                               style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 8, border: 'none', background: 'transparent', color: 'var(--text-primary)', cursor: 'pointer', fontSize: 13, textAlign: 'left', fontWeight: 500 }}>
                               <span style={{ opacity: 0.7 }}><IconDownload /></span> {t('documents.download', 'Download')}
                             </button>
-                            {onEdit && canManage && (
+                            {onEditDoc && canManage && (
                               <button 
-                                onClick={() => { onEdit(doc); setOpenMenuId(null); setMenuPos(null); }} 
+                                onClick={() => { onEditDoc(doc); setOpenMenuId(null); setMenuPos(null); }} 
                                 style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 8, border: 'none', background: 'transparent', color: 'var(--text-primary)', cursor: 'pointer', fontSize: 13, textAlign: 'left', fontWeight: 500 }}>
                                 <span style={{ opacity: 0.7 }}><IconPen /></span> {t('common.edit', 'Edit')}
                               </button>
@@ -459,6 +681,15 @@ export const DocumentsTable: React.FC<DocumentsTableProps> = ({
         </div>
       </div>
     )}
+
+    <ConfirmModal
+      open={confirmBulkDelete}
+      title={t('documents.moveToArchive', 'Move to archive')}
+      message={t('documents.bulkDeleteConfirm', '{{count}} document(s) will be moved to the archive. You can restore them from there.', { count: selectedIds.size })}
+      onConfirm={handleBulkDelete}
+      onCancel={() => setConfirmBulkDelete(false)}
+      variant="danger"
+    />
 
     <ConfirmModal
       open={!!deletingDoc}

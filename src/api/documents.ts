@@ -6,6 +6,8 @@ export interface DocumentCategory {
   name: string;
   isActive: boolean;
   createdAt: string;
+  /** How many documents currently sit in this category. */
+  documentCount?: number;
 }
 
 export interface EmployeeDocument {
@@ -208,6 +210,8 @@ export async function uploadDocumentUnified(
     employeeId?: number | null;
     companyId?: number | null;
     extractZip?: boolean;
+    /** Receives 0-100 as the file is transferred, for the step 1 progress bar. */
+    onProgress?: (percent: number) => void;
   }
 ): Promise<any> {
   const formData = new FormData();
@@ -222,13 +226,46 @@ export async function uploadDocumentUnified(
 
   const { data } = await apiClient.post('/documents/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
+    onUploadProgress: options?.onProgress
+      ? (event) => {
+          // Without a known total we can still show motion, but not a real
+          // percentage - cap at 99 so the bar only completes on the response.
+          if (!event.total) return options.onProgress!(99);
+          options.onProgress!(Math.min(99, Math.round((event.loaded * 100) / event.total)));
+        }
+      : undefined,
   });
   return data.data;
 }
 
 
+export interface MatchPreviewEntry {
+  documentId: number | null;
+  fileName: string;
+  matched: boolean;
+  outcome: 'assigned' | 'ambiguous' | 'unmatched';
+  reason: string;
+  employee: { id: number; name: string; surname: string; companyId: number | null } | null;
+  suggestions: Array<{ id: number; name: string; surname: string; companyId: number | null; reason: string }>;
+}
+
+/**
+ * Re-runs employee matching for files already uploaded, without changing
+ * anything. Used when the operator switches company mid-wizard, since company
+ * is a hard gate on auto-assignment.
+ */
+export async function previewDocumentMatches(
+  files: Array<{ documentId?: number; fileName: string }>,
+  companyId: number | null
+): Promise<MatchPreviewEntry[]> {
+  const { data } = await apiClient.post('/documents/match-preview', { files, company_id: companyId });
+  return data.data.files as MatchPreviewEntry[];
+}
+
 export interface DocumentUpdatePayload {
   title: string;
+  /** Category name; must exist and be active for the target company. */
+  category?: string | null;
   employee_id: number | null;
   requires_signature?: boolean;
   expires_at?: string | null;
@@ -267,4 +304,13 @@ export async function getDocumentPreviewUrlGeneric(id: number, mimeType: string,
     responseType: 'blob',
   });
   return window.URL.createObjectURL(new Blob([response.data], { type: mimeType }));
+}
+
+export async function cleanupDraftDocuments(documentIds: number[]): Promise<void> {
+  if (!documentIds || documentIds.length === 0) return;
+  try {
+    await apiClient.post('/documents/cleanup-drafts', { documentIds });
+  } catch {
+    /* ignore */
+  }
 }

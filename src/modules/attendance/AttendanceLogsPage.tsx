@@ -48,7 +48,7 @@ export interface SummaryRow {
   actualBreakMinutes: number;
   breakRecorded: boolean;
   breakNotCompleted: boolean;
-  status: 'leave' | 'absent' | 'pending' | 'in_progress' | 'worked' | 'cancelled';
+  status: 'leave' | 'absent' | 'pending' | 'in_progress' | 'worked' | 'cancelled' | 'day_off';
 }
 
 function formatHoursStr(mins: number): string {
@@ -95,7 +95,7 @@ function getAvatarColor(name: string): string {
   return colors[Math.abs(hash) % colors.length];
 }
 
-export type VarianceKind = 'leave' | 'absent' | 'pending' | 'in_progress' | 'on_time' | 'overtime' | 'undertime' | 'cancelled';
+export type VarianceKind = 'leave' | 'absent' | 'pending' | 'in_progress' | 'on_time' | 'overtime' | 'undertime' | 'cancelled' | 'day_off';
 
 // Single source of truth for how a row's variance is shown. The precomputed
 // row.status already resolves leave / absent / pending / in-progress; here we only
@@ -114,6 +114,8 @@ function varianceDisplay(
   switch (row.status) {
     case 'cancelled':
       return { kind: 'cancelled', text: t('attendance.statusCancelled', 'Annullato'), color: '#9ca3af', bg: 'rgba(156,163,175,0.10)', border: 'rgba(156,163,175,0.30)', icon: '✕' };
+    case 'day_off':
+      return { kind: 'day_off', text: t('attendance.statusDayOff', 'Giorno Libero'), color: '#0891b2', bg: 'rgba(8,145,178,0.10)', border: 'rgba(8,145,178,0.25)', icon: '🏖️' };
     case 'leave':
       return { kind: 'leave', text: t('attendance.statusOnLeave', 'Congedo'), color: '#c9973a', bg: 'rgba(201,151,58,0.10)', border: 'rgba(201,151,58,0.25)', icon: '🌴' };
     case 'pending':
@@ -1127,8 +1129,11 @@ export default function AttendanceLogsPage() {
       if (row.workedMinutes === 0 && row.effectiveScheduledMinutes === 0 && (row.neutralizedMinutes > 0 || row.vacationMinutes > 0 || row.sickMinutes > 0 || row.leaveMinutes > 0)) row.status = 'leave';
       // Nothing due, nothing worked, no leave — but the period's shift(s) were cancelled.
       // Without this the row would fall through to 'worked' with a 0 variance → "On time".
+      // Distinguish planned day-off from regular cancellation via isOffDay flag.
       else if (row.workedMinutes === 0 && row.effectiveScheduledMinutes === 0 && row.neutralizedMinutes === 0
-               && row.shifts.length > 0 && row.shifts.every(s => s.status === 'cancelled')) row.status = 'cancelled';
+               && row.shifts.length > 0 && row.shifts.every(s => s.status === 'cancelled')) {
+        row.status = row.shifts.some((s: any) => s.isOffDay) ? 'day_off' : 'cancelled';
+      }
       else if (row.workedMinutes === 0 && row.effectiveScheduledMinutes > 0) row.status = 'absent';
       else row.status = 'worked';
     }
@@ -1212,7 +1217,7 @@ export default function AttendanceLogsPage() {
       sumAbsent += r.absentMinutes;
       shiftCount += r.shifts.length;
       employeeIds.add(r.userId);
-      if (r.status === 'pending' || r.status === 'in_progress' || r.status === 'cancelled') return;
+      if (r.status === 'pending' || r.status === 'in_progress' || r.status === 'cancelled' || r.status === 'day_off') return;
       if (r.varianceMinutes > 0) sumOvertime += r.varianceMinutes;
       else if (r.varianceMinutes < 0) sumUndertime += Math.abs(r.varianceMinutes);
     });
@@ -2884,7 +2889,7 @@ export default function AttendanceLogsPage() {
                                 </td>
                                 {/* Avanzamento — capped at 100% + tick when complete; over-100% lives in Variance */}
                                 <td style={{ padding: compact ? '6px 10px' : '10px 14px', minWidth: 140 }}>
-                                  {(row.status === 'leave' || row.status === 'pending' || row.status === 'cancelled') ? (
+                                  {(row.status === 'leave' || row.status === 'pending' || row.status === 'cancelled' || row.status === 'day_off') ? (
                                     <span style={{ fontSize: compact ? 12 : 13, fontWeight: 700, color: 'var(--text-muted)' }}>—</span>
                                   ) : (() => {
                                     const denom = row.effectiveScheduledMinutes;
