@@ -82,6 +82,7 @@ import {
   JobPosting, Candidate, Interview, HRAlert, JobRisk, AllInterviewFeedbackComment,
   InterviewFeedbackComment, InterviewNotificationLog,
   CandidateStatus, JobStatus, JobLanguage, JobType, RemoteType, IndeedStatsResponse,
+  InterviewType,
 } from '../../api/ats';
 import { parseCandidateProfile, serializeCandidateProfile, buildCandidateProfile, type CandidateApplicationProfile } from './candidateProfile';
 import DocumentPreviewModal from './DocumentPreviewModal';
@@ -270,15 +271,21 @@ function runIndeedComplianceSuite(data: any): CheckResult[] {
   const titleStr = data.title || '';
   const country = data.country || '';
 
-  // Resolve fallbacks for listing payloads
-  const companyEmail = data.companyEmail || 'hr@fusarouomo.it';
+  // No tenant-specific fallbacks here. This suite exists to report missing
+  // fields, so defaulting them would make the checks below pass on data that is
+  // actually absent — and would surface another company's details while doing it.
+  const companyEmail = data.companyEmail || '';
   const indeedApplyTokenConfigured = data.indeedApplyTokenConfigured !== undefined ? data.indeedApplyTokenConfigured : true;
-  const indeedApplyPostUrl = data.indeedApplyPostUrl || `${import.meta.env.VITE_PUBLIC_URL || window.location.origin}/api/public/indeed-apply/${data.companySlug || 'fusarouomo'}`;
-  const companyName = data.companyName || 'FUSARO UOMO';
+  const companySlug = data.companySlug || '';
+  const indeedApplyPostUrl = data.indeedApplyPostUrl
+    || (companySlug
+      ? `${import.meta.env.VITE_PUBLIC_URL || window.location.origin}/api/public/indeed-apply/${companySlug}`
+      : '');
+  const companyName = data.companyName || '';
   const jobId = data.id || 0;
 
   const frontendBase = (import.meta.env.VITE_FRONTEND_URL || window.location.origin).replace(/\/+$/, '');
-  const jobCompanySlug = data.companySlug || 'fusarouomo';
+  const jobCompanySlug = companySlug;
   const baseJobUrl = `${frontendBase}/careers/${jobCompanySlug}/jobs/${jobId}`;
   const applyUrl = baseJobUrl + (baseJobUrl.includes('?') ? '&' : '?') + 'source=Indeed';
 
@@ -1111,13 +1118,18 @@ const IndeedComplianceModal: React.FC<IndeedComplianceModalProps> = ({ reference
 
       // Perform network check for U4 asynchronously
       const checkU4 = results.find(r => r.id === 'U4');
-      if (checkU4) {
+      const jobCompanySlug = data.companySlug || '';
+      // Without a slug there is no URL to probe. Report that honestly instead of
+      // testing a hardcoded company's page and passing on someone else's result.
+      if (checkU4 && !jobCompanySlug) {
+        checkU4.ok = false;
+        checkU4.problem = 'Company slug is missing, so the public apply URL cannot be verified.';
+      } else if (checkU4) {
         const frontendBase = (import.meta.env.VITE_FRONTEND_URL || window.location.origin).replace(/\/+$/, '');
-        const jobCompanySlug = data.companySlug || 'fusarouomo';
         const jobId = data.id || 0;
         const baseJobUrl = `${frontendBase}/careers/${jobCompanySlug}/jobs/${jobId}`;
         const applyUrl = baseJobUrl + (baseJobUrl.includes('?') ? '&' : '?') + 'source=Indeed';
-        
+
         try {
           const resp = await fetch(applyUrl, { method: 'GET' });
           if (resp.status !== 200) {
@@ -4810,7 +4822,7 @@ const CandidateModal: React.FC<CandidateModalProps> = ({
   const [intDate, setIntDate] = useState('');
   const [intTime, setIntTime] = useState('09:00');
   const [intLocation, setIntLocation] = useState('');
-  const [intType, setIntType] = useState<'phone' | 'in_person'>(candidate.status === 'phone_interview' ? 'phone' : 'in_person');
+  const [intType, setIntType] = useState<InterviewType>(candidate.status === 'phone_interview' ? 'phone' : 'in_person');
   const [intDescription, setIntDescription] = useState('');
   const [intDuration, setIntDuration] = useState<number | ''>('');
   const [intInterviewerId, setIntInterviewerId] = useState<string | null>(null);
@@ -6107,7 +6119,7 @@ const CandidateModal: React.FC<CandidateModalProps> = ({
                       </label>
                       <select
                         value={intType}
-                        onChange={(e) => setIntType(e.target.value as 'phone' | 'in_person')}
+                        onChange={(e) => setIntType(e.target.value as InterviewType)}
                         style={{
                           width: '100%',
                           boxSizing: 'border-box',
@@ -6121,6 +6133,7 @@ const CandidateModal: React.FC<CandidateModalProps> = ({
                       >
                         <option value="phone">📞 {t('ats.phoneInterview')}</option>
                         <option value="in_person">🤝 {t('ats.inPersonInterview')}</option>
+                        <option value="video">🎥 {t('ats.videoInterview', 'Video Interview')}</option>
                       </select>
                     </div>
 
@@ -8885,7 +8898,14 @@ const IndeedPanel: React.FC<{ canEdit: boolean; companyId?: number }> = ({ canEd
     setBotTestStatus('testing');
     setBotTestResult(null);
     try {
-      const companySlug = stats?.companySlug || 'fusaro-uomo';
+      // No slug means we cannot know which careers page to test; guessing one
+      // would show the admin a different company's page as if it were theirs.
+      const companySlug = stats?.companySlug || '';
+      if (!companySlug) {
+        setBotTestStatus('failed');
+        setBotTestResult('No company selected — pick a company to test its careers page.');
+        return;
+      }
       const targetUrl = `${window.location.origin}/careers/${companySlug}`;
       const testUrl = `${getApiBaseUrl()}/ats/test-ssr?url=${encodeURIComponent(targetUrl)}`;
       

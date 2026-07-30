@@ -3,27 +3,34 @@ import { ArrowLeft } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useParams, Link } from 'react-router-dom';
 import { LanguageSwitcher } from '../../components/ui/LanguageSwitcher';
-import { getPublicLegalDocument, LegalDocument } from '../../api/publicCareers';
+import { getPublicLegalDocument, getPublicCompany, LegalDocument, PublicCompany } from '../../api/publicCareers';
 
 export default function CookiePolicyPage() {
   const { companySlug } = useParams<{ companySlug?: string }>();
   const { i18n } = useTranslation();
   const lang = i18n.language?.startsWith('en') ? 'en' : 'it';
-  const params = new URLSearchParams(window.location.search);
 
   const [doc, setDoc] = useState<LegalDocument | null>(null);
+  const [company, setCompany] = useState<PublicCompany | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const companyName = companySlug ? (params.get('companyName') || '') : (doc?.platformCompanyName || '');
-  const companyEmail = companySlug ? (params.get('companyEmail') || '') : (doc?.platformCompanyEmail || '');
+  const companyName = company ? company.name : (doc?.platformCompanyName || '');
+  const companyEmail = company ? (company.companyEmail || '') : (doc?.platformCompanyEmail || '');
 
   useEffect(() => {
     let isMounted = true;
     setLoading(true);
-    getPublicLegalDocument('cookie', lang)
-      .then((data) => {
+
+    const promises: [Promise<LegalDocument>, Promise<PublicCompany | null>] = [
+      getPublicLegalDocument('cookie', lang),
+      companySlug ? getPublicCompany(companySlug).catch(() => null) : Promise.resolve(null),
+    ];
+
+    Promise.all(promises)
+      .then(([docData, companyData]) => {
         if (isMounted) {
-          setDoc(data);
+          setDoc(docData);
+          setCompany(companyData);
           setLoading(false);
         }
       })
@@ -31,10 +38,11 @@ export default function CookiePolicyPage() {
         console.error('Failed to load cookie policy from DB:', err);
         if (isMounted) setLoading(false);
       });
+
     return () => {
       isMounted = false;
     };
-  }, [lang]);
+  }, [lang, companySlug]);
 
   const convertMarkdownToHtml = (md: string) => {
     if (!md) return '';

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Phone, Users, MapPin, Calendar, Clock, User, Briefcase, Trash2, Save, Building2, Store as StoreIcon } from 'lucide-react';
+import { X, Phone, Users, Video, MapPin, Calendar, Clock, User, Briefcase, Trash2, Save, Building2, Store as StoreIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Interview } from '../../api/ats';
 import { getAvatarUrl } from '../../api/client';
@@ -9,7 +9,7 @@ import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { DatePicker } from '../../components/ui/DatePicker';
 import { TimePicker } from '../../components/ui/TimePicker';
-import { fullName, initials, formatDuration } from './atsCalendarUtils';
+import { fullName, initials, formatDuration, INTERVIEW_TYPE_PALETTES } from './atsCalendarUtils';
 
 interface InterviewDetailsModalProps {
   interview: Interview;
@@ -21,6 +21,7 @@ interface InterviewDetailsModalProps {
 const INTERVIEW_TYPE_OPTIONS = [
   { value: 'phone', label: 'Phone Interview', icon: Phone },
   { value: 'in_person', label: 'In-Person Interview', icon: Users },
+  { value: 'video', label: 'Video Interview', icon: Video },
 ];
 
 export default function InterviewDetailsModal({
@@ -61,6 +62,9 @@ export default function InterviewDetailsModal({
   const interviewerFullName = interview.interviewerName
     ? fullName(interview.interviewerName, interview.interviewerSurname || '')
     : null;
+
+  const typePalette =
+    INTERVIEW_TYPE_PALETTES[interviewType] ?? INTERVIEW_TYPE_PALETTES.in_person;
 
   const handleSave = async () => {
     setSaving(true);
@@ -201,16 +205,17 @@ export default function InterviewDetailsModal({
             style={{
               marginBottom: 18,
               padding: 16,
-              background: 'linear-gradient(135deg, rgba(59,130,246,0.08) 0%, rgba(147,197,253,0.08) 100%)',
+              background: 'var(--surface-warm)',
               borderRadius: 10,
-              border: '1px solid rgba(59,130,246,0.2)',
+              border: '1px solid var(--border)',
+              borderLeft: '3px solid var(--primary)',
             }}
           >
             <div
               style={{
                 fontSize: '0.65rem',
                 fontWeight: 700,
-                color: '#1e40af',
+                color: 'var(--primary)',
                 marginBottom: 12,
                 textTransform: 'uppercase',
                 letterSpacing: 0.8,
@@ -232,8 +237,8 @@ export default function InterviewDetailsModal({
                     height: 50,
                     borderRadius: '50%',
                     objectFit: 'cover',
-                    border: '3px solid rgba(59,130,246,0.3)',
-                    boxShadow: '0 4px 12px rgba(59,130,246,0.15)',
+                    border: '3px solid rgba(13, 33, 55, 0.14)',
+                    boxShadow: '0 4px 12px rgba(13, 33, 55, 0.10)',
                   }}
                 />
               ) : (
@@ -245,22 +250,22 @@ export default function InterviewDetailsModal({
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    background: 'linear-gradient(135deg, #1e3a5f, #3a7bd5)',
+                    background: 'linear-gradient(135deg, var(--primary) 0%, var(--primary-mid) 100%)',
                     color: '#fff',
                     fontSize: '1rem',
                     fontWeight: 800,
-                    border: '3px solid rgba(59,130,246,0.3)',
-                    boxShadow: '0 4px 12px rgba(59,130,246,0.15)',
+                    border: '3px solid rgba(13, 33, 55, 0.14)',
+                    boxShadow: '0 4px 12px rgba(13, 33, 55, 0.10)',
                   }}
                 >
                   {candidateInitials}
                 </div>
               )}
               <div>
-                <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#1e40af', marginBottom: 3 }}>
+                <div style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 3 }}>
                   {candidateFullName}
                 </div>
-                <div style={{ fontSize: '0.8rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: 5 }}>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 5 }}>
                   <Briefcase size={13} />
                   {interview.positionTitle || t('ats.noPosition', 'No position specified')}
                 </div>
@@ -273,16 +278,19 @@ export default function InterviewDetailsModal({
             style={{
               marginBottom: 18,
               padding: 16,
-              background: 'linear-gradient(135deg, rgba(201,151,58,0.08) 0%, rgba(251,191,36,0.08) 100%)',
+              background: 'var(--surface-warm)',
               borderRadius: 10,
-              border: '1px solid rgba(201,151,58,0.2)',
+              border: '1px solid var(--border)',
+              // Accent bar picks up the interview type's colour so the modal
+              // visually matches the block the user clicked to open it.
+              borderLeft: `3px solid ${typePalette.leftBorder}`,
             }}
           >
             <div
               style={{
                 fontSize: '0.65rem',
                 fontWeight: 700,
-                color: '#92400e',
+                color: typePalette.text,
                 marginBottom: 14,
                 textTransform: 'uppercase',
                 letterSpacing: 0.8,
@@ -313,6 +321,10 @@ export default function InterviewDetailsModal({
                   {INTERVIEW_TYPE_OPTIONS.map((option) => {
                     const Icon = option.icon;
                     const isSelected = interviewType === option.value;
+                    // Each option previews its own calendar colour, so the choice
+                    // made here is recognisable later in the grid.
+                    const optionPalette =
+                      INTERVIEW_TYPE_PALETTES[option.value] ?? INTERVIEW_TYPE_PALETTES.in_person;
                     return (
                       <button
                         key={option.value}
@@ -322,9 +334,9 @@ export default function InterviewDetailsModal({
                           padding: '10px 12px',
                           borderRadius: 8,
                           border: isSelected
-                            ? '2px solid var(--primary)'
+                            ? `2px solid ${optionPalette.leftBorder}`
                             : '1px solid var(--border)',
-                          background: isSelected ? 'rgba(13,33,55,0.05)' : 'var(--surface)',
+                          background: isSelected ? optionPalette.bg : 'var(--surface)',
                           cursor: 'pointer',
                           display: 'flex',
                           flexDirection: 'column',
@@ -335,13 +347,13 @@ export default function InterviewDetailsModal({
                       >
                         <Icon
                           size={20}
-                          color={isSelected ? 'var(--primary)' : 'var(--text-muted)'}
+                          color={isSelected ? optionPalette.iconColor : 'var(--text-muted)'}
                         />
                         <span
                           style={{
                             fontSize: '0.75rem',
-                            fontWeight: 600,
-                            color: isSelected ? 'var(--primary)' : 'var(--text-secondary)',
+                            fontWeight: isSelected ? 700 : 600,
+                            color: isSelected ? optionPalette.text : 'var(--text-secondary)',
                           }}
                         >
                           {t(`ats.interviewType.${option.value}`, option.label)}
@@ -356,7 +368,7 @@ export default function InterviewDetailsModal({
                     const Icon = INTERVIEW_TYPE_ICONS[interview.interviewType];
                     return (
                       <>
-                        <Icon size={18} color="var(--text-secondary)" />
+                        <Icon size={18} color={typePalette.iconColor} />
                         <span style={{ fontSize: '0.9rem', fontWeight: 600 }}>
                           {t(`ats.interviewType.${interview.interviewType}`, interview.interviewType)}
                         </span>
@@ -480,16 +492,17 @@ export default function InterviewDetailsModal({
               style={{
                 marginBottom: 18,
                 padding: 16,
-                background: 'linear-gradient(135deg, rgba(124,58,237,0.08) 0%, rgba(168,85,247,0.08) 100%)',
+                background: 'var(--surface-warm)',
                 borderRadius: 10,
-                border: '1px solid rgba(124,58,237,0.2)',
+                border: '1px solid var(--border)',
+                borderLeft: '3px solid var(--accent)',
               }}
             >
               <div
                 style={{
                   fontSize: '0.65rem',
                   fontWeight: 700,
-                  color: '#6b21a8',
+                  color: 'var(--accent-hover)',
                   marginBottom: 12,
                   textTransform: 'uppercase',
                   letterSpacing: 0.8,
@@ -510,16 +523,16 @@ export default function InterviewDetailsModal({
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    background: 'linear-gradient(135deg, #7C3AED, #A855F7)',
+                    background: 'linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%)',
                     color: '#fff',
                     fontSize: '0.85rem',
                     fontWeight: 800,
-                    border: '2px solid rgba(124,58,237,0.3)',
+                    border: '2px solid rgba(201, 151, 58, 0.30)',
                   }}
                 >
                   {interviewerFullName.charAt(0).toUpperCase()}
                 </div>
-                <span style={{ fontSize: '0.95rem', fontWeight: 700, color: '#6b21a8' }}>
+                <span style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                   {interviewerFullName}
                 </span>
               </div>
@@ -704,7 +717,8 @@ export default function InterviewDetailsModal({
   );
 }
 
-const INTERVIEW_TYPE_ICONS: Record<Interview['interviewType'], typeof Phone> = {
+const INTERVIEW_TYPE_ICONS: Record<string, typeof Phone> = {
   phone: Phone,
   in_person: Users,
+  video: Video,
 };

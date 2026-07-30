@@ -73,11 +73,16 @@ export const DocumentManager: React.FC<DocumentManagerProps> = ({
   const [showCategories, setShowCategories] = useState(false);
   const [editDoc, setEditDoc] = useState<any | null>(null);
 
-  const canManage = ['admin', 'hr'].includes(user?.role || '');
+  const isSuperAdmin = Boolean(user?.isSuperAdmin);
+  const canManage = ['admin', 'hr'].includes(user?.role || '') || isSuperAdmin;
   const isEmployee = user?.role === 'employee';
   const isStoreManager = user?.role === 'store_manager';
 
-  const showTeamTab = !isEmployee && !isStoreManager && !employeeId && permissions?.team_documents === true;
+  const canAccessTeamDocs = !isEmployee && !isStoreManager && (
+    canManage || permissions?.team_documents === true
+  );
+
+  const showTeamTab = canAccessTeamDocs && !employeeId;
 
   const activeDocs = showTeamTab
     ? (activeTab === 'my' ? myDocs : teamDocs)
@@ -86,10 +91,10 @@ export const DocumentManager: React.FC<DocumentManagerProps> = ({
   const docs = view === 'trash' ? trashDocs : activeDocs;
 
   useEffect(() => {
-    if ((isStoreManager || (permissions && permissions.team_documents === false)) && activeTab === 'team') {
+    if (!canAccessTeamDocs && activeTab === 'team') {
       setActiveTab('my');
     }
-  }, [permissions, activeTab, isStoreManager]);
+  }, [canAccessTeamDocs, activeTab]);
 
   const tRef = React.useRef(t);
   tRef.current = t;
@@ -115,7 +120,7 @@ export const DocumentManager: React.FC<DocumentManagerProps> = ({
       let fetchedTeam: EmployeeDocument[] = [];
       let fetchedTrash: EmployeeDocument[] = [];
 
-      const hasTeamPerm = permissions?.team_documents === true && !isStoreManager;
+      const hasTeamPerm = !isStoreManager && (canManage || permissions?.team_documents === true);
 
       if (employeeId) {
         const [my, trash] = await Promise.all([
@@ -165,6 +170,7 @@ export const DocumentManager: React.FC<DocumentManagerProps> = ({
     employeeId,
     isEmployee,
     isStoreManager,
+    canManage,
     user?.companyId,
     permissions?.team_documents,
     authLoading

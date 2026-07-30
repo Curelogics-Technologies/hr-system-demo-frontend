@@ -88,9 +88,25 @@ export function getMonthEnd(date: Date): Date {
 
 // ─── Time Slot Calculations ───────────────────────────────────────────────────
 
-const START_HOUR = 1; // 01:00
-const END_HOUR = 24; // 24:00
+export const START_HOUR = 1; // 01:00
+export const END_HOUR = 24; // 24:00
 const TOTAL_MINS = (END_HOUR - START_HOUR) * 60;
+
+/**
+ * The grid is laid out in fixed pixels rather than percentages so an entry's
+ * height is predictable: a 30-minute interview is always HOUR_ROW_HEIGHT / 2
+ * tall regardless of how tall the viewport is. The previous percentage model
+ * collapsed short interviews to ~20px on a laptop, hiding their labels.
+ */
+export const HOUR_ROW_HEIGHT = 64;
+export const GRID_HEIGHT_PX = (END_HOUR - START_HOUR) * HOUR_ROW_HEIGHT;
+
+/** Shortest entry that can still show one line of text and stay clickable. */
+export const MIN_ENTRY_HEIGHT_PX = 30;
+
+/** Interviews realistically sit inside these hours; used to shade the grid. */
+export const BUSINESS_START_HOUR = 8;
+export const BUSINESS_END_HOUR = 20;
 
 export function timeToMinutes(time: string): number {
   const [h, m] = time.split(':').map(Number);
@@ -103,22 +119,57 @@ export function minutesToTime(minutes: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
-export function timeToPosition(time: string): string {
-  const mins = timeToMinutes(time);
-  const percentage = Math.max(0, Math.min(100, ((mins - START_HOUR * 60) / TOTAL_MINS) * 100));
-  return `${percentage.toFixed(3)}%`;
+/**
+ * The window of hours the weekly grid renders.
+ *
+ * The grid always spans the whole day: an interview can legitimately be booked at
+ * any hour, and hiding empty hours makes the calendar look like it only supports
+ * a fixed working window. The full grid is ~1500px tall, so the page scrolls —
+ * business hours are tinted (see isBusinessHour) to anchor the eye instead.
+ */
+export interface HourRange {
+  startHour: number;
+  endHour: number;
 }
 
-export function durationToWidth(durationMinutes: number): string {
-  const percentage = Math.max(0.5, (durationMinutes / TOTAL_MINS) * 100);
-  return `${percentage.toFixed(3)}%`;
+export const FULL_DAY_RANGE: HourRange = { startHour: START_HOUR, endHour: END_HOUR };
+
+export function gridHeightPx(range: HourRange): number {
+  return (range.endHour - range.startHour) * HOUR_ROW_HEIGHT;
 }
 
-export function getHourLabels(): string[] {
+/** Distance in px from the top of the grid to the given wall-clock time. */
+export function timeToOffsetPx(time: string, startHour: number = START_HOUR): number {
+  const mins = timeToMinutes(time) - startHour * 60;
+  const clamped = Math.max(0, Math.min(TOTAL_MINS, mins));
+  return (clamped / 60) * HOUR_ROW_HEIGHT;
+}
+
+export function durationToHeightPx(durationMinutes: number): number {
+  const raw = (durationMinutes / 60) * HOUR_ROW_HEIGHT;
+  return Math.max(MIN_ENTRY_HEIGHT_PX, raw);
+}
+
+export function isBusinessHour(hour: number): boolean {
+  return hour >= BUSINESS_START_HOUR && hour < BUSINESS_END_HOUR;
+}
+
+export function getHourLabels(range: HourRange): string[] {
   return Array.from(
-    { length: END_HOUR - START_HOUR + 1 },
-    (_, i) => `${String(START_HOUR + i).padStart(2, '0')}:00`
+    { length: range.endHour - range.startHour + 1 },
+    (_, i) => `${String(range.startHour + i).padStart(2, '0')}:00`
   );
+}
+
+/**
+ * Current time as a px offset, or null when outside the rendered range.
+ * Drives the "now" marker in the weekly view.
+ */
+export function nowOffsetPx(range: HourRange): number | null {
+  const now = new Date();
+  const mins = now.getHours() * 60 + now.getMinutes();
+  if (mins < range.startHour * 60 || mins > range.endHour * 60) return null;
+  return ((mins - range.startHour * 60) / 60) * HOUR_ROW_HEIGHT;
 }
 
 // ─── Interview Conflict Detection ─────────────────────────────────────────────
@@ -212,40 +263,108 @@ export function getActiveFilterCount(filters: InterviewFilter): number {
   return count;
 }
 
-// ─── Color Schemes ────────────────────────────────────────────────────────────
+// ─── Color Schemes & Palettes ──────────────────────────────────────────────────
+//
+// The app's design system is a single warm light theme: cream surfaces
+// (#FAFAF8 / #F2F0EC), navy primary (#0D2137) and gold accent (#C9973A).
+// Fully saturated purple / emerald / blue tints read as foreign against that,
+// so each palette here is a desaturated, warm-leaning tint whose ink is dark
+// enough to stay legible on both --surface and --surface-warm.
 
-export const INTERVIEW_STATUS_COLORS = {
-  scheduled: {
-    bg: 'rgba(219,234,254,0.76)',
-    border: '#2563eb',
-    text: '#1e40af',
-    leftBorder: '#2563eb',
+export interface EntryPalette {
+  bg: string;
+  border: string;
+  leftBorder: string;
+  text: string;
+  iconColor: string;
+  glow?: string;
+}
+
+export const INTERVIEW_TYPE_PALETTES: Record<string, EntryPalette> = {
+  // In-person is the default store interview — anchored to the navy brand hue.
+  in_person: {
+    bg: '#EDF1F6',
+    border: 'rgba(47, 90, 133, 0.20)',
+    leftBorder: '#2F5A85',
+    text: '#1B3A5B',
+    iconColor: '#2F5A85',
   },
+  // Warm plum: clearly distinct from navy without introducing a cold hue.
+  phone: {
+    bg: '#F5EFF6',
+    border: 'rgba(122, 84, 128, 0.20)',
+    leftBorder: '#7A5480',
+    text: '#4E3253',
+    iconColor: '#7A5480',
+  },
+  // Muted teal: separates video from both navy and plum at a glance.
+  video: {
+    bg: '#E9F3F2',
+    border: 'rgba(47, 125, 116, 0.20)',
+    leftBorder: '#2F7D74',
+    text: '#1C4F49',
+    iconColor: '#2F7D74',
+  },
+};
+
+/**
+ * Status palettes override the type palette when the interview is no longer
+ * simply "upcoming" — a finished or cancelled interview should recede visually
+ * so the eye lands on what still needs action.
+ */
+export const INTERVIEW_STATUS_COLORS: Record<string, EntryPalette> = {
+  scheduled: INTERVIEW_TYPE_PALETTES.in_person,
   completed: {
-    bg: 'rgba(220,252,231,0.76)',
-    border: '#16a34a',
-    text: '#15803d',
-    leftBorder: '#16a34a',
+    bg: '#EDF4EE',
+    border: 'rgba(76, 122, 85, 0.20)',
+    leftBorder: '#4C7A55',
+    text: '#2C4A32',
+    iconColor: '#4C7A55',
   },
   cancelled: {
-    bg: 'rgba(254,226,226,0.76)',
-    border: '#dc2626',
-    text: '#991b1b',
-    leftBorder: '#dc2626',
+    bg: '#F4F3F0',
+    border: 'rgba(154, 150, 141, 0.28)',
+    leftBorder: '#9A968D',
+    text: '#78736A',
+    iconColor: '#9A968D',
   },
   rescheduled: {
-    bg: 'rgba(254,243,199,0.78)',
-    border: '#d97706',
-    text: '#92400e',
-    leftBorder: '#d97706',
+    bg: '#FBF4E6',
+    border: 'rgba(201, 151, 58, 0.28)',
+    leftBorder: '#C9973A',
+    text: '#7A5A15',
+    iconColor: '#C9973A',
   },
-} as const;
-
-export const CONFLICT_COLORS = {
-  bg: 'rgba(251,191,36,0.12)',
-  border: '#f59e0b',
-  text: '#92400e',
 };
+
+/** Burnt orange: reads as a warning beside gold without colliding with it. */
+export const CONFLICT_COLORS: EntryPalette = {
+  bg: '#FBEFE4',
+  border: 'rgba(180, 99, 42, 0.42)',
+  leftBorder: '#B4632A',
+  text: '#7A3D14',
+  iconColor: '#B4632A',
+  glow: '0 0 0 1px rgba(180, 99, 42, 0.18), 0 2px 6px rgba(180, 99, 42, 0.18)',
+};
+
+/**
+ * Single source of truth for how an entry is coloured.
+ *
+ * Precedence is deliberate: cancelled and completed win over a conflict flag,
+ * because flagging an overlap on an interview that is already finished or called
+ * off is noise the user cannot act on.
+ */
+export function resolveEntryPalette(
+  interviewType: string,
+  status: string,
+  hasConflictFlag: boolean,
+): EntryPalette {
+  if (status === 'cancelled') return INTERVIEW_STATUS_COLORS.cancelled;
+  if (status === 'completed') return INTERVIEW_STATUS_COLORS.completed;
+  if (hasConflictFlag) return CONFLICT_COLORS;
+  if (status === 'rescheduled') return INTERVIEW_STATUS_COLORS.rescheduled;
+  return INTERVIEW_TYPE_PALETTES[interviewType] ?? INTERVIEW_TYPE_PALETTES.in_person;
+}
 
 // ─── Helper Functions ─────────────────────────────────────────────────────────
 

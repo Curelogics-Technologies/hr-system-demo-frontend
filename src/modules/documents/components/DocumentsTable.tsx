@@ -68,6 +68,9 @@ export const DocumentsTable: React.FC<DocumentsTableProps> = ({
   const [previewLoadingId, setPreviewLoadingId] = useState<number | null>(null);
   const [openMenuId, setOpenMenuId] = useState<number | null>(null);
   const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
+  // Text content for formats an iframe cannot render (XML, TXT, CSV).
+  const [previewText, setPreviewText] = useState<string>('');
+  const [previewTextLoading, setPreviewTextLoading] = useState(false);
   const pageSize = 10;
 
   const handleBulkRestore = async () => {
@@ -121,6 +124,31 @@ export const DocumentsTable: React.FC<DocumentsTableProps> = ({
       setOpenMenuId(docId);
     }
   };
+
+  // Read the blob behind a text-like preview so it can be shown as text.
+  // Capped so a huge export cannot lock the browser up.
+  useEffect(() => {
+    if (!previewDocUrl) { setPreviewText(''); return; }
+    const isText = ['xml', 'txt', 'csv'].some(ext => previewDocName.toLowerCase().endsWith(`.${ext}`))
+      || ['application/xml', 'text/xml', 'text/plain', 'text/csv'].includes(previewDocMimeType);
+    if (!isText) { setPreviewText(''); return; }
+
+    let cancelled = false;
+    const MAX_CHARS = 200_000;
+    setPreviewTextLoading(true);
+    fetch(previewDocUrl)
+      .then(r => r.text())
+      .then(text => {
+        if (cancelled) return;
+        setPreviewText(text.length > MAX_CHARS
+          ? `${text.slice(0, MAX_CHARS)}\n\n… ${t('documents.previewTruncated', 'truncated — download the file to see the rest')}`
+          : text);
+      })
+      .catch(() => { if (!cancelled) setPreviewText(t('documents.previewTextError', 'Could not read this file as text.')); })
+      .finally(() => { if (!cancelled) setPreviewTextLoading(false); });
+
+    return () => { cancelled = true; };
+  }, [previewDocUrl, previewDocName, previewDocMimeType, t]);
 
   // Keep the current page valid as the list changes. Snapping back to page 1
   // on every refresh means deleting a row on page 3 throws the operator back to
@@ -329,6 +357,10 @@ export const DocumentsTable: React.FC<DocumentsTableProps> = ({
   const allOnPageSelected = currentDocs.length > 0 && currentDocs.every((d: any) => selectedIds.has(d.id));
   const canBulkSelect = canManage;
 
+  /** Formats a browser cannot display but that are still readable as text. */
+  const isTextPreview = ['xml', 'txt', 'csv'].some(ext => previewDocName.toLowerCase().endsWith(`.${ext}`))
+    || ['application/xml', 'text/xml', 'text/plain', 'text/csv'].includes(previewDocMimeType);
+
   return (
     <>
     {/* Bulk actions bar. Hidden until the operator opts in, so the normal
@@ -470,22 +502,36 @@ export const DocumentsTable: React.FC<DocumentsTableProps> = ({
               {(!isEmployee) && (
                 <td style={{ padding: '12px 16px' }}>
                   {(() => {
-                    const empName = (doc.employeeName ?? doc.employee_name ?? '').trim();
+                    const rawName = (doc.employeeName ?? doc.employee_name ?? '').trim();
                     const empSurname = (doc.employeeSurname ?? doc.employee_surname ?? '').trim();
-                    const fullEmpName = `${empName} ${empSurname}`.trim() || empName;
+
+                    let fullEmpName = rawName;
+                    if (empSurname && !fullEmpName.toLowerCase().includes(empSurname.toLowerCase())) {
+                      fullEmpName = `${fullEmpName} ${empSurname}`.trim();
+                    }
+                    if (!fullEmpName) {
+                      fullEmpName = (doc.employeeFirstName ?? '').trim();
+                    }
+
                     const hasEmp = Boolean(doc.employeeId || doc.employee_id) && Boolean(fullEmpName);
+                    const displayEmpName = fullEmpName.length > 24
+                      ? `${fullEmpName.slice(0, 24)}...`
+                      : fullEmpName;
 
                     if (hasEmp) {
                       return (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                           <PersonAvatar
-                            name={empName}
-                            surname={empSurname}
+                            name={doc.employeeFirstName ?? rawName.split(' ')[0] ?? ''}
+                            surname={empSurname || (rawName.split(' ').length > 1 ? rawName.split(' ').slice(1).join(' ') : '')}
                             avatarFilename={doc.employeeAvatarFilename ?? doc.employee_avatar_filename}
                             size={26}
                           />
-                          <span style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {fullEmpName}
+                          <span
+                            title={fullEmpName}
+                            style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                          >
+                            {displayEmpName}
                           </span>
                         </div>
                       );
@@ -753,11 +799,27 @@ export const DocumentsTable: React.FC<DocumentsTableProps> = ({
               </button>
             </div>
           ) : previewDocMimeType?.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].some(ext => previewDocName.toLowerCase().endsWith(`.${ext}`)) ? (
-            <img 
-              src={previewDocUrl} 
-              style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} 
-              alt={previewDocName} 
+            <img
+              src={previewDocUrl}
+              style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+              alt={previewDocName}
             />
+          ) : isTextPreview ? (
+            // XML / TXT / CSV render as text. A browser iframe would either
+            // download them or show a parser error, so read the blob instead.
+            <div style={{ width: '100%', height: '100%', overflow: 'auto', background: 'var(--surface)' }}>
+              {previewTextLoading ? (
+                <div style={{ padding: 24, fontSize: 13, color: 'var(--text-muted)' }}>{t('common.loading')}</div>
+              ) : (
+                <pre style={{
+                  margin: 0, padding: 18, fontSize: 12, lineHeight: 1.55,
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+                  color: 'var(--text-primary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                }}>
+                  {previewText}
+                </pre>
+              )}
+            </div>
           ) : (
             <iframe 
               src={previewDocUrl} 

@@ -75,27 +75,48 @@ export default function ATSMonthlyCalendar({
   }, [year, month]);
 
   return (
-    <div style={{ padding: 16, overflowX: 'auto' }}>
-      <div style={{ minWidth: 1200 }}>
-        {/* Day headers */}
+    <div
+      style={{
+        // Natural height — the page shell owns the vertical scroll, so the month
+        // grid is never clipped and there is only one scrollbar on screen.
+        overflowX: 'auto',
+        width: '100%',
+        padding: 16,
+        background: 'var(--surface)',
+      }}
+    >
+      <div style={{ minWidth: 860 }}>
+        {/* Day headers — sticky so weekday names survive vertical scrolling */}
         <div
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
-            gap: 4,
-            marginBottom: 8,
+            gap: 5,
+            marginBottom: 6,
+            position: 'sticky',
+            // Sticks flush with the scrollport. A negative offset would let the
+            // row scroll partly out of view before pinning, clipping the labels.
+            top: 0,
+            zIndex: 20,
+            background: 'var(--surface)',
+            paddingTop: 4,
+            paddingBottom: 6,
           }}
         >
-          {DAY_LABELS.map((label) => (
+          {DAY_LABELS.map((label, idx) => (
             <div
               key={label}
               style={{
                 textAlign: 'center',
-                fontWeight: 600,
+                fontWeight: 800,
+                fontSize: '0.68rem',
+                letterSpacing: 0.6,
+                textTransform: 'uppercase',
                 fontFamily: 'var(--font-display)',
-                color: 'var(--primary)',
-                padding: '4px 0',
-                fontSize: '0.85rem',
+                color: idx >= 5 ? 'var(--text-muted)' : 'var(--primary)',
+                padding: '5px 0',
+                borderRadius: 5,
+                background: idx >= 5 ? 'var(--surface-warm)' : 'transparent',
               }}
             >
               {label}
@@ -108,12 +129,27 @@ export default function ATSMonthlyCalendar({
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
-            gap: 4,
+            gap: 5,
           }}
         >
           {cells.map((date, idx) => {
+            const isWeekendCol = idx % 7 >= 5;
+
+            // Leading/trailing blanks keep the grid rectangular; tint them so the
+            // month's real boundaries are obvious at a glance.
             if (!date) {
-              return <div key={`empty-${idx}`} style={{ minHeight: 104 }} />;
+              return (
+                <div
+                  key={`empty-${idx}`}
+                  style={{
+                    minHeight: 108,
+                    borderRadius: 7,
+                    border: '1px dashed var(--border)',
+                    background: 'var(--surface-warm)',
+                    opacity: 0.5,
+                  }}
+                />
+              );
             }
 
             const dateStr = formatDate(date);
@@ -127,15 +163,23 @@ export default function ATSMonthlyCalendar({
                 key={dateStr}
                 style={{
                   minWidth: 0,
-                  minHeight: 92,
-                  borderRadius: 6,
+                  minHeight: 108,
+                  borderRadius: 7,
                   border: isTodayCell ? '2px solid var(--accent)' : '1px solid var(--border)',
                   padding: 7,
                   cursor: 'pointer',
-                  background: isTodayCell ? 'rgba(201, 151, 58, 0.06)' : 'var(--surface)',
-                  transition: 'background 0.15s',
+                  background: isTodayCell
+                    ? 'rgba(201, 151, 58, 0.06)'
+                    : isWeekendCol
+                      ? 'var(--surface-warm)'
+                      : 'var(--surface)',
+                  transition: 'box-shadow 0.15s, border-color 0.15s',
                   position: 'relative',
-                  boxShadow: hasInterviews ? 'var(--shadow-xs)' : undefined,
+                  boxShadow: isHovered
+                    ? '0 4px 14px rgba(13, 33, 55, 0.12)'
+                    : hasInterviews
+                      ? 'var(--shadow-xs)'
+                      : undefined,
                 }}
                 onMouseEnter={() => setHoveredDay(dateStr)}
                 onMouseLeave={() => setHoveredDay(null)}
@@ -158,8 +202,8 @@ export default function ATSMonthlyCalendar({
                 >
                   <div
                     style={{
-                      fontWeight: isTodayCell ? 700 : 500,
-                      color: isTodayCell ? 'var(--accent)' : 'var(--text)',
+                      fontWeight: isTodayCell ? 700 : 600,
+                      color: isTodayCell ? 'var(--accent)' : 'var(--text-primary)',
                       fontFamily: 'var(--font-display)',
                       fontSize: '0.9rem',
                       lineHeight: 1,
@@ -235,11 +279,25 @@ export default function ATSMonthlyCalendar({
                     })}
                     {dayInterviews.length > MAX_VISIBLE && (
                       <div
+                        // Clickable: the cell's own handler ignores clicks on
+                        // children, so without this the overflow badge looked
+                        // interactive but did nothing.
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDayClick(dateStr);
+                        }}
+                        title={t('ats.viewAllInterviews', 'View all interviews for this day')}
                         style={{
-                          fontSize: '0.55rem',
-                          fontWeight: 700,
-                          color: 'var(--text-secondary)',
-                          paddingLeft: 8,
+                          fontSize: '0.6rem',
+                          fontWeight: 800,
+                          color: 'var(--primary)',
+                          padding: '2px 6px',
+                          marginTop: 1,
+                          borderRadius: 4,
+                          background: 'var(--surface-warm)',
+                          border: '1px dashed var(--border)',
+                          textAlign: 'center',
+                          cursor: 'pointer',
                         }}
                       >
                         +{dayInterviews.length - MAX_VISIBLE} {t('common.more', 'more')}
@@ -257,13 +315,17 @@ export default function ATSMonthlyCalendar({
                       bottom: idx >= cells.length - 7 ? 'calc(100% + 4px)' : 'auto',
                       right: idx % 7 > 3 ? 0 : 'auto',
                       left: idx % 7 > 3 ? 'auto' : 0,
-                      minWidth: 240,
+                      minWidth: 244,
                       maxWidth: 320,
-                      borderRadius: 10,
-                      border: '1px solid rgba(148,163,184,0.44)',
-                      background: '#ffffff',
-                      boxShadow: '0 14px 36px rgba(15,23,42,0.22)',
-                      padding: '10px 12px',
+                      // A busy day can hold many interviews; cap the popover and
+                      // let it scroll rather than run off the viewport.
+                      maxHeight: 280,
+                      overflowY: 'auto',
+                      borderRadius: 11,
+                      border: '1px solid var(--border)',
+                      background: 'var(--surface)',
+                      boxShadow: '0 18px 44px rgba(13, 33, 55, 0.20)',
+                      padding: '11px 13px',
                       zIndex: 100,
                       pointerEvents: 'none',
                     }}
@@ -315,7 +377,7 @@ export default function ATSMonthlyCalendar({
                                   height: 24,
                                   borderRadius: '50%',
                                   objectFit: 'cover',
-                                  border: '1px solid rgba(148,163,184,0.45)',
+                                  border: '1px solid var(--border)',
                                 }}
                               />
                             ) : (
@@ -327,11 +389,11 @@ export default function ATSMonthlyCalendar({
                                   display: 'flex',
                                   alignItems: 'center',
                                   justifyContent: 'center',
-                                  background: 'linear-gradient(135deg, #1e3a5f, #3a7bd5)',
+                                  background: 'linear-gradient(135deg, var(--primary) 0%, var(--primary-mid) 100%)',
                                   color: '#fff',
                                   fontSize: '0.6rem',
                                   fontWeight: 800,
-                                  border: '1px solid rgba(148,163,184,0.45)',
+                                  border: '1px solid var(--border)',
                                 }}
                               >
                                 {candidateFullName

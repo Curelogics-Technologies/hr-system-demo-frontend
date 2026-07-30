@@ -12,8 +12,10 @@ import { useBreakpoint } from '../../hooks/useBreakpoint';
 import CustomSelect, { SelectOption } from '../../components/ui/CustomSelect';
 import { getCompanies } from '../../api/companies';
 import { ModalBackdrop, ModalHeader } from './components/DocUtils';
+import { CategoriesModal } from './components/Modals';
 import { getAvatarUrl } from '../../api/client';
 import { formatEmployeeName } from '../../utils/employeeName';
+import { translateApiError } from '../../utils/apiErrors';
 import { Trash2, Eye } from 'lucide-react';
 import { getCategories, DocumentCategory } from '../../api/documents';
 import {
@@ -183,6 +185,16 @@ interface UploadFileItem {
   matched?: boolean;
   matchedEmployee?: any;
   /**
+   * The match the server already computed when this file was uploaded. Step 3
+   * seeds from this rather than asking again, so the common path uses data we
+   * know arrived correctly instead of depending on a second round trip.
+   */
+  matchOutcome?: MatchOutcome;
+  matchReason?: MatchReason;
+  matchSuggestions?: MatchSuggestion[];
+  /** Company the server matched against, so we know when a re-match is needed. */
+  matchedForCompanyId?: number | null;
+  /**
    * Real byte size. Files extracted from a ZIP never existed as a browser File,
    * so the size comes from the server rather than from `file.size` - which is
    * what used to render every extracted file as "0.00 MB".
@@ -196,7 +208,9 @@ interface UploadFileItem {
 interface SkippedItem {
   fileName: string;
   size: number;
-  reason: 'unsupported_format';
+  /** unsupported_format = never imported; processing_error = this one file failed. */
+  reason: 'unsupported_format' | 'processing_error';
+  message?: string;
 }
 
 interface DuplicateItem {
@@ -272,9 +286,13 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
   const [analysedFileKey, setAnalysedFileKey] = useState<string>('');
   const [analysing, setAnalysing] = useState(false);
 
+  /** True while step 3 is matching filenames against the company's employees. */
+  const [matching, setMatching] = useState(false);
+
   /** Category applied to the batch; per-document overrides live on each item. */
   const [globalCategory, setGlobalCategory] = useState<string>('');
   const [categories, setCategories] = useState<DocumentCategory[]>([]);
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
 
   // Global Metadata
   const [globalRequiresSignature, setGlobalRequiresSignature] = useState(false);
@@ -495,10 +513,15 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
                 uploaded: true,
                 documentId: extFile.documentId,
                 matched: extFile.matched,
-                matchedEmployee: extFile.employee
+                matchedEmployee: extFile.employee,
+                matchOutcome: extFile.outcome,
+                matchReason: extFile.reason,
+                matchSuggestions: extFile.suggestions ?? [],
+                matchedForCompanyId: defaultCompId,
               });
             }
             if (Array.isArray(response.skipped)) collectedSkipped.push(...response.skipped);
+            if (Array.isArray(response.failed)) collectedSkipped.push(...response.failed);
             if (Array.isArray(response.duplicates)) collectedDuplicates.push(...response.duplicates);
           } else {
             items.push({
@@ -598,7 +621,15 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
 
   const handleGlobalCompany = (val: number | null) => {
     setGlobalCompanyId(val);
-    setFiles(prev => prev.map(item => item.useGlobal ? { ...item, companyId: val } : item));
+    // Categories belong to a company, so the old company's category has to come
+    // off every item too - otherwise the save fails with INVALID_CATEGORY.
+    setFiles(prev => prev.map(item => item.useGlobal
+      ? { ...item, companyId: val, category: undefined }
+      : { ...item, category: item.companyId === val ? item.category : undefined }));
+    // Any assignment suggested for the previous company is no longer valid.
+    setUnmatchedDocs(prev => prev.map(doc => doc.companyId === val
+      ? doc
+      : { ...doc, companyId: val, manualEmployeeId: null, isAutoMatched: false, category: undefined }));
     // A different company means a different employee pool and a different set
     // of categories, so neither the previous fit analysis nor the chosen
     // category can be carried over.
@@ -635,6 +666,60 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
     setFiles(prev => prev.map(item => item.id === id ? { ...item, expanded: !item.expanded } : item));
   };
 
+  /**
+   * Match a batch of documents against the employees of their company.
+   *
+   * Deliberately a plain async function called at the moment the operator moves
+   * forward, not a useEffect: an effect has to guess *when* to run from a
+   * dependency array, and a re-render mid-flight cancels the in-flight request,
+   * which is how matches silently stopped appearing at all. Here the trigger is
+   * explicit and there is nothing to cancel.
+   */
+  const runMatching = async (docs: UnmatchedItem[]): Promise<UnmatchedItem[]> => {
+    if (docs.length === 0) return docs;
+
+    // Documents can carry their own company override, so match per company.
+    const byCompany = new Map<number | null, UnmatchedItem[]>();
+    for (const doc of docs) {
+      const list = byCompany.get(doc.companyId) ?? [];
+      list.push(doc);
+      byCompany.set(doc.companyId, list);
+    }
+
+    const results = new Map<number, MatchPreviewEntry>();
+    for (const [companyId, group] of byCompany) {
+      const entries = await previewDocumentMatches(
+        group.map(d => ({ documentId: d.documentId, fileName: `${d.editableTitle}${d.fileExtension}` })),
+        companyId,
+      );
+      for (const entry of entries) {
+        if (entry.documentId != null) results.set(entry.documentId, entry);
+      }
+    }
+
+    return docs.map(doc => {
+      const entry = results.get(doc.documentId);
+      if (!entry) return doc;
+
+      // A manual choice the operator already made survives only while that
+      // person still belongs to this document's company.
+      const manualStillValid = doc.manualEmployeeId != null
+        && !doc.isAutoMatched
+        && employees.some(e => e.id === doc.manualEmployeeId && (!doc.companyId || e.companyId === doc.companyId));
+
+      const autoId = entry.outcome === 'assigned' && entry.employee ? entry.employee.id : null;
+
+      return {
+        ...doc,
+        outcome: entry.outcome,
+        reason: entry.reason as MatchReason,
+        suggestions: (entry.suggestions ?? []) as MatchSuggestion[],
+        manualEmployeeId: manualStillValid ? doc.manualEmployeeId : autoId,
+        isAutoMatched: manualStillValid ? false : autoId != null,
+      };
+    });
+  };
+
   const handleSubmit = async () => {
     if (files.length === 0) return;
 
@@ -649,38 +734,12 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
 
     setUploading(true);
     const updatedFiles = [...files];
-    const matchingList: UnmatchedItem[] = [];
+    const docList: UnmatchedItem[] = [];
 
-    // Re-match everything already on the server against the company currently
-    // selected. Grouped per company so each batch is matched in its own scope.
-    const freshMatches = new Map<number, MatchPreviewEntry>();
-    const alreadyUploaded = updatedFiles.filter(f => f.uploaded && f.documentId);
-    if (alreadyUploaded.length > 0) {
-      const byCompany = new Map<number | null, UploadFileItem[]>();
-      for (const item of alreadyUploaded) {
-        const list = byCompany.get(item.companyId) ?? [];
-        list.push(item);
-        byCompany.set(item.companyId, list);
-      }
-      try {
-        for (const [companyId, group] of byCompany) {
-          const entries = await previewDocumentMatches(
-            group.map(g => ({ documentId: g.documentId!, fileName: g.file.name })),
-            companyId
-          );
-          for (const entry of entries) {
-            if (entry.documentId != null) freshMatches.set(entry.documentId, entry);
-          }
-        }
-      } catch {
-        // A failed re-match must not silently fall back to a stale cross-company
-        // assignment - stop and let the operator retry.
-        showToast(t('documents.errorRematch', 'Could not verify employee matches. Please try again.'), 'error');
-        setUploading(false);
-        return;
-      }
-    }
-
+    // Step 2 only uploads and stores metadata. Employee matching happens once,
+    // on entering step 3, against whichever company is selected at that moment -
+    // see the matching effect below. Keeping the two apart is what makes
+    // changing the company in step 2 reliably re-run the match.
     for (let i = 0; i < updatedFiles.length; i++) {
       const item = updatedFiles[i];
       try {
@@ -688,46 +747,55 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
           ? ['admin', 'hr']
           : ['admin', 'hr', 'area_manager', 'store_manager', 'employee'];
 
-        const existingDoc = unmatchedDocs.find(d => d.documentId === item.documentId);
-        
-        if (item.uploaded && item.documentId) {
-          // Files uploaded earlier (typically extracted from a ZIP) were matched
-          // against whatever company was selected at the time. If that changed in
-          // step 2, re-run the match now - company is a hard gate, so a stale
-          // result could otherwise assign across companies.
-          let refreshed = freshMatches.get(item.documentId);
-          const matchedEmpId = (existingDoc && existingDoc.manualEmployeeId !== null && existingDoc.manualEmployeeId !== undefined)
-            ? existingDoc.manualEmployeeId
-            : (refreshed?.employee?.id ?? (item.matchedEmployee?.id || null));
+        type MatchSeed = Pick<UploadFileItem, 'matchOutcome' | 'matchReason' | 'matchSuggestions' | 'matchedEmployee' | 'matchedForCompanyId'>;
 
+        const toEntry = (documentId: number, fileName: string, sizeBytes?: number, seedOverride?: MatchSeed): UnmatchedItem => {
+          const lastDot = fileName.lastIndexOf('.');
+          const previous = unmatchedDocs.find(d => d.documentId === documentId);
+          const seed: MatchSeed = seedOverride ?? item;
+          // Going Back to step 2 and forward again must not discard work: a
+          // manual assignment survives while the company is unchanged. If the
+          // company changed, it is dropped and re-derived by runMatching.
+          const keepManual = previous
+            && previous.companyId === item.companyId
+            && !previous.isAutoMatched
+            && previous.manualEmployeeId != null;
+
+          // Seed from the match the server already returned at upload time.
+          // Only valid while the document is still filed under the company it
+          // was matched against; otherwise runMatching recomputes it.
+          const seedValid = seed.matchedForCompanyId === item.companyId && !!seed.matchOutcome;
+          const seedAutoId = seedValid && seed.matchOutcome === 'assigned' && seed.matchedEmployee
+            ? seed.matchedEmployee.id as number
+            : null;
+
+          return {
+            documentId,
+            fileName,
+            editableTitle: previous ? previous.editableTitle : (lastDot > 0 ? fileName.substring(0, lastDot) : fileName),
+            fileExtension: lastDot > 0 ? fileName.substring(lastDot) : '',
+            manualEmployeeId: keepManual ? previous!.manualEmployeeId : seedAutoId,
+            companyId: item.companyId,
+            sizeBytes,
+            outcome: seedValid ? seed.matchOutcome! : 'unmatched',
+            reason: seedValid ? seed.matchReason : undefined,
+            suggestions: seedValid ? (seed.matchSuggestions ?? []) : [],
+            isAutoMatched: !keepManual && seedAutoId != null,
+          };
+        };
+
+        if (item.uploaded && item.documentId) {
+          // Nothing is assigned here: an abandoned wizard must never leave a
+          // payslip sitting in someone's personal area.
           await updateDocumentGeneric(item.documentId, {
             title: item.file.name,
-            employee_id: matchedEmpId,
+            employee_id: null,
             requires_signature: item.requiresSignature,
             expires_at: item.expiresAt || null,
             visible_to_roles: visibleToRoles,
             company_id: item.companyId,
-            category: item.category || globalCategory || null
           });
-
-          const fileName = item.file.name;
-          const lastDot = fileName.lastIndexOf('.');
-          const initialTitle = lastDot > 0 ? fileName.substring(0, lastDot) : fileName;
-          const extension = lastDot > 0 ? fileName.substring(lastDot) : '';
-
-          matchingList.push({
-            documentId: item.documentId,
-            fileName,
-            editableTitle: existingDoc ? existingDoc.editableTitle : initialTitle,
-            fileExtension: extension,
-            manualEmployeeId: matchedEmpId,
-            companyId: item.companyId,
-            sizeBytes: item.sizeBytes,
-            outcome: refreshed?.outcome ?? (matchedEmpId ? 'assigned' : (item.matched ? 'assigned' : 'unmatched')),
-            reason: (refreshed?.reason as MatchReason) ?? undefined,
-            suggestions: (refreshed?.suggestions as MatchSuggestion[]) ?? [],
-            isAutoMatched: !!matchedEmpId
-          });
+          docList.push(toEntry(item.documentId, item.file.name, item.sizeBytes));
         } else {
           const response = await uploadDocumentUnified(item.file, {
             requiresSignature: item.requiresSignature,
@@ -735,84 +803,59 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
             visibleToRoles,
             employeeId: targetEmployeeId,
             companyId: item.companyId,
-            extractZip: true
+            extractZip: true,
           });
 
           if (response) {
             if (response.isZip && Array.isArray(response.files)) {
               updatedFiles[i] = { ...item, uploaded: true };
-
               for (const extFile of response.files) {
-                const fileName = extFile.fileName;
-                const lastDot = fileName.lastIndexOf('.');
-                const initialTitle = lastDot > 0 ? fileName.substring(0, lastDot) : fileName;
-                const extension = lastDot > 0 ? fileName.substring(lastDot) : '';
-
-                const existingDoc = unmatchedDocs.find(d => d.documentId === extFile.documentId);
-                const isAutoMatched = extFile.matched && extFile.employee;
-                const matchedEmpId = existingDoc ? existingDoc.manualEmployeeId : (isAutoMatched ? extFile.employee.id : null);
-
-                matchingList.push({
-                  documentId: extFile.documentId,
-                  fileName,
-                  editableTitle: existingDoc ? existingDoc.editableTitle : initialTitle,
-                  fileExtension: extension,
-                  manualEmployeeId: matchedEmpId,
-                  companyId: item.companyId,
-                  sizeBytes: extFile.size ?? 0,
-                  outcome: extFile.outcome,
-                  reason: extFile.reason,
-                  suggestions: extFile.suggestions ?? [],
-                  isAutoMatched: existingDoc ? existingDoc.isAutoMatched : !!isAutoMatched
-                });
+                // A ZIP added at step 2 carries its own match on each entry.
+                docList.push(toEntry(extFile.documentId, extFile.fileName, extFile.size, {
+                  matchOutcome: extFile.outcome,
+                  matchReason: extFile.reason,
+                  matchSuggestions: extFile.suggestions ?? [],
+                  matchedEmployee: extFile.employee,
+                  matchedForCompanyId: item.companyId,
+                }));
               }
               if (Array.isArray(response.skipped)) setSkippedFiles(prev => [...prev, ...response.skipped]);
+              if (Array.isArray(response.failed)) setSkippedFiles(prev => [...prev, ...response.failed]);
               if (Array.isArray(response.duplicates)) setDuplicateFiles(prev => [...prev, ...response.duplicates]);
             } else if (response.documentId) {
-              updatedFiles[i] = {
-                ...item,
-                uploaded: true,
-                documentId: response.documentId,
-                matched: response.matched,
-                matchedEmployee: response.employee
-              };
-
-              const fileName = item.file.name;
-              const lastDot = fileName.lastIndexOf('.');
-              const initialTitle = lastDot > 0 ? fileName.substring(0, lastDot) : fileName;
-              const extension = lastDot > 0 ? fileName.substring(lastDot) : '';
-
-              const existingDoc = unmatchedDocs.find(d => d.documentId === response.documentId);
-              const isAutoMatched = response.matched && response.employee;
-              const matchedEmpId = existingDoc ? existingDoc.manualEmployeeId : (isAutoMatched ? response.employee.id : null);
-
-              matchingList.push({
-                documentId: response.documentId,
-                fileName,
-                editableTitle: existingDoc ? existingDoc.editableTitle : initialTitle,
-                fileExtension: extension,
-                manualEmployeeId: matchedEmpId,
-                companyId: item.companyId,
-                sizeBytes: response.size ?? item.file.size,
-                outcome: response.outcome,
-                reason: response.reason,
-                suggestions: response.suggestions ?? [],
-                isAutoMatched: existingDoc ? existingDoc.isAutoMatched : !!isAutoMatched
-              });
+              updatedFiles[i] = { ...item, uploaded: true, documentId: response.documentId };
+              docList.push(toEntry(response.documentId, item.file.name, response.size ?? item.file.size));
             }
           }
         }
       } catch (err: any) {
-        showToast(err?.message || `${t('documents.errorUpload')} (${item.file.name})`, 'error');
+        // Commit what already succeeded before bailing out, otherwise a retry
+        // uploads those files a second time and creates duplicates.
+        setFiles(updatedFiles);
+        if (docList.length > 0) setUnmatchedDocs(docList);
+        showToast(translateApiError(err, t) ?? `${t('documents.errorUpload')} (${item.file.name})`, 'error');
         setUploading(false);
         return;
       }
     }
 
     setFiles(updatedFiles);
-    setUnmatchedDocs(matchingList);
+    setUnmatchedDocs(docList);
     setUploading(false);
+
+    // Show step 3 with its matching screen, then match. Runs every time the
+    // operator advances, so changing the company in step 2 and pressing Next
+    // always produces a fresh set of matches for that company.
     setStep(3);
+    setMatching(true);
+    try {
+      const matched = await runMatching(docList);
+      setUnmatchedDocs(matched);
+    } catch (err) {
+      showToast(translateApiError(err, t) ?? t('documents.errorRematch', 'Could not verify employee matches. Please try again.'), 'error');
+    } finally {
+      setMatching(false);
+    }
   };
 
   const buildFinalUploadedDocs = (currentFiles: UploadFileItem[], manualAssignments: UnmatchedItem[]) => {
@@ -863,6 +906,9 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
       await deleteDocument(docId);
       setUploadedDocs(prev => prev.filter(d => d.documentId !== docId));
       setFiles(prev => prev.filter(f => f.documentId !== docId));
+      // unmatchedDocs is what Confirm iterates over. Leaving the row here would
+      // resurrect the deleted document on Confirm and notify the employee.
+      setUnmatchedDocs(prev => prev.filter(d => d.documentId !== docId));
       showToast(t('documents.deleted'), 'success');
     } catch {
       showToast(t('common.error'), 'error');
@@ -875,10 +921,23 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
       for (const item of unmatchedDocs) {
         const fullTitle = `${item.editableTitle}${item.fileExtension}`;
         const sourceFile = files.find(f => f.documentId === item.documentId);
+
+        // This is the only place an assignment is persisted, so it is also the
+        // place the company gate has to hold. An employee from another company
+        // is dropped rather than saved - the step 4 summary already shows such a
+        // document as unassigned, and the two must agree.
+        const chosen = item.manualEmployeeId != null
+          ? employees.find(e => e.id === item.manualEmployeeId)
+          : undefined;
+        const employeeId = chosen && (!item.companyId || chosen.companyId === item.companyId)
+          ? chosen.id
+          : null;
+
         await updateDocumentGeneric(item.documentId, {
           title: fullTitle,
-          employee_id: item.manualEmployeeId || null,
-          category: item.category || sourceFile?.category || globalCategory || null,
+          employee_id: employeeId,
+          company_id: item.companyId,
+          category: item.category || undefined,
           confirm: true,
           notify: true
         });
@@ -887,8 +946,8 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
       showToast(t('documents.uploaded'), 'success');
       onSuccess();
       onClose();
-    } catch {
-      showToast(t('common.error'), 'error');
+    } catch (err) {
+      showToast(translateApiError(err, t) ?? t('common.error'), 'error');
     } finally {
       setUploading(false);
     }
@@ -1338,6 +1397,62 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
     return null;
   };
 
+  /**
+   * Does the assigned person's name actually appear in the (possibly edited)
+   * filename? Purely advisory - an operator is allowed to assign a document
+   * whose name does not match, but they should be told. Recomputed from
+   * `editableTitle`, so renaming the file to match clears the warning.
+   */
+  const describeAssignmentMismatch = (doc: UnmatchedItem): string | null => {
+    if (doc.manualEmployeeId == null) return null;
+    const emp = employees.find(e => e.id === doc.manualEmployeeId);
+    if (!emp) return null;
+
+    // Wrong company outranks a name mismatch: this assignment will be refused
+    // on save, so say that rather than quibbling about the spelling.
+    if (emp.companyId && doc.companyId && emp.companyId !== doc.companyId) {
+      const comp = companies.find(c => c.id === emp.companyId);
+      return t('documents.warningOtherCompany', 'This person belongs to {{company}} — the document is filed under a different company, so this assignment will not be saved.', {
+        company: comp?.name ?? t('documents.otherCompanyShort', 'other company'),
+      });
+    }
+
+    const strip = (v: string) => (v || '')
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/['’`]/g, '')
+      .toLowerCase();
+
+    // Same tokenisation the backend matcher uses, including a trailing-digit
+    // strip, so the UI and the engine agree on what "matches" means.
+    const tokens = new Set<string>();
+    for (const raw of strip(doc.editableTitle).split(/[^a-z0-9]+/).filter(Boolean)) {
+      tokens.add(raw);
+      const trimmed = raw.replace(/\d+$/, '');
+      if (trimmed.length >= 2) tokens.add(trimmed);
+    }
+    const joined = strip(doc.editableTitle).replace(/[^a-z0-9]/g, '');
+
+    const has = (value: string | null | undefined) => {
+      const parts = strip(value || '').split(/[^a-z0-9]+/).filter(Boolean);
+      if (parts.length === 0) return false;
+      const whole = parts.join('');
+      return tokens.has(whole) || joined.includes(whole) || parts.every(p => tokens.has(p));
+    };
+
+    const firstOk = has(emp.name);
+    const lastOk = has(emp.surname);
+
+    if (firstOk && lastOk) return null;
+    if (!firstOk && !lastOk) {
+      return t('documents.mismatchNone', 'The assigned name does not appear in this filename at all — check you have the right person, or rename the file.');
+    }
+    if (lastOk) {
+      return t('documents.mismatchFirstName', 'Only the surname matches this filename; the first name does not.');
+    }
+    return t('documents.mismatchSurname', 'Only the first name matches this filename; the surname does not.');
+  };
+
   /** Everything the operator should look at before confirming. */
   const problems = (() => {
     const list: Array<{ kind: string; label: string; detail: string; extra?: string | null; documentId?: number }> = [];
@@ -1352,7 +1467,14 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
       });
     }
     for (const s of skippedFiles) {
-      list.push({ kind: 'skipped', label: s.fileName, detail: t('documents.reasonUnsupportedFormat', 'Unsupported format — not imported') });
+      list.push({
+        kind: 'skipped',
+        label: s.fileName,
+        detail: s.reason === 'processing_error'
+          ? t('documents.reasonProcessingError', 'This file could not be read — the other files were processed normally')
+          : t('documents.reasonUnsupportedFormat', 'Unsupported format — not imported'),
+        extra: s.message ?? null,
+      });
     }
     for (const d of duplicateFiles) {
       list.push({ kind: 'duplicate', label: d.fileName, detail: t('documents.reasonDuplicate', 'Appears more than once in the archive') });
@@ -1678,23 +1800,62 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
                       <DatePicker value={globalExpiresAt} onChange={handleGlobalExpiry} />
                     </div>
 
-                    <div style={{ position: 'relative', zIndex: 15 }}>
-                      <label style={labelStyle}>
-                        {t('documents.category', 'Category')} <span style={{ color: 'var(--text-muted)', fontWeight: 400, textTransform: 'none' }}>({t('common.optional', 'optional')})</span>
-                      </label>
-                      <CustomSelect
-                        value={globalCategory || null}
-                        onChange={(val) => handleGlobalCategory(val ?? '')}
-                        options={categoryOptions}
-                        placeholder={categories.length === 0
-                          ? t('documents.noCategoriesForCompany', 'No categories for this company')
-                          : t('documents.selectCategory', 'Select a category')}
-                        disabled={!globalCompanyId || categories.length === 0}
-                        isClearable
-                        showCheck={false}
-                        highlightSelected
-                      />
-                    </div>
+                    {/* Category */}
+                    {globalCompanyId && (
+                      <div>
+                        <label style={labelStyle}>
+                          {t('documents.category', 'Categoria')} <span style={{ color: 'var(--text-muted)', fontWeight: 400, textTransform: 'none' }}>({t('common.optional', 'optional')})</span>
+                        </label>
+                        {categories.length > 0 ? (
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                            <div style={{ flex: 1 }}>
+                              <CustomSelect
+                                value={globalCategory || null}
+                                onChange={(val) => handleGlobalCategory(val || '')}
+                                options={categories.filter(c => c.isActive !== false).map(c => {
+                                  const { icon, name: catLabel } = splitCategoryName(c.name);
+                                  return { value: c.name, label: `${icon} ${catLabel}` };
+                                })}
+                                placeholder={t('documents.selectCategory', 'Seleziona categoria...')}
+                                isClearable={true}
+                                searchable={true}
+                                controlMinHeight={38}
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setShowCategoryModal(true)}
+                              style={{
+                                padding: '8px 12px', borderRadius: 8,
+                                border: '1px solid var(--border)',
+                                background: 'var(--surface-warm)',
+                                color: 'var(--text-secondary)',
+                                fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                                whiteSpace: 'nowrap',
+                                transition: 'all 0.15s',
+                              }}
+                            >
+                              {t('documents.manageCategories', 'Gestisci')}
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setShowCategoryModal(true)}
+                            style={{
+                              padding: '8px 14px', borderRadius: 8,
+                              border: '1px dashed var(--border)',
+                              background: 'var(--surface-warm)',
+                              color: 'var(--primary)',
+                              fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                              width: '100%', textAlign: 'center', height: 38
+                            }}
+                          >
+                            + {t('documents.createFirstCategory', 'Crea la prima categoria')}
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -1887,6 +2048,31 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
                 </div>
               </div>
             </div>
+          ) : step === 3 && matching ? (
+            // Matching runs on entering this step and again after any company
+            // change, so it gets its own screen rather than silently swapping
+            // the rows underneath the operator.
+            <div style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+              minHeight: 320, gap: 16, padding: '0 28px',
+            }}>
+              <div style={{ fontSize: 34, animation: 'pulse 1s infinite' }}>🔍</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--primary)' }}>
+                {t('documents.matchingTitle', 'Matching documents to employees…')}
+              </div>
+              <div style={{ fontSize: 12.5, color: 'var(--text-muted)', textAlign: 'center', maxWidth: 420, lineHeight: 1.5 }}>
+                {t('documents.matchingSubtitle', 'Reading each filename and comparing it with the employees of {{company}}.', {
+                  company: companies.find(c => c.id === globalCompanyId)?.name ?? t('companies.company', 'the selected company'),
+                })}
+              </div>
+              <div style={{ width: '100%', maxWidth: 340, height: 8, borderRadius: 999, background: 'var(--border)', overflow: 'hidden' }}>
+                <div style={{
+                  width: '40%', height: '100%', borderRadius: 999,
+                  background: 'linear-gradient(90deg, var(--primary), #10B981)',
+                  animation: 'indeterminateSlide 1.1s ease-in-out infinite',
+                }} />
+              </div>
+            </div>
           ) : step === 3 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               {/* Assignment progress: the one number that tells an operator
@@ -1951,6 +2137,8 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
                             const assignedEmployee = doc.manualEmployeeId != null
                               ? employees.find(e => e.id === doc.manualEmployeeId)
                               : undefined;
+                            const mismatchWarning = describeAssignmentMismatch(doc);
+                            const otherCompanyHint = explainSuggestions(doc);
                             return (
                               <div
                                 key={doc.documentId}
@@ -2046,42 +2234,34 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
                                         controlMinHeight={38}
                                       />
                                     </div>
-                                    {assignedEmployee && (() => {
-                                      const normFile = doc.fileName.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-                                      const normName = (assignedEmployee.name || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-                                      const normSurname = (assignedEmployee.surname || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-                                      const fileTokens = normFile.split(/[^a-z0-9]+/);
-                                      const nameMatches = normName.length >= 2 && fileTokens.some(t => t.includes(normName) || normName.includes(t));
-                                      const surnameMatches = normSurname.length >= 2 && fileTokens.some(t => t.includes(normSurname) || normSurname.includes(t));
-
-                                      let warningMsg = '';
-                                      if (assignedEmployee.companyId && doc.companyId && assignedEmployee.companyId !== doc.companyId) {
-                                        const comp = companies.find(c => c.id === assignedEmployee.companyId);
-                                        warningMsg = t('documents.warningOtherCompany', 'This person belongs to {{company}}', { company: comp?.name ?? 'a different company' });
-                                      } else if (nameMatches && !surnameMatches) {
-                                        warningMsg = t('documents.warningFirstMatchSurnameDiffers', 'First name matches, but surname differs');
-                                      } else if (surnameMatches && !nameMatches) {
-                                        warningMsg = t('documents.warningSurnameMatchFirstNameDiffers', 'Surname matches, but first name differs');
-                                      } else if (!nameMatches && !surnameMatches) {
-                                        warningMsg = t('documents.warningManualMismatch', 'Name differs from filename');
-                                      }
-                                      const isMismatch = warningMsg !== '';
-                                      if (!isMismatch) return null;
-                                      return (
-                                        <div style={{ marginTop: 6, fontSize: 10.5, color: '#B91C1C', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 5, padding: '4px 7px', background: 'rgba(220,38,38,0.09)', borderRadius: 6, border: '1px solid rgba(220,38,38,0.25)' }}>
-                                          <span>⚠️</span>
-                                          <span>{warningMsg}</span>
-                                        </div>
-                                      );
-                                    })()}
                                   </div>
                                 </div>
+
+                                {/* An assignment whose name does not match the
+                                    filename is allowed, but never silent. Spans
+                                    the whole row rather than sitting under one
+                                    field, and clears as soon as the filename is
+                                    edited to match. */}
+                                {isResolved && mismatchWarning && (
+                                  <div style={{
+                                    marginTop: 9, padding: '7px 9px', borderRadius: 8,
+                                    background: 'rgba(220,38,38,0.07)', border: '1px solid rgba(220,38,38,0.28)',
+                                    display: 'flex', alignItems: 'flex-start', gap: 7,
+                                    fontSize: 11, fontWeight: 600, color: '#B91C1C',
+                                  }}>
+                                    <span aria-hidden style={{ flexShrink: 0 }}>⚠</span>
+                                    <span>{mismatchWarning}</span>
+                                  </div>
+                                )}
 
                                 {!isResolved && (
                                   <div style={{ marginTop: 9, paddingTop: 8, borderTop: '1px dashed var(--border)' }}>
                                     <div style={{ fontSize: 11, color: '#B45309', fontWeight: 600, marginBottom: (doc.suggestions?.length ?? 0) > 0 ? 6 : 0, display: 'flex', alignItems: 'flex-start', gap: 6 }}>
                                       <span aria-hidden style={{ flexShrink: 0 }}>⚠</span>
-                                      <span>{describeMatchReason(doc.reason, doc.suggestions?.length ?? 0, t)}</span>
+                                      <span>
+                                        {describeMatchReason(doc.reason, doc.suggestions?.length ?? 0, t)}
+                                        {otherCompanyHint ? ` — ${otherCompanyHint}` : ''}
+                                      </span>
                                     </div>
                                     {(doc.suggestions?.length ?? 0) > 0 && (
                                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
@@ -2437,6 +2617,20 @@ export const UnifiedUploadWizard: React.FC<Props> = ({ onClose, onSuccess, targe
             </div>
           </ModalBackdrop>
         </div>
+      )}
+
+      {showCategoryModal && (
+        <CategoriesModal
+          onClose={() => {
+            setShowCategoryModal(false);
+            // Refresh categories after managing them
+            if (globalCompanyId) {
+              getCategories(false)
+                .then(all => setCategories(all.filter(c => c.companyId === globalCompanyId)))
+                .catch(() => {});
+            }
+          }}
+        />
       )}
     </div>,
     document.body

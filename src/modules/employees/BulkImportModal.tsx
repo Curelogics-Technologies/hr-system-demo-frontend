@@ -222,14 +222,60 @@ export function BulkImportModal({ open, onClose, onComplete }: Props) {
                   }}>
                     {t('employees.bulkImportGuideTitle', 'Struttura Colonne Excel Supportate')}
                   </div>
-                  <div style={{ padding: 14, color: 'var(--text-secondary)' }}>
-                    <p style={{ margin: '0 0 10px', fontSize: 12, lineHeight: 1.5 }}>
-                      Il sistema riconosce automaticamente i nomi delle colonne in Italiano e Inglese, ignorando parentesi ed eventuali spazi (es. <code>Nome (completo)</code>, <code>Cognome (completo)</code>, <code>Luogo di lavoro</code>, <code>Scadenza contratto</code>, <code>Stato</code>).
-                    </p>
-                    <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.6 }}>
-                      <li><strong>Obbligatori:</strong> Nome, Cognome, Email aziendale, Email personale, Ruolo, Azienda, Negozio/Sede</li>
-                      <li><strong>Opzionali:</strong> Data assunzione, Scadenza contratto, Orario di lavoro (Tempo Pieno/Part-time), Data nascita, Genere (Maschio/Femmina), Primo soccorso (Sì/No), Stato (Attivo/Inattivo)</li>
-                    </ul>
+                  <div style={{ maxHeight: 320, overflow: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                      <thead style={{ position: 'sticky', top: 0, background: 'var(--surface-warm)', zIndex: 1 }}>
+                        <tr>
+                          <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: 'var(--text-muted)', borderBottom: '2px solid var(--border)', whiteSpace: 'nowrap' }}>{t('employees.guideColName', 'Colonna')}</th>
+                          <th style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 700, color: 'var(--text-muted)', borderBottom: '2px solid var(--border)', width: 90 }}>{t('employees.guideColRequired', 'Obbligatorio')}</th>
+                          <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: 'var(--text-muted)', borderBottom: '2px solid var(--border)' }}>{t('employees.guideColFormat', 'Formato')}</th>
+                          <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: 'var(--text-muted)', borderBottom: '2px solid var(--border)' }}>{t('employees.guideColExample', 'Esempio')}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[
+                          { col: 'Nome / Nome (completo)', req: true, fmt: t('employees.guideText', 'Testo'), ex: 'Mario' },
+                          { col: 'Cognome / Cognome (completo)', req: true, fmt: t('employees.guideText', 'Testo'), ex: 'Rossi' },
+                          { col: 'E-mail / Email', req: true, fmt: t('employees.guideEmail', 'Email'), ex: 'mario.rossi@azienda.it' },
+                          { col: 'Email personale', req: true, fmt: t('employees.guideEmail', 'Email'), ex: 'mario@gmail.com' },
+                          { col: 'Ruolo', req: true, fmt: 'employee / hr / admin / area_manager / store_manager', ex: 'employee' },
+                          { col: 'Azienda / Società', req: true, fmt: t('employees.guideText', 'Testo'), ex: 'FUSARO UOMO' },
+                          { col: 'Negozio / Sede / Luogo di lavoro', req: true, fmt: t('employees.guideText', 'Testo'), ex: 'Store Roma' },
+                          { col: 'Supervisore / Responsabile', req: false, fmt: t('employees.guideFullName', 'Nome Cognome'), ex: 'Marco Verdi' },
+                          { col: 'Dipartimento / Reparto', req: false, fmt: t('employees.guideText', 'Testo'), ex: 'Vendite' },
+                          { col: 'Data assunzione', req: false, fmt: 'YYYY-MM-DD / DD/MM/YYYY', ex: '2024-01-15' },
+                          { col: 'Scadenza contratto / Fine contratto', req: false, fmt: 'YYYY-MM-DD / DD/MM/YYYY', ex: '2025-01-14' },
+                          { col: 'Orario di lavoro', req: false, fmt: 'Tempo Pieno / Part-time', ex: 'Tempo Pieno' },
+                          { col: 'Ore settimanali', req: false, fmt: t('employees.guideNumber', 'Numero'), ex: '40' },
+                          { col: 'Data nascita / Data di nascita', req: false, fmt: 'YYYY-MM-DD / DD/MM/YYYY', ex: '1990-05-20' },
+                          { col: 'Genere / Sesso', req: false, fmt: 'Maschio / Femmina / M / F', ex: 'Maschio' },
+                          { col: 'Stato', req: false, fmt: 'Attivo / Inattivo', ex: 'Attivo' },
+                          { col: 'Provincia', req: false, fmt: t('employees.guideText', 'Testo'), ex: 'RM' },
+                          { col: 'Città', req: false, fmt: t('employees.guideText', 'Testo'), ex: 'Roma' },
+                          { col: 'Indirizzo', req: false, fmt: t('employees.guideText', 'Testo'), ex: 'Via del Corso 100' },
+                          { col: 'CAP / Codice postale', req: false, fmt: t('employees.guideText', 'Testo'), ex: '00186' },
+                          { col: 'Telefono / Cellulare', req: false, fmt: t('employees.guideText', 'Testo'), ex: '+393331234567' },
+                          { col: 'Nazionalità', req: false, fmt: t('employees.guideText', 'Testo'), ex: 'Italiana' },
+                          { col: 'IBAN', req: false, fmt: t('employees.guideText', 'Testo'), ex: 'IT60X054281110...' },
+                          { col: 'Primo soccorso / Primo soccorritore', req: false, fmt: 'Sì / No', ex: 'Sì' },
+                          { col: 'Stato civile', req: false, fmt: 'Celibe / Nubile / Coniugato / ...', ex: 'Celibe' },
+                          { col: 'Tipo contratto', req: false, fmt: 'Tempo Indeterminato / Determinato / Apprendistato', ex: 'Tempo Determinato' },
+                          { col: 'Data di risoluzione / Data cessazione', req: false, fmt: 'YYYY-MM-DD / DD/MM/YYYY', ex: '2025-06-30' },
+                          { col: 'Tipo cessazione / Tipo risoluzione', req: false, fmt: 'Dimissioni volontarie / Licenziamento / ...', ex: 'Fine contratto' },
+                          { col: 'Password temporanea', req: false, fmt: t('employees.guideText', 'Testo'), ex: 'MyP@ss123' },
+                        ].map((row, i) => (
+                          <tr key={i} style={{ borderBottom: '1px solid var(--border-light)', background: i % 2 === 0 ? 'var(--surface)' : 'var(--surface-warm)' }}>
+                            <td style={{ padding: '7px 10px', fontWeight: 600, color: 'var(--text-primary)' }}>{row.col}</td>
+                            <td style={{ padding: '7px 10px', textAlign: 'center', fontWeight: 700, color: row.req ? '#DC2626' : 'var(--text-muted)' }}>{row.req ? t('common.yes', 'Sì') : 'No'}</td>
+                            <td style={{ padding: '7px 10px', color: 'var(--text-secondary)', fontSize: 11 }}>{row.fmt}</td>
+                            <td style={{ padding: '7px 10px', fontFamily: 'monospace', fontSize: 11, color: 'var(--primary)' }}>{row.ex}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div style={{ padding: '8px 14px', background: 'var(--surface-warm)', borderTop: '1px solid var(--border)', fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                    {t('employees.bulkImportGuideNote', 'Il sistema riconosce automaticamente i nomi delle colonne in italiano e inglese, ignorando parentesi, trattini e spazi aggiuntivi.')}
                   </div>
                 </div>
               )}
@@ -315,8 +361,8 @@ export function BulkImportModal({ open, onClose, onComplete }: Props) {
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                     <thead style={{ position: 'sticky', top: 0, background: 'var(--surface-warm)' }}>
                       <tr>
-                        <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: 'var(--text-muted)' }}>Riga</th>
-                        <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: 'var(--text-muted)' }}>Errore</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: 'var(--text-muted)' }}>{t('employees.bulkImportRow', 'Riga')}</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: 'var(--text-muted)' }}>{t('employees.bulkImportError', 'Errore')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -588,22 +634,30 @@ function getHeaderFormat(header: string, rows: ParsedRow[]): 'text' | 'email' | 
     lowerHeader.includes('assunzione') ||
     lowerHeader.includes('cessazione') ||
     lowerHeader.includes('risoluzione') ||
-    lowerHeader.includes('scadenza')
+    lowerHeader.includes('scadenza') ||
+    lowerHeader.includes('contratto') ||
+    lowerHeader.includes('fine')
   ) {
     return 'date';
   }
 
-  const values = rows.map(r => r.data[header]);
+  const values = rows.map(r => r.data[header]).filter(v => v !== '' && v != null);
   
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (values.some(val => val && emailRegex.test(String(val).trim()))) return 'email';
+  if (values.some(val => emailRegex.test(String(val).trim()))) return 'email';
 
   const dateRegex = /^(\d{4}[-\/.]\d{1,2}[-\/.]\d{1,2}|\d{1,2}[-\/.]\d{1,2}[-\/.]\d{4})$/;
-  if (values.some(val => val && dateRegex.test(String(val).trim()))) return 'date';
+  if (values.some(val => dateRegex.test(String(val).trim()))) return 'date';
 
-  const hasNumbers = values.some(val => val !== '' && val !== null && val !== undefined && !isNaN(Number(val)));
+  // Check for Excel date serial numbers (typical range for 2000-2030 dates: ~36526-47848)
+  const hasNumbers = values.some(val => !isNaN(Number(val)));
   const allNumbersOrEmpty = values.every(val => val === '' || val === null || val === undefined || !isNaN(Number(val)));
-  if (hasNumbers && allNumbersOrEmpty) return 'number';
+  if (hasNumbers && allNumbersOrEmpty) {
+    const numVals = values.map(Number).filter(n => !isNaN(n));
+    const looksLikeDateSerials = numVals.length > 0 && numVals.every(n => n >= 30000 && n <= 55000);
+    if (looksLikeDateSerials) return 'date';
+    return 'number';
+  }
 
   return 'text';
 }
@@ -665,11 +719,17 @@ function ColumnMappingModal({
 
     return SCHEMA_FIELDS.filter(field => {
       if (initialMappedKeys.has(field.key) || selectedKeys.includes(field.key)) return false;
-      if (format === 'date') return field.format === 'date' || field.format === 'text';
-      if (field.format === 'date') return format === 'date' || format === 'text' || format === 'number';
-      if (field.format === format) return true;
-      if (format === 'text' || format === 'number') return true;
-      return false;
+      // In manual mapping, allow all fields - the user knows what they're doing.
+      // Prioritize format-matched fields by sorting, not by filtering.
+      return true;
+    }).sort((a, b) => {
+      // Prioritize same-format fields
+      const aMatch = a.format === format ? 0 : 1;
+      const bMatch = b.format === format ? 0 : 1;
+      if (aMatch !== bMatch) return aMatch - bMatch;
+      // Then required fields first
+      if (a.required !== b.required) return a.required ? -1 : 1;
+      return 0;
     });
   };
 
@@ -744,7 +804,7 @@ function ColumnMappingModal({
         <div style={S.header}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <AlertTriangle size={18} color="var(--accent)" />
-            <h3 style={{ fontSize: '15px', fontWeight: 700, margin: 0 }}>Mappatura Manuale Colonne</h3>
+            <h3 style={{ fontSize: '15px', fontWeight: 700, margin: 0 }}>{t('employees.mappingTitle', 'Mappatura Manuale Colonne')}</h3>
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '20px' }}>×</button>
         </div>
@@ -754,13 +814,13 @@ function ColumnMappingModal({
           {savedTemplates.length > 0 && (
             <div style={{ marginBottom: 16, padding: 12, borderRadius: 10, background: 'var(--surface-warm)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
               <Bookmark size={16} color="var(--primary)" />
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>Modello salvato:</span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>{t('employees.savedTemplate', 'Modello salvato')}:</span>
               <div style={{ flex: 1 }}>
                 <CustomSelect
                   value={selectedTemplateId || null}
                   onChange={val => handleApplyTemplate(val || '')}
                   options={savedTemplates.map(t => ({ value: String(t.id), label: t.name }))}
-                  placeholder="Seleziona un modello salvato per questa azienda..."
+                  placeholder={t('employees.selectTemplate', 'Seleziona un modello salvato...')}
                   isClearable={true}
                   searchable={true}
                   controlMinHeight={34}
@@ -770,7 +830,7 @@ function ColumnMappingModal({
           )}
 
           <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: '0 0 16px' }}>
-            Alcune colonne del tuo file non corrispondono automaticamente ai campi standard. Assegna ciascuna colonna del file al campo di destinazione corretto:
+            {t('employees.mappingDescription', 'Alcune colonne del tuo file non corrispondono automaticamente ai campi standard. Assegna ciascuna colonna del file al campo di destinazione corretto:')}
           </p>
 
           <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -806,7 +866,7 @@ function ColumnMappingModal({
                       value={selectedValue || null}
                       onChange={val => handleSelectField(h, val || '')}
                       options={selectOptions}
-                      placeholder="Seleziona campo di destinazione..."
+                      placeholder={t('employees.selectTargetField', 'Seleziona campo di destinazione...')}
                       isClearable={true}
                       searchable={true}
                       controlMinHeight={36}
@@ -822,7 +882,7 @@ function ColumnMappingModal({
             <div style={{ marginTop: 16, padding: 12, borderRadius: 10, background: 'rgba(2,132,199,0.06)', border: '1px solid rgba(2,132,199,0.2)', display: 'flex', alignItems: 'center', gap: 8 }}>
               <input
                 type="text"
-                placeholder="Nome del modello (es. Export Paghe Zucchetti)"
+                placeholder={t('employees.templateNamePlaceholder', 'Nome del modello (es. Export Paghe Zucchetti)')}
                 value={templateName}
                 onChange={e => setTemplateName(e.target.value)}
                 style={{ flex: 1, padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 12 }}
@@ -833,14 +893,14 @@ function ColumnMappingModal({
                 disabled={savingTemplate || !templateName.trim()}
                 style={{ padding: '7px 14px', borderRadius: 6, background: 'var(--primary)', color: '#fff', border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
               >
-                Salva
+                {t('common.save', 'Salva')}
               </button>
               <button
                 type="button"
                 onClick={() => setShowSavePrompt(false)}
                 style={{ padding: '7px 10px', borderRadius: 6, background: 'none', border: '1px solid var(--border)', fontSize: 12, cursor: 'pointer' }}
               >
-                Annulla
+                {t('common.cancel', 'Annulla')}
               </button>
             </div>
           )}
@@ -852,18 +912,18 @@ function ColumnMappingModal({
             onClick={() => setShowSavePrompt(true)}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', fontSize: 12, fontWeight: 600, cursor: 'pointer', color: 'var(--primary)' }}
           >
-            <Save size={14} /> Salva come modello aziendale
+            <Save size={14} /> {t('employees.saveAsTemplate', 'Salva come modello aziendale')}
           </button>
 
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={onClose} style={{ ...S.btn, background: 'none', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
-              Annulla
+              {t('common.cancel', 'Annulla')}
             </button>
             <button
               onClick={handleSave}
               style={{ ...S.btn, background: 'var(--primary)', color: '#fff' }}
             >
-              Conferma Mappatura
+              {t('employees.confirmMapping', 'Conferma Mappatura')}
             </button>
           </div>
         </div>
