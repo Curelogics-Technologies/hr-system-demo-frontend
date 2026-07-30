@@ -542,3 +542,15 @@ input, select, textarea {
   -ms-overflow-style: none !important;  /* IE and Edge */
   scrollbar-width: none !important;  /* Firefox */
 }
+
+/* Upload wizard: gentle attention pulse and an indeterminate progress sweep
+   used while files upload and while filenames are matched to employees. */
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.65; transform: scale(0.94); }
+}
+
+@keyframes indeterminateSlide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}

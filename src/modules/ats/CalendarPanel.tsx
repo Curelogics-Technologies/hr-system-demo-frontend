@@ -30,9 +30,31 @@ import {
   getActiveFilterCount,
   InterviewFilter,
   Interview,
+  INTERVIEW_TYPE_PALETTES,
+  INTERVIEW_STATUS_COLORS,
+  CONFLICT_COLORS,
+  EntryPalette,
 } from './atsCalendarUtils';
 
 import { useBreakpoint } from '../../hooks/useBreakpoint';
+
+/**
+ * Legend entries read their swatch straight from the shared palettes, so the key
+ * can never drift out of sync with the blocks it is explaining.
+ */
+const CALENDAR_LEGEND: Array<{
+  key: string;
+  fallback: string;
+  palette: EntryPalette;
+  emphasise?: boolean;
+}> = [
+  { key: 'ats.interviewType.in_person', fallback: 'In-Person', palette: INTERVIEW_TYPE_PALETTES.in_person },
+  { key: 'ats.interviewType.phone', fallback: 'Phone', palette: INTERVIEW_TYPE_PALETTES.phone },
+  { key: 'ats.interviewType.video', fallback: 'Video', palette: INTERVIEW_TYPE_PALETTES.video },
+  { key: 'ats.status.completed', fallback: 'Completed', palette: INTERVIEW_STATUS_COLORS.completed },
+  { key: 'ats.status.cancelled', fallback: 'Cancelled', palette: INTERVIEW_STATUS_COLORS.cancelled },
+  { key: 'ats.scheduleConflict', fallback: 'Conflict', palette: CONFLICT_COLORS, emphasise: true },
+];
 
 interface CalendarPanelProps {
   positions: JobPosting[];
@@ -571,9 +593,12 @@ export default function CalendarPanel({
           boxShadow: 'var(--shadow-sm)',
           display: 'flex',
           flexDirection: 'column',
+          // No height cap and no scroll of its own: the panel grows to fit the
+          // calendar and the app shell's <main> provides the single page scroll.
+          // A bounded height here is what produced two nested scrollbars.
+          overflow: 'hidden',
         }}
       >
-        {/* Single row header - matching shifts module */}
         {/* Single row header - matching shifts module */}
         <div
           style={{
@@ -585,6 +610,7 @@ export default function CalendarPanel({
             flexDirection: isMobile ? 'column' : 'row',
             gap: isMobile ? 12 : 8,
             minHeight: isMobile ? 'auto' : 52,
+            flexShrink: 0,
           }}
         >
           {isMobile ? (
@@ -932,8 +958,49 @@ export default function CalendarPanel({
           )}
         </div>
 
+        {/* Calendar Legend Bar */}
+        <div
+          style={{
+            padding: '8px 24px',
+            borderBottom: '1px solid var(--border)',
+            background: 'var(--surface-warm)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 16,
+            fontSize: '0.72rem',
+            fontWeight: 600,
+            color: 'var(--text-secondary)',
+            flexWrap: 'wrap',
+            flexShrink: 0,
+          }}
+        >
+          <span style={{ fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-muted)', fontWeight: 700 }}>
+            {t('ats.legend', 'Legend')}:
+          </span>
+          {CALENDAR_LEGEND.map(({ key, fallback, palette, emphasise }) => (
+            <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span
+                style={{
+                  display: 'inline-block',
+                  width: 11,
+                  height: 11,
+                  borderRadius: 3,
+                  background: palette.bg,
+                  borderLeft: `3px solid ${palette.leftBorder}`,
+                  border: `1px solid ${palette.border}`,
+                  borderLeftWidth: 3,
+                  borderLeftColor: palette.leftBorder,
+                }}
+              />
+              <span style={emphasise ? { color: palette.text, fontWeight: 700 } : undefined}>
+                {t(key, fallback)}
+              </span>
+            </div>
+          ))}
+        </div>
+
         {/* Calendar Content */}
-        <div style={{ flex: 1, overflowY: 'auto', background: 'var(--background)' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--background)' }}>
           {loading ? (
             <div
               style={{
@@ -978,11 +1045,14 @@ export default function CalendarPanel({
           style={{
             padding: '8px 16px',
             borderTop: '1px solid var(--border)',
+            background: 'var(--surface-warm)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
             fontSize: 11,
+            fontWeight: 600,
             color: 'var(--text-muted)',
+            flexShrink: 0,
           }}
         >
           <div>

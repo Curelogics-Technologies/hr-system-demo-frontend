@@ -597,14 +597,10 @@ export default function PublicJobDetailPage() {
   const [hiringTeam, setHiringTeam] = useState<PublicHiringContact[]>([]);
 
   const privacyUrl = useMemo(() => {
-    const queryParams = new URLSearchParams();
-    if (companyName) queryParams.set('companyName', companyName);
-    if (companyMeta?.companyEmail) queryParams.set('companyEmail', companyMeta.companyEmail);
-    const queryString = queryParams.toString() ? `?${queryParams.toString()}` : '';
     return effectiveCompanySlug 
-      ? `/careers/${effectiveCompanySlug}/privacy${queryString}` 
-      : `/privacy${queryString}`;
-  }, [effectiveCompanySlug, companyName, companyMeta?.companyEmail]);
+      ? `/careers/${effectiveCompanySlug}/privacy` 
+      : '/privacy';
+  }, [effectiveCompanySlug]);
 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');

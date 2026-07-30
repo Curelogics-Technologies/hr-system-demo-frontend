@@ -11,12 +11,10 @@ interface CareersFooterProps {
 export default function CareersFooter({ companyName, companyEmail, companySlug }: CareersFooterProps) {
   const { i18n } = useTranslation();
   const lang = i18n.language?.startsWith('en') ? 'en' : 'it';
-  const displayCompany = companySlug ? (companyName || 'Fusaro Uomo') : null;
-
-  const queryParams = new URLSearchParams();
-  if (companyName) queryParams.set('companyName', companyName);
-  if (companyEmail) queryParams.set('companyEmail', companyEmail || '');
-  const queryString = queryParams.toString() ? `?${queryParams.toString()}` : '';
+  // Show the company only when we actually know it. Falling back to a specific
+  // tenant's name would misattribute another client's careers page; the footer
+  // already carries the platform name ("Powered by Veylo HR") on its own.
+  const displayCompany = companySlug && companyName ? companyName : null;
 
   return (
     <footer style={{
@@ -43,7 +41,7 @@ export default function CareersFooter({ companyName, companyEmail, companySlug }
         </div>
         <div style={{ display: 'flex', gap: '24px' }}>
           <Link 
-            to={companySlug ? `/careers/${companySlug}/privacy${queryString}` : `/privacy${queryString}`} 
+            to={companySlug ? `/careers/${companySlug}/privacy` : '/privacy'} 
             style={{ color: 'var(--text-secondary)', transition: 'color 0.2s', textDecoration: 'none' }} 
             onMouseEnter={e => e.currentTarget.style.color = 'var(--accent)'} 
             onMouseLeave={e => e.currentTarget.style.color = 'var(--text-secondary)'}
@@ -51,7 +49,7 @@ export default function CareersFooter({ companyName, companyEmail, companySlug }
             {lang === 'it' ? 'Informativa Privacy' : 'Privacy Policy'}
           </Link>
           <Link 
-            to={companySlug ? `/careers/${companySlug}/terms${queryString}` : `/terms${queryString}`} 
+            to={companySlug ? `/careers/${companySlug}/terms` : '/terms'} 
             style={{ color: 'var(--text-secondary)', transition: 'color 0.2s', textDecoration: 'none' }} 
             onMouseEnter={e => e.currentTarget.style.color = 'var(--accent)'} 
             onMouseLeave={e => e.currentTarget.style.color = 'var(--text-secondary)'}
@@ -59,7 +57,7 @@ export default function CareersFooter({ companyName, companyEmail, companySlug }
             {lang === 'it' ? 'Termini di Servizio' : 'Terms of Service'}
           </Link>
           <Link 
-            to={companySlug ? `/careers/${companySlug}/cookie-policy${queryString}` : `/cookie-policy${queryString}`} 
+            to={companySlug ? `/careers/${companySlug}/cookie-policy` : '/cookie-policy'} 
             style={{ color: 'var(--text-secondary)', transition: 'color 0.2s', textDecoration: 'none' }} 
             onMouseEnter={e => e.currentTarget.style.color = 'var(--accent)'} 
             onMouseLeave={e => e.currentTarget.style.color = 'var(--text-secondary)'}

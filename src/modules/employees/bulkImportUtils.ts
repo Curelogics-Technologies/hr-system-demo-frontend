@@ -15,12 +15,40 @@ export function normalizeHeader(raw: string): string {
   return str.replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
+/**
+ * COLUMN_MAP indexed with every space removed, so a header whose words are
+ * split differently from the alias still resolves: "E-mail" normalises to
+ * "e mail", which collapses to "email"; "E-mail personale" collapses to
+ * "emailpersonale", matching the alias "email personale". Built once.
+ */
+let collapsedColumnMap: Record<string, string> | null = null;
+function getCollapsedColumnMap(): Record<string, string> {
+  // Built on first use: COLUMN_MAP is declared further down this module.
+  if (collapsedColumnMap) return collapsedColumnMap;
+  const index: Record<string, string> = {};
+  for (const [key, field] of Object.entries(COLUMN_MAP)) {
+    const collapsed = key.replace(/\s+/g, '');
+    // First alias wins, so an exact alias is never shadowed by a later one.
+    if (!(collapsed in index)) index[collapsed] = field;
+  }
+  collapsedColumnMap = index;
+  return index;
+}
+
 export function matchHeaderToField(rawHeader: string): string | undefined {
   if (!rawHeader) return undefined;
+
   const norm = normalizeHeader(rawHeader);
   if (COLUMN_MAP[norm]) return COLUMN_MAP[norm];
+
   const directNorm = rawHeader.trim().toLowerCase();
-  return COLUMN_MAP[directNorm];
+  if (COLUMN_MAP[directNorm]) return COLUMN_MAP[directNorm];
+
+  // Last resort: ignore word spacing entirely. Catches "E-mail", "E mail",
+  // "Data Nascita" vs "datanascita", and similar exporter quirks without
+  // needing a new alias for every variant.
+  const collapsed = norm.replace(/\s+/g, '');
+  return collapsed ? getCollapsedColumnMap()[collapsed] : undefined;
 }
 
 /* ── Column header → API field mapping ─────────────────────────────────── */
