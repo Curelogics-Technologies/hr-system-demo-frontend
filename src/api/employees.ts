@@ -112,3 +112,45 @@ export async function deleteImportTemplate(id: number): Promise<void> {
   await apiClient.delete(`/employees/import-templates/${id}`);
 }
 
+/* ── Bulk import ─────────────────────────────────────────────────────────── */
+
+export interface ImportPrecheck {
+  /** Every work email already in the tenant, lowercased. */
+  emails: string[];
+  stores: Array<{ id: number; name: string; companyId: number; maxStaff: number; activeCount: number }>;
+}
+
+export interface BulkImportFailure {
+  rowIndex: number;
+  code: string;
+  detail?: string;
+}
+
+export interface BulkImportResponse {
+  created: Array<{ rowIndex: number; id: number; email: string; uniqueId: string }>;
+  createdCount: number;
+  failures: BulkImportFailure[];
+  warnings: BulkImportFailure[];
+}
+
+/**
+ * Reference data for validating a file before anything is written. Fetched from
+ * a dedicated endpoint rather than the paginated employee list, which is capped
+ * and would miss duplicates in a large tenant.
+ */
+export async function getImportPrecheck(): Promise<ImportPrecheck> {
+  const { data } = await apiClient.get('/employees/import-precheck');
+  return data.data;
+}
+
+/**
+ * Creates every supplied row inside one server-side transaction: either all of
+ * them land or none do, so a failure never leaves a half-imported file behind.
+ */
+export async function bulkImportEmployees(
+  rows: Array<Record<string, unknown>>,
+): Promise<BulkImportResponse> {
+  const { data } = await apiClient.post('/employees/bulk-import', { rows });
+  return data.data;
+}
+
