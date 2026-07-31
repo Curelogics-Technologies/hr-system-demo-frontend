@@ -51,6 +51,18 @@ export function matchHeaderToField(rawHeader: string): string | undefined {
 
 /* ── Column header → API field mapping ─────────────────────────────────── */
 export const COLUMN_MAP: Record<string, string> = {
+  // Every FIELD_CATALOG label must appear here, in both languages: the sample
+  // workbook uses those labels as its headers, so a missing alias makes the file
+  // we ship un-importable. A test asserts this round-trip.
+  'first name': 'name',
+  'work email': 'email',
+  'email aziendale': 'email',
+  'mail aziendale': 'email',
+  'working time': 'workingType',
+  'probation months': 'probationMonths',
+  'mesi di prova': 'probationMonths',
+  'first aid officer': 'firstAidFlag',
+
   // English
   'name': 'name',
   'surname': 'surname',
@@ -757,60 +769,186 @@ export function validateRows(
   });
 }
 
+/* ── Column suggestions ──────────────────────────────────────────────────── */
+
+export type ColumnStatus = 'recognised' | 'suggested' | 'manual' | 'unmapped' | 'duplicate';
+
+/**
+ * Best-guess field for a header the alias table did not recognise.
+ *
+ * Scores word overlap against every field's Italian and English label, so an
+ * exporter's own wording ("Data assunzione dipendente", "Sede lavorativa")
+ * still lands on the right field instead of leaving the operator to hunt for it.
+ * Only reasonably confident matches are returned — a wrong suggestion the
+ * operator accepts blindly is worse than no suggestion at all.
+ */
+export function suggestFieldForHeader(rawHeader: string): string | null {
+  const norm = normalizeHeader(rawHeader);
+  if (!norm) return null;
+
+  const words = norm.split(' ').filter((w) => w.length > 2);
+  if (words.length === 0) return null;
+
+  let best: { key: string; score: number } | null = null;
+
+  for (const def of FIELD_CATALOG) {
+    for (const label of [def.labelIt, def.labelEn]) {
+      const target = normalizeHeader(label);
+      const targetWords = target.split(' ').filter(Boolean);
+
+      let score = 0;
+      for (const w of words) {
+        if (targetWords.includes(w)) score += 2;
+        else if (targetWords.some((tw) => tw.startsWith(w) || w.startsWith(tw))) score += 1;
+      }
+      // Normalise by target length so short labels do not dominate.
+      const ratio = score / Math.max(targetWords.length, words.length);
+      if (ratio >= 0.5 && (!best || ratio > best.score)) {
+        best = { key: def.key, score: ratio };
+      }
+    }
+  }
+
+  return best ? best.key : null;
+}
+
+export interface ColumnInfo {
+  header: string;
+  field: string;
+  status: ColumnStatus;
+  /** Suggestion offered when the column is unmapped. */
+  suggestion: string | null;
+  /** First non-empty value in the file, shown as a sample. */
+  sample: string;
+  /** True when another column already targets the same field. */
+  duplicate: boolean;
+}
+
+/**
+ * Per-column view used by the mapping step and the preview's column headers.
+ * Computed once for the whole file rather than per row.
+ */
+export function analyzeColumns(
+  headers: string[],
+  mapping: Record<string, string>,
+  autoMapping: Record<string, string>,
+  rows: ParsedRow[],
+): ColumnInfo[] {
+  return headers.map((header) => {
+    const field = mapping[header] ?? '';
+    const duplicate = field !== '' && headers.some((o) => o !== header && mapping[o] === field);
+
+    let sample = '';
+    for (const r of rows) {
+      const v = String(r.data[header] ?? '').trim();
+      if (v) { sample = v; break; }
+    }
+
+    let status: ColumnStatus;
+    if (duplicate) status = 'duplicate';
+    else if (!field) status = 'unmapped';
+    else if (autoMapping[header] === field) status = 'recognised';
+    else status = 'manual';
+
+    return {
+      header,
+      field,
+      status,
+      suggestion: field ? null : suggestFieldForHeader(header),
+      sample,
+      duplicate,
+    };
+  });
+}
+
 /* ── Sample workbook ─────────────────────────────────────────────────────── */
 
-const SAMPLE_PEOPLE = [
-  { n: 'Mario',   s: 'Rossi',    r: 'Dipendente',           g: 'Maschio', w: 'Tempo Pieno',    d: 'Vendite',       h: '01/03/2024', b: '15/06/1990', wh: '40', m: 'Coniugato', fa: 'Si' },
-  { n: 'Giulia',  s: 'Bianchi',  r: 'Responsabile Negozio', g: 'Femmina', w: 'Tempo Pieno',    d: 'Direzione',     h: '15/01/2022', b: '22/09/1985', wh: '40', m: 'Nubile',    fa: 'No' },
-  { n: 'Luca',    s: 'Ferrari',  r: 'Responsabile Area',    g: 'Maschio', w: 'Tempo Pieno',    d: 'Operations',    h: '10/06/2021', b: '05/11/1980', wh: '40', m: 'Coniugato', fa: 'Si' },
-  { n: 'Sofia',   s: 'Esposito', r: 'Risorse Umane',        g: 'Femmina', w: 'Tempo Pieno',    d: 'Risorse Umane', h: '20/02/2023', b: '18/04/1988', wh: '40', m: 'Nubile',    fa: 'No' },
-  { n: 'Marco',   s: 'Conti',    r: 'Dipendente',           g: 'Maschio', w: 'Tempo Parziale', d: 'Magazzino',     h: '05/09/2024', b: '30/01/1996', wh: '20', m: 'Celibe',    fa: 'No' },
-  { n: 'Chiara',  s: 'Lombardi', r: 'Dipendente',           g: 'Femmina', w: 'Tempo Pieno',    d: 'Cassa',         h: '12/11/2023', b: '07/05/1994', wh: '40', m: 'Nubile',    fa: 'Si' },
-  { n: 'Alessio', s: 'Greco',    r: 'Dipendente',           g: 'Maschio', w: 'Tempo Parziale', d: 'Vendite',       h: '03/04/2025', b: '14/08/1999', wh: '24', m: 'Celibe',    fa: 'No' },
-  { n: 'Martina', s: 'Ricci',    r: 'Dipendente',           g: 'Femmina', w: 'Tempo Pieno',    d: 'Vendite',       h: '08/07/2022', b: '25/12/1992', wh: '38', m: 'Coniugata', fa: 'No' },
-  { n: 'Davide',  s: 'Moretti',  r: 'Responsabile Negozio', g: 'Maschio', w: 'Tempo Pieno',    d: 'Direzione',     h: '01/02/2020', b: '11/03/1983', wh: '40', m: 'Coniugato', fa: 'Si' },
-  { n: 'Elena',   s: 'Barbieri', r: 'Dipendente',           g: 'Femmina', w: 'Tempo Parziale', d: 'Cassa',         h: '19/10/2024', b: '02/02/1997', wh: '18', m: 'Nubile',    fa: 'No' },
+/**
+ * Rows for the downloadable example.
+ *
+ * Deliberately not all valid: the file doubles as a teaching aid, walking the
+ * operator through every outcome the wizard can produce — clean rows, blocking
+ * errors, and non-blocking warnings — so the guide's explanations have something
+ * concrete to point at. The "Note" column is itself a demonstration: it matches
+ * no field, so it shows up as an ignored extra column.
+ */
+interface SampleRow {
+  n: string; s: string; role: string; gender: string; work: string;
+  dept: string; hire: string; born: string; hours: string; marital: string; firstAid: string;
+  /** Overrides applied after the standard mapping, for the broken examples. */
+  email?: string; store?: string; noteIt: string; noteEn: string;
+}
+
+const SAMPLE_ROWS: SampleRow[] = [
+  { n: 'Mario', s: 'Rossi', role: 'Dipendente', gender: 'Maschio', work: 'Tempo Pieno', dept: 'Vendite', hire: '01/03/2024', born: '15/06/1990', hours: '40', marital: 'Coniugato', firstAid: 'Si',
+    noteIt: 'Riga corretta — verra importata', noteEn: 'Valid row — will be imported' },
+  { n: 'Giulia', s: 'Bianchi', role: 'Responsabile Negozio', gender: 'Femmina', work: 'Tempo Pieno', dept: 'Direzione', hire: '15/01/2022', born: '22/09/1985', hours: '40', marital: 'Nubile', firstAid: 'No',
+    noteIt: 'Riga corretta — ruolo responsabile', noteEn: 'Valid row — manager role' },
+  { n: 'Luca', s: 'Ferrari', role: 'Responsabile Area', gender: 'Maschio', work: 'Tempo Pieno', dept: 'Operations', hire: '10/06/2021', born: '05/11/1980', hours: '40', marital: 'Coniugato', firstAid: 'Si',
+    noteIt: 'Riga corretta — ruolo area manager', noteEn: 'Valid row — area manager role' },
+  { n: 'Sofia', s: 'Esposito', role: 'Risorse Umane', gender: 'Femmina', work: 'Tempo Parziale', dept: 'Risorse Umane', hire: '20/02/2023', born: '18/04/1988', hours: '24', marital: 'Nubile', firstAid: 'No',
+    noteIt: 'Riga corretta — part time', noteEn: 'Valid row — part time' },
+  { n: 'Marco', s: 'Conti', role: 'Dipendente', gender: 'Maschio', work: 'Tempo Pieno', dept: 'Magazzino', hire: '05/09/2024', born: '30/01/1996', hours: '40', marital: 'Celibe', firstAid: 'No',
+    email: '', noteIt: 'ERRORE — email aziendale mancante (campo obbligatorio)', noteEn: 'ERROR — work email missing (required field)' },
+  { n: 'Chiara', s: 'Lombardi', role: 'Dipendente', gender: 'Femmina', work: 'Tempo Pieno', dept: 'Cassa', hire: '12/11/2023', born: '07/05/1994', hours: '40', marital: 'Nubile', firstAid: 'Si',
+    email: 'chiara.lombardi', noteIt: 'ERRORE — indirizzo email non valido', noteEn: 'ERROR — invalid email address' },
+  { n: 'Alessio', s: 'Greco', role: 'Amministratore', gender: 'Maschio', work: 'Tempo Pieno', dept: 'Direzione', hire: '03/04/2025', born: '14/08/1999', hours: '40', marital: 'Celibe', firstAid: 'No',
+    noteIt: 'ERRORE — il ruolo Amministratore non e importabile', noteEn: 'ERROR — the Administrator role cannot be imported' },
+  { n: 'Martina', s: 'Ricci', role: 'Dipendente', gender: 'Femmina', work: 'Tempo Pieno', dept: 'Vendite', hire: 'prossimo mese', born: '25/12/1992', hours: '38', marital: 'Coniugata', firstAid: 'No',
+    noteIt: 'ERRORE — data di assunzione non leggibile', noteEn: 'ERROR — hire date cannot be read' },
+  { n: 'Davide', s: 'Moretti', role: 'Dipendente', gender: 'Sconosciuto', work: 'Tempo Pieno', dept: 'Direzione', hire: '01/02/2020', born: '11/03/1983', hours: '40', marital: 'Coniugato', firstAid: 'Si',
+    noteIt: 'AVVISO — genere non riconosciuto: il campo resta vuoto, la riga viene importata', noteEn: 'WARNING — gender not recognised: field left empty, row still imported' },
+  { n: 'Elena', s: 'Barbieri', role: 'Dipendente', gender: 'Femmina', work: 'Tempo Parziale', dept: 'Cassa', hire: '19/10/2024', born: '02/02/1997', hours: '18', marital: 'Nubile', firstAid: 'No',
+    store: '__MISSING__', noteIt: 'ERRORE — luogo di lavoro inesistente', noteEn: 'ERROR — store does not exist' },
 ];
 
 /**
- * Sample file with ten realistic employees across four roles.
+ * Sample file with ten employees covering every outcome the wizard produces.
  *
  * Headers follow the selected UI language so the operator recognises them, but
  * the parser accepts either language regardless of which file was downloaded.
- * Company and store are pre-filled from the current selection when known —
- * guessing them would produce a file that fails validation on first upload.
+ * Company and store are filled from the tenant's own records when available —
+ * a hardcoded guess would make every row fail on the very first upload.
  */
 export function downloadSampleEmployeesExcel(lang: string, companyName = '', storeName = ''): void {
   const it = lang.startsWith('it');
   const h = (k: string) => fieldLabel(k, lang);
+  const noteHeader = it ? 'Note' : 'Notes';
 
-  const rows = SAMPLE_PEOPLE.map((p, i) => ({
-    [h('name')]: p.n,
-    [h('surname')]: p.s,
-    [h('email')]: `${p.n.toLowerCase()}.${p.s.toLowerCase()}@azienda.it`,
-    [h('personalEmail')]: `${p.n.toLowerCase()}.${p.s.toLowerCase()}@gmail.com`,
-    [h('role')]: p.r,
-    [h('companyName')]: companyName,
-    [h('storeName')]: storeName,
-    [h('status')]: it ? 'Attivo' : 'Active',
-    [h('gender')]: it ? p.g : p.g === 'Maschio' ? 'Male' : 'Female',
-    [h('workingType')]: it ? p.w : p.w === 'Tempo Pieno' ? 'Full time' : 'Part time',
-    [h('department')]: p.d,
-    [h('hireDate')]: p.h,
-    [h('dateOfBirth')]: p.b,
-    [h('weeklyHours')]: p.wh,
-    [h('maritalStatus')]: p.m,
-    [h('contractType')]: 'Tempo Indeterminato',
-    [h('firstAidFlag')]: it ? p.fa : p.fa === 'Si' ? 'Yes' : 'No',
-    [h('phone')]: `+39 33${i} 12345${i}${i}`,
-    [h('nationality')]: it ? 'Italiana' : 'Italian',
-    [h('city')]: 'Milano',
-    [h('cap')]: '20121',
-    [h('country')]: it ? 'Italia' : 'Italy',
-  }));
+  const rows = SAMPLE_ROWS.map((p, i) => {
+    const slug = `${p.n.toLowerCase()}.${p.s.toLowerCase()}`;
+    const email = p.email === undefined ? `${slug}@azienda.it` : p.email;
+    const store = p.store === '__MISSING__'
+      ? (it ? 'Negozio Inesistente' : 'Nonexistent Store')
+      : storeName;
+
+    return {
+      [h('name')]: p.n,
+      [h('surname')]: p.s,
+      [h('email')]: email,
+      [h('personalEmail')]: `${slug}@gmail.com`,
+      [h('role')]: p.role,
+      [h('companyName')]: companyName,
+      [h('storeName')]: store,
+      [h('status')]: it ? 'Attivo' : 'Active',
+      [h('gender')]: it ? p.gender : p.gender === 'Maschio' ? 'Male' : p.gender === 'Femmina' ? 'Female' : p.gender,
+      [h('workingType')]: it ? p.work : p.work === 'Tempo Pieno' ? 'Full time' : 'Part time',
+      [h('department')]: p.dept,
+      [h('hireDate')]: p.hire,
+      [h('dateOfBirth')]: p.born,
+      [h('weeklyHours')]: p.hours,
+      [h('maritalStatus')]: p.marital,
+      [h('contractType')]: 'Tempo Indeterminato',
+      [h('firstAidFlag')]: it ? p.firstAid : p.firstAid === 'Si' ? 'Yes' : 'No',
+      [h('phone')]: `+39 33${i} 12345${i}${i}`,
+      [h('city')]: 'Milano',
+      [h('cap')]: '20121',
+      [noteHeader]: it ? p.noteIt : p.noteEn,
+    };
+  });
 
   const sheet = XLSX.utils.json_to_sheet(rows);
-  sheet['!cols'] = Object.keys(rows[0]).map((k) => ({ wch: Math.max(14, k.length + 2) }));
+  sheet['!cols'] = Object.keys(rows[0]).map((k) => ({ wch: k === noteHeader ? 62 : Math.max(14, k.length + 2) }));
 
   // Second sheet documents every field, so the file explains itself offline.
   const legend = FIELD_CATALOG.map((f) => ({
