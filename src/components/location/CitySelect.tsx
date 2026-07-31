@@ -89,21 +89,38 @@ export function CitySelect({
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [cities]);
 
-  // When a country/state is selected but the dataset returns no cities for it,
-  // switch to a free-text input instead of leaving a disabled, empty dropdown.
-  const freeTextMode = allowFreeText && Boolean(countryCode) && !loading && options.length === 0;
+  // When a country/state is selected but the dataset returns no cities for it
+  // (e.g. Italian provinces such as Monza/Como), OR when the current value is
+  // not one of the dataset options, switch to a free-text input. This shows and
+  // preserves the value instead of a dropdown that cannot represent it — so a
+  // saved city is never silently dropped on reopen.
+  const valueInOptions = !value || options.some((option) => option.value === value);
+  const freeTextMode =
+    allowFreeText && Boolean(countryCode) && !loading && (options.length === 0 || !valueInOptions);
 
   // Prevent parent onChange updates from triggering the effect loop
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
+  // Track the country/province context so a city is discarded ONLY when the user
+  // actively changes that context — never on the initial hydration of a saved
+  // job (which previously wiped persisted cities such as "Monza" on reopen).
+  const prevContextRef = useRef<string | null>(null);
+
   useEffect(() => {
+    const context = `${countryCode ?? ''}|${stateCode ?? ''}`;
+    const prevContext = prevContextRef.current;
+    prevContextRef.current = context;
+
     if (!value) return;
     if (loading) return; // Wait until options are loaded before validating
-    if (freeTextMode) return; // Keep manually-entered value when no dataset options exist
+    if (freeTextMode) return; // Free-text value (no dataset match) is always kept
     if (options.some((option) => option.value === value)) return;
-    onChangeRef.current(null);
-  }, [value, options, loading, freeTextMode]);
+    // Only clear when the country/province actually changed after mount.
+    if (prevContext !== null && prevContext !== context) {
+      onChangeRef.current(null);
+    }
+  }, [value, options, loading, freeTextMode, countryCode, stateCode]);
 
   const isDisabled = disabled || !countryCode || (options.length === 0 && !freeTextMode) || loading;
 

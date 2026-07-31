@@ -1884,6 +1884,7 @@ const JobModal: React.FC<JobModalProps> = ({ job, stores, companies, defaultComp
   const [errors, setErrors] = useState<JobModalErrors>({});
   const [companyEmployees, setCompanyEmployees] = useState<Employee[]>([]);
   const [guideDismissed, setGuideDismissed] = useState(false);
+  const [showIndeedInfo, setShowIndeedInfo] = useState(false);
   const [newQuestionText, setNewQuestionText] = useState('');
   const questionsEndRef = useRef<HTMLDivElement>(null);
 
@@ -2967,11 +2968,100 @@ const JobModal: React.FC<JobModalProps> = ({ job, stores, companies, defaultComp
                 </div>
               </div>
 
+              {/* Indeed — how it works (info modal) */}
+              {showIndeedInfo && (
+                <div
+                  onClick={() => setShowIndeedInfo(false)}
+                  style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }}
+                >
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ background: '#fff', color: '#0f172a', borderRadius: 14, maxWidth: 580, width: '100%', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.30)' }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, padding: '18px 20px', borderBottom: '1px solid #e2e8f0' }}>
+                      <div>
+                        <div style={{ fontSize: 16, fontWeight: 700 }}>Indeed — come funziona</div>
+                        <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>How the Indeed integration works</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowIndeedInfo(false)}
+                        aria-label="Close"
+                        style={{ border: 'none', background: 'transparent', fontSize: 22, lineHeight: 1, color: '#94a3b8', cursor: 'pointer', padding: 0 }}
+                      >
+                        ×
+                      </button>
+                    </div>
+
+                    <div style={{ padding: '16px 20px', display: 'grid', gap: 16, fontSize: 13, lineHeight: 1.55 }}>
+                      <div>
+                        <div style={{ fontWeight: 700, color: '#185FA5', marginBottom: 4 }}>1. Come arrivano le candidature</div>
+                        <div>
+                          Le posizioni pubblicate vengono inviate a Indeed tramite il feed XML. Il candidato le vede su Indeed,
+                          clicca <strong>Candidati</strong> e viene portato alla pagina careers della piattaforma: la candidatura
+                          arriva <strong>automaticamente nell'ATS</strong>. Non serve alcun token per questo flusso.
+                        </div>
+                        <div style={{ color: '#64748b', marginTop: 4, fontSize: 12 }}>
+                          Published jobs go to Indeed via the XML feed → the candidate clicks Apply → they land on the careers page →
+                          the application appears in the ATS automatically. No token required.
+                        </div>
+                      </div>
+
+                      <div>
+                        <div style={{ fontWeight: 700, color: '#185FA5', marginBottom: 4 }}>2. "Apply on Indeed" nativo &amp; token</div>
+                        <div>
+                          La candidatura <em>dentro</em> Indeed (Indeed Apply nativo) richiede l'approvazione della partnership Indeed e
+                          un token reale. Finché non c'è, questa modalità resta disattivata e il blocco
+                          <code style={{ background: '#f1f5f9', padding: '1px 4px', borderRadius: 4 }}>indeed-apply-data</code> viene
+                          omesso dal feed, così <strong>nessuna candidatura viene rifiutata in silenzio</strong>. Si riattiva con una
+                          sola impostazione (il token) quando disponibile.
+                        </div>
+                        <div style={{ color: '#64748b', marginTop: 4, fontSize: 12 }}>
+                          Native in-Indeed apply needs partnership approval and a real token. Until then it stays off and the feed omits
+                          the apply block — so nothing is silently rejected. Reversible with one setting.
+                        </div>
+                      </div>
+
+                      <div>
+                        <div style={{ fontWeight: 700, color: '#185FA5', marginBottom: 4 }}>3. Indeed Readiness (i 5 controlli)</div>
+                        <div>
+                          Il punteggio indica la <strong>qualità dell'annuncio</strong> per Indeed: titolo valido, descrizione
+                          strutturata, posizione completa (città + paese), stipendio e domande di screening. Un annuncio con punteggio
+                          pieno viene indicizzato in modo pulito ed evita penalizzazioni.
+                        </div>
+                        <div style={{ color: '#64748b', marginTop: 4, fontSize: 12 }}>
+                          The score reflects listing quality for Indeed: valid title, structured description, complete location,
+                          salary and screener questions. A full score indexes cleanly and avoids penalties.
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ padding: '14px 20px', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'flex-end' }}>
+                      <button
+                        type="button"
+                        onClick={() => setShowIndeedInfo(false)}
+                        style={{ background: '#185FA5', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+                      >
+                        {t('common.close', 'Chiudi')}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Indeed Readiness Section */}
               <div style={{ borderTop: '1px solid rgba(255,255,255,0.2)', paddingTop: 10, display: 'grid', gap: 7 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 7 }}>
-                  <span style={{ color: '#CBD5E1', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700 }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#CBD5E1', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700 }}>
                     Indeed Readiness
+                    <button
+                      type="button"
+                      onClick={() => setShowIndeedInfo(true)}
+                      title={t('ats.indeedInfoOpen', 'Come funziona / How it works')}
+                      style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 15, height: 15, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.45)', background: 'transparent', color: '#CBD5E1', fontSize: 10, fontWeight: 700, cursor: 'pointer', lineHeight: 1, padding: 0 }}
+                    >
+                      i
+                    </button>
                   </span>
                   <span style={{ color: '#F8FAFC', fontSize: 11, fontWeight: 700 }}>
                     {indeedScore}/5
@@ -3364,7 +3454,7 @@ const JobModal: React.FC<JobModalProps> = ({ job, stores, companies, defaultComp
                         type="number"
                         value={weeklyHoursInput}
                         onChange={(e) => setWeeklyHoursInput(e.target.value)}
-                        placeholder={t('ats.weeklyHoursPlaceholder', '40')}
+                        placeholder={t('ats.weeklyHoursPlaceholder', 'es. 40')}
                       />
                       <Input
                         label={t('ats.salaryMin', 'Salary min')}
@@ -3459,7 +3549,7 @@ const JobModal: React.FC<JobModalProps> = ({ job, stores, companies, defaultComp
                           )}
                           {locationOverride.country === 'IT' && (
                             <span style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 4, display: 'block', lineHeight: '1.4' }}>
-                              {t('ats.stateItalyHelper', "Per l'Italia, inserisci il codice provincia: NA (Napoli), MI (Milano), SA (Salerno), RM (Roma). Il sistema converte automaticamente.")}
+                              {t('ats.stateItalyHelper', "Seleziona la provincia dall'elenco: il codice (es. NA, MI, MB) viene applicato automaticamente al salvataggio.")}
                             </span>
                           )}
                         </div>

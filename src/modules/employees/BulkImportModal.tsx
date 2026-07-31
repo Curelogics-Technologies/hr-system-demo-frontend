@@ -1,14 +1,24 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { Upload, X, FileSpreadsheet, CheckCircle2, XCircle, AlertTriangle, Bookmark, Save } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
+import {
+  Upload, X, FileSpreadsheet, CheckCircle2, AlertTriangle, AlertCircle, Info,
+  Download, BookOpen, Save, ArrowRight, ArrowLeft, Building2, Store as StoreIcon,
+  Mail, Calendar, User, Hash, ShieldAlert, Copy, Maximize2, ChevronDown, Check, Ban, Wand2,
+} from 'lucide-react';
 import { getCompanies } from '../../api/companies';
 import { getStores } from '../../api/stores';
-import { getEmployees, getImportTemplates, saveImportTemplate, ImportTemplate } from '../../api/employees';
-import { Company, Store, Employee, UserRole } from '../../types';
-import { parseExcelFile, processRow, ParsedRow, ImportResult, COLUMN_MAP, matchHeaderToField, downloadImportTemplateExcel } from './bulkImportUtils';
-import CustomSelect from '../../components/ui/CustomSelect';
+import {
+  getEmployees, getImportTemplates, saveImportTemplate, getImportPrecheck,
+  bulkImportEmployees, ImportTemplate, ImportPrecheck,
+} from '../../api/employees';
+import { Company, Store, Employee } from '../../types';
+import {
+  parseExcelFile, ParsedRow,
+  FIELD_CATALOG, REQUIRED_FIELD_KEYS, fieldLabel,
+  buildInitialMapping, validateRows, RowValidation, RowIssue, IssueCode,
+  ValidationContext, downloadSampleEmployeesExcel, analyzeColumns, ColumnInfo,
+} from './bulkImportUtils';
 
 interface Props {
   open: boolean;
@@ -16,73 +26,502 @@ interface Props {
   onComplete: () => void;
 }
 
-type Phase = 'upload' | 'preview' | 'processing' | 'done';
+type Step = 1 | 2 | 3 | 4;
 
-export function BulkImportModal({ open, onClose, onComplete }: Props) {
+/* ── Shared visual tokens ─────────────────────────────────────────────────── */
+
+const OK = { fg: '#15803D', bg: 'rgba(21,128,61,0.10)', border: 'rgba(21,128,61,0.30)' };
+const WARN = { fg: '#B45309', bg: 'rgba(245,158,11,0.11)', border: 'rgba(245,158,11,0.38)' };
+const ERR = { fg: '#B91C1C', bg: 'rgba(220,38,38,0.09)', border: 'rgba(220,38,38,0.32)' };
+const INFO = { fg: 'var(--primary)', bg: 'rgba(13,33,55,0.045)', border: 'var(--border)' };
+
+/** One icon per issue kind, so a problem is recognisable before it is read. */
+const ISSUE_ICON: Record<IssueCode, typeof AlertCircle> = {
+  REQUIRED_MISSING: AlertCircle,
+  INVALID_EMAIL: Mail,
+  DUPLICATE_IN_FILE: Copy,
+  ALREADY_EXISTS: User,
+  COMPANY_NOT_FOUND: Building2,
+  STORE_NOT_FOUND: StoreIcon,
+  STORE_WRONG_COMPANY: Building2,
+  INVALID_ROLE: ShieldAlert,
+  ADMIN_NOT_ALLOWED: Ban,
+  INVALID_DATE: Calendar,
+  INVALID_NUMBER: Hash,
+  STORE_OVER_CAPACITY: StoreIcon,
+  SUPERVISOR_NOT_FOUND: User,
+  VALUE_NOT_RECOGNISED: AlertTriangle,
+};
+
+function StatCard({ value, label, tone, icon }: { value: number | string; label: string; tone: 'ok' | 'warn' | 'err' | 'plain'; icon?: React.ReactNode }) {
+  const c = tone === 'ok' ? OK : tone === 'warn' ? WARN : tone === 'err' ? ERR : null;
+  return (
+    <div style={{ padding: '10px 13px', borderRadius: 11, background: c ? c.bg : 'var(--background)', border: `1px solid ${c ? c.border : 'var(--border)'}` }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        {icon && <span style={{ color: c ? c.fg : 'var(--text-muted)', display: 'flex' }}>{icon}</span>}
+        <div style={{ fontSize: 21, fontWeight: 800, lineHeight: 1.1, color: c ? c.fg : 'var(--text-primary)' }}>{value}</div>
+      </div>
+      <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-secondary)', marginTop: 3 }}>{label}</div>
+    </div>
+  );
+}
+
+function Banner({ tone, icon, title, body, html }: { tone: 'ok' | 'warn' | 'err' | 'info'; icon: React.ReactNode; title: string; body?: string; html?: boolean }) {
+  const c = tone === 'ok' ? OK : tone === 'warn' ? WARN : tone === 'err' ? ERR : INFO;
+  return (
+    <div style={{ display: 'flex', gap: 10, padding: '10px 13px', borderRadius: 10, background: c.bg, border: `1px solid ${c.border}` }}>
+      <span style={{ color: c.fg, flexShrink: 0, marginTop: 1, display: 'flex' }}>{icon}</span>
+      <div style={{ minWidth: 0 }}>
+        {html
+          ? <div style={{ fontSize: 12.5, fontWeight: 600, color: c.fg, lineHeight: 1.5 }} dangerouslySetInnerHTML={{ __html: title }} />
+          : <div style={{ fontSize: 12.5, fontWeight: 700, color: c.fg, lineHeight: 1.45 }}>{title}</div>}
+        {body && <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 3, lineHeight: 1.5 }}>{body}</div>}
+      </div>
+    </div>
+  );
+}
+
+function Pill({ tone, children }: { tone: 'ok' | 'warn' | 'err' | 'info' | 'muted'; children: React.ReactNode }) {
+  const c = tone === 'ok' ? OK : tone === 'warn' ? WARN : tone === 'err' ? ERR : tone === 'info' ? INFO
+    : { fg: 'var(--text-muted)', bg: 'var(--background)', border: 'var(--border)' };
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 7px', borderRadius: 999,
+      fontSize: 9.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.4,
+      color: c.fg, background: c.bg, border: `1px solid ${c.border}`, whiteSpace: 'nowrap',
+    }}>
+      {children}
+    </span>
+  );
+}
+
+/* ── Custom field dropdown ────────────────────────────────────────────────── */
+
+/**
+ * Replaces the native <select>, whose option list is drawn by the OS and cannot
+ * be styled — it looked foreign next to the rest of the wizard and gave no room
+ * for the required marker or the stored-value hint.
+ */
+function FieldSelect({ value, onChange, lang, invalid }: {
+  value: string; onChange: (v: string) => void; lang: string; invalid?: boolean;
+}) {
   const { t } = useTranslation();
-  const { user } = useAuth();
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  const [phase, setPhase] = useState<Phase>('upload');
-  const [file, setFile] = useState<File | null>(null);
-  const [rows, setRows] = useState<ParsedRow[]>([]);
-  const [results, setResults] = useState<ImportResult[]>([]);
-  const [progress, setProgress] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [dragOver, setDragOver] = useState(false);
-  const [guideOpen, setGuideOpen] = useState(false);
-  const [isEditingData, setIsEditingData] = useState(false);
-  const [showMappingModal, setShowMappingModal] = useState(false);
-  const [pendingRows, setPendingRows] = useState<ParsedRow[]>([]);
-  const [pendingHeaders, setPendingHeaders] = useState<string[]>([]);
-
-  // Reference data for name→id lookups
-  const [companies, setCompanies] = useState<Company[]>([]);
-  const [stores, setStores] = useState<Store[]>([]);
-  const [supervisors, setSupervisors] = useState<Employee[]>([]);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
-    setPhase('upload'); setFile(null); setRows([]); setResults([]); setProgress(0); setError(null); setGuideOpen(false);
-    setShowMappingModal(false); setPendingRows([]); setPendingHeaders([]);
-    // Load reference data
+    const close = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open]);
+
+  const current = FIELD_CATALOG.find((f) => f.key === value);
+  const required = FIELD_CATALOG.filter((f) => f.required);
+  const optional = FIELD_CATALOG.filter((f) => !f.required);
+
+  const row = (key: string, label: string, req: boolean) => (
+    <button
+      key={key || 'none'}
+      onMouseDown={(e) => { e.preventDefault(); onChange(key); setOpen(false); }}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+        padding: '7px 11px', border: 'none', cursor: 'pointer', fontSize: 12,
+        background: key === value ? 'rgba(13,33,55,0.06)' : 'transparent',
+        color: key ? 'var(--text-primary)' : 'var(--text-muted)',
+        fontWeight: key === value ? 700 : 500,
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(201,151,58,0.10)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = key === value ? 'rgba(13,33,55,0.06)' : 'transparent'; }}
+    >
+      <span style={{ width: 13, display: 'flex', flexShrink: 0, color: OK.fg }}>
+        {key === value && <Check size={13} strokeWidth={3} />}
+      </span>
+      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+      {req && <span style={{ color: ERR.fg, fontWeight: 800, fontSize: 11 }}>*</span>}
+    </button>
+  );
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          width: '100%', display: 'flex', alignItems: 'center', gap: 7, padding: '7px 10px',
+          borderRadius: 8, border: `1px solid ${invalid ? ERR.border : open ? 'var(--accent)' : 'var(--border)'}`,
+          background: 'var(--surface)', cursor: 'pointer', fontSize: 12, textAlign: 'left',
+          color: current ? 'var(--text-primary)' : 'var(--text-muted)', fontWeight: current ? 600 : 400,
+        }}
+      >
+        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {current ? fieldLabel(current.key, lang) : t('employees.importMappingIgnore')}
+        </span>
+        {current?.required && <span style={{ color: ERR.fg, fontWeight: 800 }}>*</span>}
+        <ChevronDown size={14} style={{ flexShrink: 0, opacity: 0.6, transform: open ? 'rotate(180deg)' : undefined, transition: 'transform .15s' }} />
+      </button>
+
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 60,
+          maxHeight: 280, overflowY: 'auto', background: 'var(--surface)', borderRadius: 10,
+          border: '1px solid var(--border)', boxShadow: '0 16px 40px rgba(13,33,55,0.22)', padding: 4,
+        }}>
+          {row('', t('employees.importMappingIgnore'), false)}
+          <div style={{ padding: '5px 11px 3px', fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.5, color: ERR.fg }}>
+            {t('employees.importGuideColRequired')}
+          </div>
+          {required.map((f) => row(f.key, fieldLabel(f.key, lang), true))}
+          <div style={{ padding: '7px 11px 3px', fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-muted)' }}>
+            {t('employees.importGuideColName')}
+          </div>
+          {optional.map((f) => row(f.key, fieldLabel(f.key, lang), false))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Guide modal ──────────────────────────────────────────────────────────── */
+
+/** Mock spreadsheet used to show, rather than describe, a good and a bad file. */
+function MiniSheet({ cols, rows, badCells, extraCol }: {
+  cols: string[]; rows: string[][]; badCells?: Array<[number, number, 'err' | 'warn']>; extraCol?: number;
+}) {
+  const cellTone = (r: number, c: number) => badCells?.find(([br, bc]) => br === r && bc === c)?.[2];
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 9, overflow: 'hidden', background: 'var(--surface)' }}>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 480 }}>
+          <thead>
+            <tr style={{ background: 'var(--surface-warm)' }}>
+              {cols.map((c, i) => (
+                <th key={c} style={{
+                  padding: '6px 9px', fontSize: 10, fontWeight: 800, textAlign: 'left', whiteSpace: 'nowrap',
+                  borderBottom: '1px solid var(--border)',
+                  color: extraCol === i ? WARN.fg : 'var(--text-primary)',
+                  background: extraCol === i ? WARN.bg : undefined,
+                }}>
+                  {c}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, ri) => (
+              <tr key={ri}>
+                {r.map((cell, ci) => {
+                  const tone = cellTone(ri, ci);
+                  return (
+                    <td key={ci} style={{
+                      padding: '5px 9px', fontSize: 10.5, whiteSpace: 'nowrap',
+                      borderBottom: '1px solid var(--border-light)',
+                      color: tone === 'err' ? ERR.fg : tone === 'warn' ? WARN.fg : 'var(--text-secondary)',
+                      background: tone === 'err' ? ERR.bg : tone === 'warn' ? WARN.bg : extraCol === ci ? 'rgba(245,158,11,0.05)' : undefined,
+                      fontWeight: tone ? 700 : 500,
+                    }}>
+                      {cell || <span style={{ opacity: 0.4 }}>—</span>}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function GuideModal({ open, onClose, lang }: { open: boolean; onClose: () => void; lang: string }) {
+  const { t } = useTranslation();
+  if (!open) return null;
+
+  const th: React.CSSProperties = {
+    textAlign: 'left', padding: '7px 10px', fontSize: 10, fontWeight: 800, textTransform: 'uppercase',
+    letterSpacing: 0.4, color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap',
+    position: 'sticky', top: 0, background: 'var(--surface-warm)', zIndex: 1,
+  };
+  const td: React.CSSProperties = {
+    padding: '6px 10px', fontSize: 11, color: 'var(--text-secondary)',
+    borderBottom: '1px solid var(--border-light)', verticalAlign: 'top',
+  };
+
+  const CASES: Array<{ key: string; blocking: boolean }> = [
+    { key: 'MissingCol', blocking: true },
+    { key: 'WrongCompany', blocking: true },
+    { key: 'Duplicate', blocking: true },
+    { key: 'Admin', blocking: true },
+    { key: 'ExtraCol', blocking: false },
+    { key: 'Capacity', blocking: false },
+    { key: 'UnknownValue', blocking: false },
+  ];
+
+  const section = (title: string) => (
+    <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-display)', display: 'flex', alignItems: 'center', gap: 7 }}>
+      <span style={{ width: 3, height: 14, background: 'var(--accent)', borderRadius: 2 }} />
+      {title}
+    </div>
+  );
+
+  return createPortal(
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(13,33,55,0.58)', zIndex: 10001, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: 'min(1000px, 100%)', height: 'min(88vh, 900px)', background: 'var(--surface)', borderRadius: 16,
+          border: '1px solid var(--border)', boxShadow: '0 24px 60px rgba(13,33,55,0.30)',
+          display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        }}
+      >
+        <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+          <BookOpen size={18} color="var(--primary)" />
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, fontFamily: 'var(--font-display)', color: 'var(--text-primary)', flex: 1 }}>
+            {t('employees.importGuideTitle')}
+          </h3>
+          <button onClick={onClose} style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--background)', color: 'var(--text-muted)', cursor: 'pointer' }}>
+            <X size={15} />
+          </button>
+        </div>
+
+        <div style={{ padding: 20, overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 18 }}>
+          {/* How it works */}
+          {section(t('employees.importGuideSectionHow'))}
+          <Banner tone="info" icon={<Info size={15} />} title={t('employees.importGuideIntro')} />
+          <Banner tone="info" icon={<Info size={15} />} title={t('employees.importGuideLangNote')} />
+
+          {/* Visual: good vs bad file */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 14 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <CheckCircle2 size={14} color={OK.fg} />
+                <span style={{ fontSize: 12, fontWeight: 800, color: OK.fg }}>{t('employees.importGuideExampleGood')}</span>
+              </div>
+              <MiniSheet
+                cols={['Nome', 'Cognome', 'E-mail', 'Ruolo', 'Azienda', 'Luogo di lavoro']}
+                rows={[
+                  ['Mario', 'Rossi', 'm.rossi@a.it', 'Dipendente', 'FUSARO UOMO', 'Milano'],
+                  ['Giulia', 'Bianchi', 'g.b@a.it', 'Responsabile Negozio', 'FUSARO UOMO', 'Roma'],
+                ]}
+              />
+              <div style={{ fontSize: 10.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>{t('employees.importGuideExampleGoodDesc')}</div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <AlertTriangle size={14} color={ERR.fg} />
+                <span style={{ fontSize: 12, fontWeight: 800, color: ERR.fg }}>{t('employees.importGuideExampleBad')}</span>
+              </div>
+              <MiniSheet
+                cols={['Nome', 'Cognome', 'E-mail', 'Ruolo', 'Azienda', 'Matricola']}
+                rows={[
+                  ['Marco', 'Conti', '', 'Dipendente', 'FUSARO UOMO', 'A-114'],
+                  ['Elena', 'Barbieri', 'e.b@a.it', 'Amministratore', 'AZIENDA X', 'A-115'],
+                ]}
+                badCells={[[0, 2, 'err'], [1, 3, 'err'], [1, 4, 'err']]}
+                extraCol={5}
+              />
+              <div style={{ fontSize: 10.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>{t('employees.importGuideExampleBadDesc')}</div>
+            </div>
+          </div>
+
+          {/* The 4 steps */}
+          {section(t('employees.importGuideSectionSteps'))}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10 }}>
+            {[1, 2, 3, 4].map((n) => (
+              <div key={n} style={{ padding: '11px 13px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--background)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5 }}>
+                  <span style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--accent)', color: '#fff', fontSize: 10.5, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{n}</span>
+                  <span style={{ fontSize: 11.5, fontWeight: 800, color: 'var(--text-primary)' }}>{t(`employees.importStep${n}`)}</span>
+                </div>
+                <div style={{ fontSize: 10.5, color: 'var(--text-secondary)', lineHeight: 1.55 }} dangerouslySetInnerHTML={{ __html: t(`employees.importGuideStep${n}Desc`) }} />
+              </div>
+            ))}
+          </div>
+
+          {/* Edge cases */}
+          {section(t('employees.importGuideSectionCases'))}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {CASES.map(({ key, blocking }) => (
+              <div key={key} style={{ padding: '10px 13px', borderRadius: 10, border: `1px solid ${blocking ? ERR.border : WARN.border}`, background: blocking ? ERR.bg : WARN.bg }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 5 }}>
+                  <span style={{ fontSize: 12, fontWeight: 800, color: blocking ? ERR.fg : WARN.fg }}>{t(`employees.importCase${key}`)}</span>
+                  <Pill tone={blocking ? 'err' : 'warn'}>
+                    {blocking ? t('employees.importGuideCaseBlocking') : t('employees.importGuideCaseWarning')}
+                  </Pill>
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+                  <b style={{ color: 'var(--text-primary)' }}>{t('employees.importGuideSolution')}:</b> {t(`employees.importCase${key}Fix`)}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Field reference */}
+          {section(t('employees.importGuideSectionFields'))}
+          <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.55 }} dangerouslySetInnerHTML={{ __html: t('employees.importGuideFieldsIntro') }} />
+          <Banner tone="err" icon={<AlertCircle size={14} />} title={t('employees.importGuideRequiredLegend')} />
+
+          <div style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+            <div style={{ maxHeight: 340, overflow: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 780 }}>
+                <thead>
+                  <tr>
+                    <th style={th}>{t('employees.importGuideColName')} (IT)</th>
+                    <th style={th}>{t('employees.importGuideColName')} (EN)</th>
+                    <th style={th}>{t('employees.importGuideColRequired')}</th>
+                    <th style={th}>{t('employees.importGuideColAccepts')}</th>
+                    <th style={th}>{t('employees.importGuideColStored')}</th>
+                    <th style={th}>{t('employees.importGuideColExample')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {FIELD_CATALOG.map((f) => (
+                    <tr key={f.key} style={{ background: f.required ? 'rgba(220,38,38,0.035)' : undefined }}>
+                      <td style={{ ...td, fontWeight: 700, color: 'var(--text-primary)' }}>{f.labelIt}</td>
+                      <td style={{ ...td, fontWeight: 700, color: 'var(--text-primary)' }}>{f.labelEn}</td>
+                      <td style={td}>
+                        {f.required
+                          ? <Pill tone="err">{t('employees.importGuideRequiredYes')}</Pill>
+                          : <span style={{ opacity: 0.55 }}>{t('employees.importGuideRequiredNo')}</span>}
+                      </td>
+                      <td style={td}>{(f.accepts ?? []).join('  ·  ') || <span style={{ opacity: 0.4 }}>—</span>}</td>
+                      <td style={{ ...td, fontFamily: 'monospace', fontSize: 10, color: 'var(--primary)' }}>{f.storedAs ?? '—'}</td>
+                      <td style={td}>{f.example || <span style={{ opacity: 0.4 }}>—</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ padding: '11px 20px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', flexShrink: 0, background: 'var(--surface-warm)' }}>
+          <button onClick={onClose} style={{ padding: '9px 18px', borderRadius: 9, border: 'none', background: 'var(--primary)', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+            {t('employees.importGuideClose')}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+/* ── Main wizard ──────────────────────────────────────────────────────────── */
+
+export function BulkImportModal({ open, onClose, onComplete }: Props) {
+  const { t, i18n } = useTranslation();
+  const lang = i18n.language || 'it';
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const [step, setStep] = useState<Step>(1);
+  const [file, setFile] = useState<File | null>(null);
+  const [rows, setRows] = useState<ParsedRow[]>([]);
+  const [headers, setHeaders] = useState<string[]>([]);
+  const [mapping, setMapping] = useState<Record<string, string>>({});
+  const [autoMapping, setAutoMapping] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [onlyErrors, setOnlyErrors] = useState(false);
+
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [stores, setStores] = useState<Store[]>([]);
+  const [supervisors, setSupervisors] = useState<Employee[]>([]);
+  const [precheck, setPrecheck] = useState<ImportPrecheck | null>(null);
+
+  const [templates, setTemplates] = useState<ImportTemplate[]>([]);
+  const [templateName, setTemplateName] = useState('');
+  const [templateMsg, setTemplateMsg] = useState<string | null>(null);
+
+  const [importing, setImporting] = useState(false);
+  const [doneCount, setDoneCount] = useState<number | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setStep(1); setFile(null); setRows([]); setHeaders([]); setMapping({}); setAutoMapping({});
+    setError(null); setGuideOpen(false); setEditorOpen(false); setOnlyErrors(false);
+    setTemplateName(''); setTemplateMsg(null); setImporting(false); setDoneCount(null); setImportError(null);
+
     getCompanies().then(setCompanies).catch(() => {});
     getStores().then(setStores).catch(() => {});
-    getEmployees({ limit: 500 }).then(r => setSupervisors(r.employees.filter(
-      (e: Employee) => ['admin','hr','area_manager','store_manager'].includes(e.role)
-    ))).catch(() => {});
+    getEmployees({ limit: 500 })
+      .then((r) => setSupervisors(r.employees.filter((e: Employee) => ['admin', 'hr', 'area_manager', 'store_manager'].includes(e.role))))
+      .catch(() => {});
+    getImportTemplates().then(setTemplates).catch(() => {});
+    getImportPrecheck().then(setPrecheck).catch(() => setPrecheck({ emails: [], stores: [] }));
   }, [open]);
+
+  const ctx: ValidationContext = useMemo(() => ({
+    companies,
+    stores,
+    supervisors,
+    existingEmails: new Set((precheck?.emails ?? []).map((e) => e.toLowerCase())),
+    storeHeadcount: new Map((precheck?.stores ?? []).map((s) => [s.id, s.activeCount])),
+    storeCapacity: new Map((precheck?.stores ?? []).map((s) => [s.id, s.maxStaff])),
+  }), [companies, stores, supervisors, precheck]);
+
+  const validations: RowValidation[] = useMemo(
+    () => (rows.length ? validateRows(rows, mapping, ctx) : []),
+    [rows, mapping, ctx],
+  );
+
+  const columns: ColumnInfo[] = useMemo(
+    () => analyzeColumns(headers, mapping, autoMapping, rows),
+    [headers, mapping, autoMapping, rows],
+  );
+
+  const unmappedColumns = useMemo(() => columns.filter((c) => c.status === 'unmapped'), [columns]);
+
+  const counts = useMemo(() => {
+    const errs = validations.filter((v) => v.errors.length > 0).length;
+    const warns = validations.filter((v) => v.errors.length === 0 && v.warnings.length > 0).length;
+    const companySet = new Set<string>();
+    const storeSet = new Set<string>();
+    for (const v of validations) {
+      if (v.display.company) companySet.add(v.display.company.toLowerCase());
+      if (v.display.store) storeSet.add(v.display.store.toLowerCase());
+    }
+    return {
+      total: validations.length,
+      valid: validations.length - errs,
+      errors: errs,
+      warnings: warns,
+      companies: companySet.size,
+      stores: storeSet.size,
+    };
+  }, [validations]);
+
+  const mappedFields = useMemo(() => new Set(Object.values(mapping).filter(Boolean)), [mapping]);
+  const missingRequired = useMemo(() => REQUIRED_FIELD_KEYS.filter((k) => !mappedFields.has(k)), [mappedFields]);
+
+  /** Sample uses the tenant's own company/store so most rows validate cleanly. */
+  const handleDownloadSample = useCallback(() => {
+    const company = companies[0];
+    const store = company ? stores.find((s) => s.companyId === company.id) : undefined;
+    downloadSampleEmployeesExcel(lang, company?.name ?? '', store?.name ?? '');
+  }, [companies, stores, lang]);
 
   const handleFile = useCallback(async (f: File) => {
     setError(null);
     const ext = f.name.split('.').pop()?.toLowerCase();
     if (ext !== 'xlsx' && ext !== 'xls') {
-      setError(t('employees.bulkImportAccepted', 'Accepted formats: .xlsx, .xls'));
+      setError(t('employees.importAccepted'));
       return;
     }
-    setFile(f);
     try {
       const parsed = await parseExcelFile(f);
-      if (parsed.length === 0) { setError(t('employees.bulkImportNoData', 'No valid data rows found.')); return; }
-      
-      const fileHeaders = Object.keys(parsed[0].data);
-      const mappedFields = new Set<string>();
-      for (const h of fileHeaders) {
-        const key = matchHeaderToField(h);
-        if (key) mappedFields.add(key);
+      if (parsed.length === 0) {
+        setError(t('employees.bulkImportNoData', 'No valid data rows found.'));
+        return;
       }
-      
-      const requiredKeys = ['name', 'surname', 'email', 'role', 'personalEmail', 'companyName', 'storeName'];
-      const missingRequired = requiredKeys.filter(k => !mappedFields.has(k));
-      
-      if (missingRequired.length > 0) {
-        setPendingRows(parsed);
-        setPendingHeaders(fileHeaders);
-        setShowMappingModal(true);
-      } else {
-        setRows(parsed);
-        setPhase('preview');
-      }
+      const hs = Object.keys(parsed[0].data);
+      const auto = buildInitialMapping(hs);
+      setFile(f); setRows(parsed); setHeaders(hs); setMapping(auto); setAutoMapping(auto);
+      setStep(2);
     } catch {
       setError(t('employees.bulkImportNoData', 'Failed to parse file.'));
     }
@@ -90,846 +529,688 @@ export function BulkImportModal({ open, onClose, onComplete }: Props) {
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault(); setDragOver(false);
-    const f = e.dataTransfer.files[0];
+    const f = e.dataTransfer.files?.[0];
     if (f) handleFile(f);
   }, [handleFile]);
 
-  const startImport = useCallback(async () => {
-    setPhase('processing'); setProgress(0); setResults([]);
-    const allResults: ImportResult[] = [];
-    for (let i = 0; i < rows.length; i++) {
-      const result = await processRow(rows[i], companies, stores, supervisors, t);
-      allResults.push(result);
-      setProgress(i + 1);
-      setResults([...allResults]);
-    }
-    setPhase('done');
-    if (allResults.some(r => r.success)) onComplete();
-  }, [rows, companies, stores, supervisors, onComplete, t]);
+  const editCell = useCallback((rowIndex: number, header: string, value: string) => {
+    setRows((prev) => prev.map((r) => (r.rowIndex === rowIndex ? { ...r, data: { ...r.data, [header]: value } } : r)));
+  }, []);
 
-  if (!open) return null;
+  const issueText = useCallback((issue: RowIssue) => {
+    const label = fieldLabel(issue.field, lang);
+    const reason = t(`employees.importIssue${issue.code}`, { detail: issue.detail ?? '' });
+    return `${label}: ${reason}`;
+  }, [t, lang]);
 
-  const successCount = results.filter(r => r.success).length;
-  const failCount = results.filter(r => !r.success).length;
-  const headers = rows.length > 0 ? Object.keys(rows[0].data) : [];
-
-  const S = {
-    backdrop: { position: 'fixed' as const, inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(13,33,55,0.48)', backdropFilter: 'blur(3px)' },
-    card: { background: 'var(--surface)', borderRadius: '16px', width: 'min(680px, 95vw)', maxHeight: '90vh', display: 'flex', flexDirection: 'column' as const, boxShadow: '0 24px 60px rgba(0,0,0,0.22)', overflow: 'hidden' },
-    header: { padding: '20px 24px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 },
-    body: { flex: 1, overflowY: 'auto' as const, padding: '24px' },
-    footer: { padding: '14px 24px', borderTop: '1px solid var(--border)', background: 'var(--surface-warm)', display: 'flex', justifyContent: 'flex-end', gap: '8px', flexShrink: 0 },
-    btn: { padding: '9px 20px', borderRadius: 'var(--radius-sm)', fontSize: '13px', fontWeight: 600, fontFamily: 'var(--font-body)', cursor: 'pointer', border: 'none', transition: 'background 0.15s' },
-  };
-
-  return createPortal(
-    <div style={S.backdrop} onClick={onClose}>
-      <div style={S.card} onClick={e => e.stopPropagation()}>
-        {/* Accent stripe */}
-        <div style={{ height: 3, background: 'linear-gradient(90deg, var(--accent) 0%, var(--primary) 100%)', flexShrink: 0 }} />
-
-        {/* Header */}
-        <div style={S.header}>
-          <div>
-            <h2 style={{ fontSize: '17px', fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-display)', margin: 0, letterSpacing: '-0.02em' }}>
-              {t('employees.bulkImportTitle', 'Importa dipendenti da Excel')}
-            </h2>
-            <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '3px 0 0', fontFamily: 'var(--font-body)' }}>
-              {t('employees.bulkImportSubtitle', 'Carica un file Excel per importare ed inserire multipli dipendenti contemporaneamente.')}
-            </p>
-          </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '22px', lineHeight: 1, padding: '4px 6px', borderRadius: 'var(--radius-sm)' }}>×</button>
-        </div>
-
-        {/* Body */}
-        <div style={S.body}>
-
-          {/* ── UPLOAD phase ── */}
-          {phase === 'upload' && (
-            <>
-              <div
-                onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-                onDragLeave={() => setDragOver(false)}
-                onDrop={handleDrop}
-                onClick={() => fileRef.current?.click()}
-                style={{
-                  border: `2px dashed ${dragOver ? 'var(--accent)' : 'var(--border)'}`,
-                  borderRadius: '14px', padding: '56px 24px', textAlign: 'center', cursor: 'pointer',
-                  background: dragOver ? 'rgba(139,105,20,0.06)' : 'var(--surface-warm)',
-                  transition: 'border-color 0.2s, background 0.2s',
-                }}
-              >
-                <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
-                <Upload size={36} color={dragOver ? 'var(--accent)' : 'var(--text-muted)'} style={{ marginBottom: 12 }} />
-                <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>
-                  {t('employees.bulkImportDropzone', 'Trascina qui il file Excel o clicca per sfogliare')}
-                </div>
-                <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                  {t('employees.bulkImportAccepted', 'Formati supportati: .xlsx, .xls')}
-                </div>
-              </div>
-
-              {/* Downloadable Excel Template Button */}
-              <div style={{ marginTop: 14, display: 'flex', justifyContent: 'center' }}>
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); downloadImportTemplateExcel(); }}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 6,
-                    padding: '8px 16px', borderRadius: 8,
-                    border: '1px solid var(--primary)', background: 'rgba(2,132,199,0.06)',
-                    color: 'var(--primary)', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                    transition: 'all 0.15s'
-                  }}
-                >
-                  <FileSpreadsheet size={15} />
-                  {t('employees.downloadTemplateExcel', 'Scarica modello Excel (.xlsx)')}
-                </button>
-              </div>
-            </>
-          )}
-
-          {/* ── Format guide (collapsible) ── */}
-          {phase === 'upload' && (
-            <div style={{ marginTop: 16 }}>
-              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
-                <button
-                  onClick={(e) => { e.stopPropagation(); setGuideOpen(!guideOpen); }}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 6,
-                    padding: '7px 14px', borderRadius: 7,
-                    border: '1.5px solid var(--border)', background: 'transparent',
-                    color: 'var(--text-secondary)', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                    transition: 'all 0.15s ease',
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-warm)'; e.currentTarget.style.borderColor = 'var(--primary)'; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'var(--border)'; }}
-                >
-                  <AlertTriangle size={14} style={{ color: guideOpen ? 'var(--primary)' : 'var(--text-muted)' }} />
-                  {guideOpen ? t('employees.bulkImportGuideHide', 'Nascondi guida campi') : t('employees.bulkImportGuideToggle', 'Mostra guida struttura campi')}
-                </button>
-              </div>
-
-              {guideOpen && (
-                <div style={{
-                  borderRadius: 10, border: '1px solid var(--border)', overflow: 'hidden',
-                  fontSize: 12, boxShadow: 'var(--shadow-sm)', background: 'var(--surface)',
-                }}>
-                  <div style={{
-                    background: 'var(--primary)', color: '#fff',
-                    padding: '8px 14px', fontWeight: 700, fontSize: 11,
-                    letterSpacing: '0.05em', textTransform: 'uppercase'
-                  }}>
-                    {t('employees.bulkImportGuideTitle', 'Struttura Colonne Excel Supportate')}
-                  </div>
-                  <div style={{ maxHeight: 320, overflow: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                      <thead style={{ position: 'sticky', top: 0, background: 'var(--surface-warm)', zIndex: 1 }}>
-                        <tr>
-                          <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: 'var(--text-muted)', borderBottom: '2px solid var(--border)', whiteSpace: 'nowrap' }}>{t('employees.guideColName', 'Colonna')}</th>
-                          <th style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 700, color: 'var(--text-muted)', borderBottom: '2px solid var(--border)', width: 90 }}>{t('employees.guideColRequired', 'Obbligatorio')}</th>
-                          <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: 'var(--text-muted)', borderBottom: '2px solid var(--border)' }}>{t('employees.guideColFormat', 'Formato')}</th>
-                          <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: 'var(--text-muted)', borderBottom: '2px solid var(--border)' }}>{t('employees.guideColExample', 'Esempio')}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {[
-                          { col: 'Nome / Nome (completo)', req: true, fmt: t('employees.guideText', 'Testo'), ex: 'Mario' },
-                          { col: 'Cognome / Cognome (completo)', req: true, fmt: t('employees.guideText', 'Testo'), ex: 'Rossi' },
-                          { col: 'E-mail / Email', req: true, fmt: t('employees.guideEmail', 'Email'), ex: 'mario.rossi@azienda.it' },
-                          { col: 'Email personale', req: true, fmt: t('employees.guideEmail', 'Email'), ex: 'mario@gmail.com' },
-                          { col: 'Ruolo', req: true, fmt: 'employee / hr / admin / area_manager / store_manager', ex: 'employee' },
-                          { col: 'Azienda / Società', req: true, fmt: t('employees.guideText', 'Testo'), ex: 'FUSARO UOMO' },
-                          { col: 'Negozio / Sede / Luogo di lavoro', req: true, fmt: t('employees.guideText', 'Testo'), ex: 'Store Roma' },
-                          { col: 'Supervisore / Responsabile', req: false, fmt: t('employees.guideFullName', 'Nome Cognome'), ex: 'Marco Verdi' },
-                          { col: 'Dipartimento / Reparto', req: false, fmt: t('employees.guideText', 'Testo'), ex: 'Vendite' },
-                          { col: 'Data assunzione', req: false, fmt: 'YYYY-MM-DD / DD/MM/YYYY', ex: '2024-01-15' },
-                          { col: 'Scadenza contratto / Fine contratto', req: false, fmt: 'YYYY-MM-DD / DD/MM/YYYY', ex: '2025-01-14' },
-                          { col: 'Orario di lavoro', req: false, fmt: 'Tempo Pieno / Part-time', ex: 'Tempo Pieno' },
-                          { col: 'Ore settimanali', req: false, fmt: t('employees.guideNumber', 'Numero'), ex: '40' },
-                          { col: 'Data nascita / Data di nascita', req: false, fmt: 'YYYY-MM-DD / DD/MM/YYYY', ex: '1990-05-20' },
-                          { col: 'Genere / Sesso', req: false, fmt: 'Maschio / Femmina / M / F', ex: 'Maschio' },
-                          { col: 'Stato', req: false, fmt: 'Attivo / Inattivo', ex: 'Attivo' },
-                          { col: 'Provincia', req: false, fmt: t('employees.guideText', 'Testo'), ex: 'RM' },
-                          { col: 'Città', req: false, fmt: t('employees.guideText', 'Testo'), ex: 'Roma' },
-                          { col: 'Indirizzo', req: false, fmt: t('employees.guideText', 'Testo'), ex: 'Via del Corso 100' },
-                          { col: 'CAP / Codice postale', req: false, fmt: t('employees.guideText', 'Testo'), ex: '00186' },
-                          { col: 'Telefono / Cellulare', req: false, fmt: t('employees.guideText', 'Testo'), ex: '+393331234567' },
-                          { col: 'Nazionalità', req: false, fmt: t('employees.guideText', 'Testo'), ex: 'Italiana' },
-                          { col: 'IBAN', req: false, fmt: t('employees.guideText', 'Testo'), ex: 'IT60X054281110...' },
-                          { col: 'Primo soccorso / Primo soccorritore', req: false, fmt: 'Sì / No', ex: 'Sì' },
-                          { col: 'Stato civile', req: false, fmt: 'Celibe / Nubile / Coniugato / ...', ex: 'Celibe' },
-                          { col: 'Tipo contratto', req: false, fmt: 'Tempo Indeterminato / Determinato / Apprendistato', ex: 'Tempo Determinato' },
-                          { col: 'Data di risoluzione / Data cessazione', req: false, fmt: 'YYYY-MM-DD / DD/MM/YYYY', ex: '2025-06-30' },
-                          { col: 'Tipo cessazione / Tipo risoluzione', req: false, fmt: 'Dimissioni volontarie / Licenziamento / ...', ex: 'Fine contratto' },
-                          { col: 'Password temporanea', req: false, fmt: t('employees.guideText', 'Testo'), ex: 'MyP@ss123' },
-                        ].map((row, i) => (
-                          <tr key={i} style={{ borderBottom: '1px solid var(--border-light)', background: i % 2 === 0 ? 'var(--surface)' : 'var(--surface-warm)' }}>
-                            <td style={{ padding: '7px 10px', fontWeight: 600, color: 'var(--text-primary)' }}>{row.col}</td>
-                            <td style={{ padding: '7px 10px', textAlign: 'center', fontWeight: 700, color: row.req ? '#DC2626' : 'var(--text-muted)' }}>{row.req ? t('common.yes', 'Sì') : 'No'}</td>
-                            <td style={{ padding: '7px 10px', color: 'var(--text-secondary)', fontSize: 11 }}>{row.fmt}</td>
-                            <td style={{ padding: '7px 10px', fontFamily: 'monospace', fontSize: 11, color: 'var(--primary)' }}>{row.ex}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div style={{ padding: '8px 14px', background: 'var(--surface-warm)', borderTop: '1px solid var(--border)', fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                    {t('employees.bulkImportGuideNote', 'Il sistema riconosce automaticamente i nomi delle colonne in italiano e inglese, ignorando parentesi, trattini e spazi aggiuntivi.')}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {error && (
-            <div style={{ margin: '16px 0 0', padding: '10px 14px', borderRadius: 8, background: 'rgba(220,38,38,0.08)', border: '1px solid rgba(220,38,38,0.2)', color: '#DC2626', fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <XCircle size={16} /> {error}
-            </div>
-          )}
-
-          {/* ── PREVIEW phase ── */}
-          {phase === 'preview' && (
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
-                  {t('employees.bulkImportPreviewRows', 'File: {{name}} ({{count}} righe trovate)', { name: file?.name, count: rows.length })}
-                </span>
-                <button onClick={() => setIsEditingData(true)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 10px', fontSize: 12, fontWeight: 600, color: 'var(--primary)', cursor: 'pointer' }}>
-                  {t('employees.bulkImportEditData', 'Modifica dati')}
-                </button>
-              </div>
-
-              <div style={{ maxHeight: 300, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                  <thead style={{ position: 'sticky', top: 0, background: 'var(--surface-warm)', zIndex: 1 }}>
-                    <tr>
-                      <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>#</th>
-                      {headers.map(h => (
-                        <th key={h} style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.slice(0, 10).map((r) => (
-                      <tr key={r.rowIndex} style={{ borderBottom: '1px solid var(--border-light)' }}>
-                        <td style={{ padding: '7px 10px', color: 'var(--text-muted)' }}>{r.rowIndex}</td>
-                        {headers.map(h => (
-                          <td key={h} style={{ padding: '7px 10px', whiteSpace: 'nowrap' }}>{String(r.data[h] ?? '')}</td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {rows.length > 10 && (
-                <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '6px 0 0', textAlign: 'center' }}>
-                  {t('employees.bulkImportPreviewMore', 'Mostrando le prime 10 di {{count}} righe.', { count: rows.length })}
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* ── PROCESSING phase ── */}
-          {phase === 'processing' && (
-            <div style={{ textAlign: 'center', padding: '32px 0' }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 12 }}>
-                {t('employees.bulkImportProcessing', 'Importazione in corso... ({{current}}/{{total}})', { current: progress, total: rows.length })}
-              </div>
-              <div style={{ height: 8, background: 'var(--border-light)', borderRadius: 4, overflow: 'hidden', margin: '0 auto 16px', width: '80%' }}>
-                <div style={{ height: '100%', width: `${(progress / rows.length) * 100}%`, background: 'var(--primary)', transition: 'width 0.2s' }} />
-              </div>
-            </div>
-          )}
-
-          {/* ── DONE phase ── */}
-          {phase === 'done' && (
-            <div>
-              <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
-                <div style={{ flex: 1, padding: 14, borderRadius: 10, background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)', textAlign: 'center' }}>
-                  <div style={{ fontSize: 22, fontWeight: 800, color: '#059669' }}>{successCount}</div>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: '#059669' }}>{t('employees.bulkImportSuccessCount', 'Importati con successo')}</div>
-                </div>
-                <div style={{ flex: 1, padding: 14, borderRadius: 10, background: failCount > 0 ? 'rgba(220,38,38,0.08)' : 'var(--surface-warm)', border: `1px solid ${failCount > 0 ? 'rgba(220,38,38,0.2)' : 'var(--border)'}`, textAlign: 'center' }}>
-                  <div style={{ fontSize: 22, fontWeight: 800, color: failCount > 0 ? '#DC2626' : 'var(--text-muted)' }}>{failCount}</div>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: failCount > 0 ? '#DC2626' : 'var(--text-muted)' }}>{t('employees.bulkImportFailCount', 'Falliti / Errori')}</div>
-                </div>
-              </div>
-
-              {failCount > 0 && (
-                <div style={{ maxHeight: 220, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                    <thead style={{ position: 'sticky', top: 0, background: 'var(--surface-warm)' }}>
-                      <tr>
-                        <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: 'var(--text-muted)' }}>{t('employees.bulkImportRow', 'Riga')}</th>
-                        <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: 'var(--text-muted)' }}>{t('employees.bulkImportError', 'Errore')}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {results.filter(r => !r.success).map(r => {
-                        let errText = typeof r.error === 'string' ? r.error : r.error?.fallback || r.error?.key || 'Errore sconosciuto';
-                        if (typeof r.error === 'object' && r.error.key) {
-                          errText = String(t(r.error.key, r.error.params || {}));
-                        }
-                        return (
-                          <tr key={r.rowIndex} style={{ borderBottom: '1px solid var(--border-light)' }}>
-                            <td style={{ padding: '7px 10px', color: '#DC2626', fontWeight: 700 }}>{r.rowIndex}</td>
-                            <td style={{ padding: '7px 10px', color: '#DC2626' }}>{errText}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
-
-        </div>
-
-        {/* Footer */}
-        <div style={S.footer}>
-          {phase === 'upload' && (
-            <button onClick={onClose} style={{ ...S.btn, background: 'none', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
-              {t('common.cancel')}
-            </button>
-          )}
-
-          {phase === 'preview' && (
-            <>
-              <button onClick={() => { setPhase('upload'); setFile(null); setRows([]); }} style={{ ...S.btn, background: 'none', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
-                {t('common.cancel')}
-              </button>
-              <button onClick={startImport} style={{ ...S.btn, background: 'var(--primary)', color: '#fff' }}>
-                {t('employees.bulkImportConfirm', 'Conferma Importazione ({{count}} dipendenti)', { count: rows.length })}
-              </button>
-            </>
-          )}
-
-          {phase === 'done' && (
-            <>
-              <button onClick={() => { setPhase('upload'); setFile(null); setRows([]); setResults([]); }} style={{ ...S.btn, background: 'none', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
-                {t('employees.bulkImportNewImport', 'Nuova Importazione')}
-              </button>
-              <button onClick={onClose} style={{ ...S.btn, background: 'var(--primary)', color: '#fff' }}>
-                {t('employees.bulkImportDone', 'Completato')}
-              </button>
-            </>
-          )}
-        </div>
-
-        <EditDataModal 
-          open={isEditingData} 
-          rows={rows} 
-          onClose={() => setIsEditingData(false)} 
-          onSave={(newRows) => {
-            setRows(newRows);
-            setIsEditingData(false);
-            setPhase('preview');
-            setResults([]);
-          }}
-        />
-
-        <ColumnMappingModal
-          open={showMappingModal}
-          headers={pendingHeaders}
-          rows={pendingRows}
-          onClose={() => {
-            setShowMappingModal(false);
-            setFile(null);
-            setPhase('upload');
-          }}
-          onSave={(mappedRows) => {
-            setRows(mappedRows);
-            setShowMappingModal(false);
-            setPhase('preview');
-          }}
-        />
-      </div>
-    </div>,
-    document.body
-  );
-}
-
-/* ── Edit Data Modal ─────────────────────────────────────────────────── */
-
-function EditDataModal({ 
-  open, 
-  rows, 
-  onClose, 
-  onSave 
-}: { 
-  open: boolean; 
-  rows: ParsedRow[]; 
-  onClose: () => void; 
-  onSave: (newRows: ParsedRow[]) => void; 
-}) {
-  const { t } = useTranslation();
-  const [localRows, setLocalRows] = useState<ParsedRow[]>([]);
-
-  useEffect(() => {
-    if (open) {
-      setLocalRows(JSON.parse(JSON.stringify(rows)));
-    }
-  }, [open, rows]);
-
-  if (!open) return null;
-
-  const headers = localRows.length > 0 ? Object.keys(localRows[0].data) : [];
-
-  const handleCellChange = (rowIndex: number, header: string, val: string) => {
-    setLocalRows(prev => prev.map(r => r.rowIndex === rowIndex 
-      ? { ...r, data: { ...r.data, [header]: val } } 
-      : r
-    ));
-  };
-
-  const S = {
-    backdrop: { position: 'fixed' as const, inset: 0, zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' },
-    card: { background: 'var(--surface)', borderRadius: '16px', width: 'min(1000px, 95vw)', height: '85vh', display: 'flex', flexDirection: 'column' as const, boxShadow: '0 24px 60px rgba(0,0,0,0.3)', overflow: 'hidden' },
-    header: { padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
-    body: { flex: 1, overflow: 'auto' as const, padding: '0' },
-    footer: { padding: '12px 20px', borderTop: '1px solid var(--border)', background: 'var(--surface-warm)', display: 'flex', justifyContent: 'flex-end', gap: '8px', flexShrink: 0 },
-    btn: { padding: '8px 18px', borderRadius: 'var(--radius-sm)', fontSize: '13px', fontWeight: 600, cursor: 'pointer', border: 'none' },
-    input: { width: '100%', border: 'none', background: 'transparent', padding: '8px 10px', fontSize: '11.5px', color: 'var(--text-primary)', fontFamily: 'inherit', minWidth: '120px' },
-  };
-
-  return createPortal(
-    <div style={S.backdrop} onClick={onClose}>
-      <div style={S.card} onClick={e => e.stopPropagation()}>
-        <div style={S.header}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <FileSpreadsheet size={18} color="var(--primary)" />
-            <h3 style={{ fontSize: '15px', fontWeight: 700, margin: 0 }}>{t('employees.bulkImportEditData', 'Modifica dati')}</h3>
-          </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '20px' }}>×</button>
-        </div>
-        
-        <div style={S.body}>
-          <table style={{ minWidth: '100%', borderCollapse: 'collapse' }}>
-            <thead style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--surface-warm)' }}>
-              <tr>
-                <th style={{ width: 50, padding: '12px 10px', fontSize: 10, color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', textAlign: 'left', background: 'var(--surface-warm)', position: 'sticky', left: 0, zIndex: 11 }}>#</th>
-                {headers.map(h => (
-                  <th key={h} style={{ minWidth: 150, padding: '12px 10px', fontSize: 10, color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', textAlign: 'left', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {localRows.map((row) => (
-                <tr key={row.rowIndex} style={{ borderBottom: '1px solid var(--border-light)' }}>
-                  <td style={{ padding: '8px 10px', fontSize: 11, color: 'var(--text-muted)', background: 'var(--surface)', position: 'sticky', left: 0, zIndex: 1 }}>{row.rowIndex}</td>
-                  {headers.map(h => (
-                    <td key={h} style={{ padding: 0, borderLeft: '1px solid var(--border-light)' }}>
-                      <input 
-                        style={S.input}
-                        value={String(row.data[h] ?? '')}
-                        onChange={e => handleCellChange(row.rowIndex, h, e.target.value)}
-                      />
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div style={S.footer}>
-          <button onClick={onClose} style={{ ...S.btn, background: 'none', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
-            {t('common.cancel')}
-          </button>
-          <button 
-            onClick={() => onSave(localRows)} 
-            style={{ ...S.btn, background: 'var(--primary)', color: '#fff' }}
-          >
-            {t('employees.bulkImportEditAction', 'Salva modifiche')}
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body
-  );
-}
-
-
-/* ── Column Mapping Modal ───────────────────────────────────────────────── */
-
-const SCHEMA_FIELDS = [
-  { key: 'name', label: 'Nome', format: 'text', required: true },
-  { key: 'surname', label: 'Cognome', format: 'text', required: true },
-  { key: 'email', label: 'Email Aziendale', format: 'email', required: true },
-  { key: 'role', label: 'Ruolo', format: 'text', required: true },
-  { key: 'companyName', label: 'Azienda', format: 'text', required: true },
-  { key: 'storeName', label: 'Negozio / Sede', format: 'text', required: true },
-  { key: 'personalEmail', label: 'Email Personale', format: 'email', required: true },
-  { key: 'password', label: 'Password Temporanea', format: 'password', required: false },
-  { key: 'weeklyHours', label: 'Ore Settimanali', format: 'number', required: false },
-  { key: 'cap', label: 'CAP / Codice Postale', format: 'number', required: false },
-  { key: 'supervisorName', label: 'Supervisore / Responsabile', format: 'text', required: false },
-  { key: 'department', label: 'Dipartimento / Reparto', format: 'text', required: false },
-  { key: 'hireDate', label: 'Data di Assunzione', format: 'date', required: false },
-  { key: 'workingType', label: 'Orario di Lavoro', format: 'text', required: false },
-  { key: 'dateOfBirth', label: 'Data di Nascita', format: 'date', required: false },
-  { key: 'gender', label: 'Genere / Sesso', format: 'text', required: false },
-  { key: 'nationality', label: 'Nazionalità', format: 'text', required: false },
-  { key: 'iban', label: 'IBAN', format: 'text', required: false },
-  { key: 'address', label: 'Indirizzo', format: 'text', required: false },
-  { key: 'city', label: 'Città', format: 'text', required: false },
-  { key: 'state', label: 'Provincia', format: 'text', required: false },
-  { key: 'country', label: 'Nazione / Paese', format: 'text', required: false },
-  { key: 'phone', label: 'Telefono', format: 'text', required: false },
-  { key: 'status', label: 'Stato (Attivo / Inattivo)', format: 'text', required: false },
-  { key: 'maritalStatus', label: 'Stato Civile', format: 'text', required: false },
-  { key: 'firstAidFlag', label: 'Primo Soccorso', format: 'text', required: false },
-  { key: 'contractType', label: 'Tipo Contratto', format: 'text', required: false },
-  { key: 'probationMonths', label: 'Mesi di Prova', format: 'number', required: false },
-  { key: 'contractEndDate', label: 'Scadenza Contratto', format: 'date', required: false },
-  { key: 'terminationDate', label: 'Data di Risoluzione / Cessazione', format: 'date', required: false },
-  { key: 'terminationType', label: 'Tipo Cessazione', format: 'text', required: false },
-];
-
-const FIELD_TO_HEADER: Record<string, string> = {
-  name: 'name',
-  surname: 'surname',
-  email: 'email',
-  role: 'role',
-  companyName: 'company',
-  storeName: 'store',
-  personalEmail: 'personal email',
-  password: 'temporary password',
-  weeklyHours: 'weekly hours',
-  cap: 'postal code',
-  supervisorName: 'supervisor',
-  department: 'department',
-  hireDate: 'hire date',
-  workingType: 'work schedule',
-  dateOfBirth: 'date of birth',
-  gender: 'gender',
-  nationality: 'nationality',
-  iban: 'iban',
-  address: 'address',
-  city: 'city',
-  state: 'state',
-  country: 'country',
-  phone: 'company phone numbers',
-  status: 'status',
-  maritalStatus: 'marital status',
-  firstAidFlag: 'first aid',
-  contractType: 'contract type',
-  probationMonths: 'probation period',
-  contractEndDate: 'contract end date',
-  terminationDate: 'termination date',
-  terminationType: 'termination type',
-};
-
-function getHeaderFormat(header: string, rows: ParsedRow[]): 'text' | 'email' | 'number' | 'password' | 'date' {
-  const lowerHeader = header.toLowerCase();
-  if (lowerHeader.includes('pass') || lowerHeader.includes('pwd')) {
-    return 'password';
-  }
-  if (
-    lowerHeader.includes('data') ||
-    lowerHeader.includes('date') ||
-    lowerHeader.includes('nascita') ||
-    lowerHeader.includes('assunzione') ||
-    lowerHeader.includes('cessazione') ||
-    lowerHeader.includes('risoluzione') ||
-    lowerHeader.includes('scadenza') ||
-    lowerHeader.includes('contratto') ||
-    lowerHeader.includes('fine')
-  ) {
-    return 'date';
-  }
-
-  const values = rows.map(r => r.data[header]).filter(v => v !== '' && v != null);
-  
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (values.some(val => emailRegex.test(String(val).trim()))) return 'email';
-
-  const dateRegex = /^(\d{4}[-\/.]\d{1,2}[-\/.]\d{1,2}|\d{1,2}[-\/.]\d{1,2}[-\/.]\d{4})$/;
-  if (values.some(val => dateRegex.test(String(val).trim()))) return 'date';
-
-  // Check for Excel date serial numbers (typical range for 2000-2030 dates: ~36526-47848)
-  const hasNumbers = values.some(val => !isNaN(Number(val)));
-  const allNumbersOrEmpty = values.every(val => val === '' || val === null || val === undefined || !isNaN(Number(val)));
-  if (hasNumbers && allNumbersOrEmpty) {
-    const numVals = values.map(Number).filter(n => !isNaN(n));
-    const looksLikeDateSerials = numVals.length > 0 && numVals.every(n => n >= 30000 && n <= 55000);
-    if (looksLikeDateSerials) return 'date';
-    return 'number';
-  }
-
-  return 'text';
-}
-
-function ColumnMappingModal({
-  open,
-  headers,
-  rows,
-  onClose,
-  onSave
-}: {
-  open: boolean;
-  headers: string[];
-  rows: ParsedRow[];
-  onClose: () => void;
-  onSave: (mappedRows: ParsedRow[]) => void;
-}) {
-  const { t } = useTranslation();
-  const [mapping, setMapping] = useState<Record<string, string>>({});
-  const [savedTemplates, setSavedTemplates] = useState<ImportTemplate[]>([]);
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
-  const [showSavePrompt, setShowSavePrompt] = useState(false);
-  const [templateName, setTemplateName] = useState('');
-  const [savingTemplate, setSavingTemplate] = useState(false);
-
-  useEffect(() => {
-    if (open) {
-      getImportTemplates().then(setSavedTemplates).catch(() => {});
-    }
-  }, [open]);
-
-  const initialMappedKeys = React.useMemo(() => {
-    const matched = new Set<string>();
-    if (!headers) return matched;
-    for (const h of headers) {
-      const key = matchHeaderToField(h);
-      if (key) matched.add(key);
-    }
-    return matched;
-  }, [headers]);
-
-  const unmappedHeaders = React.useMemo(() => {
-    if (!headers) return [];
-    return headers.filter(h => !matchHeaderToField(h));
-  }, [headers]);
-
-  const headerFormats = React.useMemo(() => {
-    const formats: Record<string, 'text' | 'email' | 'number' | 'password' | 'date'> = {};
-    for (const h of unmappedHeaders) {
-      formats[h] = getHeaderFormat(h, rows);
-    }
-    return formats;
-  }, [unmappedHeaders, rows]);
-
-  const getAvailableSchemaFields = (currentHeader: string, format: string) => {
-    const selectedKeys = Object.entries(mapping)
-      .filter(([h, k]) => h !== currentHeader && k !== '')
-      .map(([h, k]) => k);
-
-    return SCHEMA_FIELDS.filter(field => {
-      if (initialMappedKeys.has(field.key) || selectedKeys.includes(field.key)) return false;
-      // In manual mapping, allow all fields - the user knows what they're doing.
-      // Prioritize format-matched fields by sorting, not by filtering.
-      return true;
-    }).sort((a, b) => {
-      // Prioritize same-format fields
-      const aMatch = a.format === format ? 0 : 1;
-      const bMatch = b.format === format ? 0 : 1;
-      if (aMatch !== bMatch) return aMatch - bMatch;
-      // Then required fields first
-      if (a.required !== b.required) return a.required ? -1 : 1;
-      return 0;
-    });
-  };
-
-  const handleSelectField = (header: string, fieldKey: string) => {
-    setMapping(prev => ({
-      ...prev,
-      [header]: fieldKey
-    }));
-  };
-
-  const handleApplyTemplate = (templateId: string) => {
-    setSelectedTemplateId(templateId);
-    if (!templateId) return;
-    const tpl = savedTemplates.find(t => String(t.id) === templateId);
-    if (tpl && tpl.mappingJson) {
-      setMapping(tpl.mappingJson);
-    }
-  };
-
-  const handleSaveTemplateAction = async () => {
-    if (!templateName.trim()) return;
-    setSavingTemplate(true);
+  const handleImport = useCallback(async () => {
+    const payloads = validations.filter((v) => v.payload).map((v) => v.payload!);
+    if (payloads.length === 0) return;
+    setImporting(true); setImportError(null);
     try {
-      const created = await saveImportTemplate(templateName.trim(), mapping);
-      setSavedTemplates(prev => [...prev, created]);
-      setSelectedTemplateId(String(created.id));
-      setShowSavePrompt(false);
-      setTemplateName('');
-    } catch (e) {
-      console.error(e);
+      const res = await bulkImportEmployees(payloads);
+      setDoneCount(res.createdCount);
+      onComplete();
+    } catch (err: unknown) {
+      const data = (err as { response?: { data?: { error?: string } } })?.response?.data;
+      setImportError(data?.error || t('employees.importFailedBody'));
     } finally {
-      setSavingTemplate(false);
+      setImporting(false);
     }
-  };
+  }, [validations, onComplete, t]);
 
-  const handleSave = () => {
-    const newRows = rows.map(row => {
-      const newData = { ...row.data };
-      for (const [header, fieldKey] of Object.entries(mapping)) {
-        if (fieldKey) {
-          const targetHeader = FIELD_TO_HEADER[fieldKey] || fieldKey;
-          newData[targetHeader] = newData[header];
-          delete newData[header];
-        }
-      }
-      return {
-        ...row,
-        data: newData
-      };
-    });
-    onSave(newRows);
-  };
+  const handleSaveTemplate = useCallback(async () => {
+    if (!templateName.trim()) return;
+    try {
+      const saved = await saveImportTemplate(templateName.trim(), mapping);
+      setTemplates((prev) => [...prev.filter((x) => x.id !== saved.id), saved]);
+      setTemplateName('');
+      setTemplateMsg(t('employees.importTemplateSaved'));
+      setTimeout(() => setTemplateMsg(null), 2500);
+    } catch { /* surfaced by the generic error banner */ }
+  }, [templateName, mapping, t]);
+
+  const applyTemplate = useCallback((tpl: ImportTemplate) => {
+    const next: Record<string, string> = {};
+    for (const h of headers) next[h] = tpl.mappingJson[h] ?? '';
+    setMapping(next);
+    setTemplateMsg(t('employees.importTemplateApplied'));
+    setTimeout(() => setTemplateMsg(null), 2500);
+  }, [headers, t]);
 
   if (!open) return null;
 
-  const S = {
-    backdrop: { position: 'fixed' as const, inset: 0, zIndex: 1200, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(13,33,55,0.48)', backdropFilter: 'blur(3px)' },
-    card: { background: 'var(--surface)', borderRadius: '16px', width: 'min(640px, 95vw)', maxHeight: '85vh', display: 'flex', flexDirection: 'column' as const, boxShadow: '0 24px 60px rgba(0,0,0,0.22)', overflow: 'hidden' },
-    header: { padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
-    body: { flex: 1, overflowY: 'auto' as const, padding: '20px' },
-    footer: { padding: '12px 20px', borderTop: '1px solid var(--border)', background: 'var(--surface-warm)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 },
-    btn: { padding: '8px 18px', borderRadius: 'var(--radius-sm)', fontSize: '13px', fontWeight: 600, cursor: 'pointer', border: 'none' },
-    row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid var(--border-light)' },
-    select: { padding: '6px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--surface)', fontSize: '12px', width: '220px' }
-  };
+  const canNext = step === 1 ? rows.length > 0 : step !== 4;
+  const visibleRows = onlyErrors ? validations.filter((v) => v.errors.length > 0) : validations;
+  const creatable = validations.filter((v) => v.payload);
 
-  return createPortal(
-    <div style={S.backdrop} onClick={onClose}>
-      <div style={S.card} onClick={e => e.stopPropagation()}>
-        <div style={{ height: 3, background: 'linear-gradient(90deg, var(--accent) 0%, var(--primary) 100%)', flexShrink: 0 }} />
+  /* ── Step 1 ─────────────────────────────────────────────────────────── */
 
-        <div style={S.header}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <AlertTriangle size={18} color="var(--accent)" />
-            <h3 style={{ fontSize: '15px', fontWeight: 700, margin: 0 }}>{t('employees.mappingTitle', 'Mappatura Manuale Colonne')}</h3>
+  const renderStep1 = () => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={handleDrop}
+        style={{
+          border: `2px dashed ${dragOver ? 'var(--accent)' : 'var(--border)'}`,
+          background: dragOver ? 'rgba(201,151,58,0.06)' : 'var(--background)',
+          borderRadius: 16, padding: '38px 26px 30px', textAlign: 'center',
+          transition: 'border-color .15s, background .15s',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
+        }}
+      >
+        <div
+          onClick={() => fileRef.current?.click()}
+          style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, width: '100%' }}
+        >
+          <div style={{
+            width: 62, height: 62, borderRadius: '50%', marginBottom: 6,
+            background: dragOver ? 'rgba(201,151,58,0.16)' : 'var(--surface)',
+            border: `1px solid ${dragOver ? 'var(--accent)' : 'var(--border)'}`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: dragOver ? 'var(--accent)' : 'var(--primary)',
+          }}>
+            <Upload size={26} />
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '20px' }}>×</button>
+          <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-display)' }}>
+            {t('employees.importDropzone')}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('employees.importAccepted')}</div>
         </div>
 
-        <div style={S.body}>
-          {/* Saved Templates Selector */}
-          {savedTemplates.length > 0 && (
-            <div style={{ marginBottom: 16, padding: 12, borderRadius: 10, background: 'var(--surface-warm)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
-              <Bookmark size={16} color="var(--primary)" />
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>{t('employees.savedTemplate', 'Modello salvato')}:</span>
-              <div style={{ flex: 1 }}>
-                <CustomSelect
-                  value={selectedTemplateId || null}
-                  onChange={val => handleApplyTemplate(val || '')}
-                  options={savedTemplates.map(t => ({ value: String(t.id), label: t.name }))}
-                  placeholder={t('employees.selectTemplate', 'Seleziona un modello salvato...')}
-                  isClearable={true}
-                  searchable={true}
-                  controlMinHeight={34}
-                />
-              </div>
-            </div>
-          )}
+        {/* Helpers live inside the drop area: they are what an operator needs
+            before choosing a file, not afterwards. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', maxWidth: 420, margin: '14px 0 10px' }}>
+          <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+          <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.6, color: 'var(--text-disabled)' }}>
+            {t('employees.importOr')}
+          </span>
+          <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+        </div>
 
-          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: '0 0 16px' }}>
-            {t('employees.mappingDescription', 'Alcune colonne del tuo file non corrispondono automaticamente ai campi standard. Assegna ciascuna colonna del file al campo di destinazione corretto:')}
-          </p>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
+          <button
+            onClick={(e) => { e.stopPropagation(); setGuideOpen(true); }}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 9, padding: '10px 16px', borderRadius: 10,
+              border: '1px solid var(--border)', background: 'var(--surface)', cursor: 'pointer', textAlign: 'left',
+              boxShadow: '0 1px 2px rgba(13,33,55,0.05)',
+            }}
+          >
+            <BookOpen size={17} color="var(--primary)" style={{ flexShrink: 0 }} />
+            <span>
+              <span style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: 'var(--text-primary)' }}>{t('employees.importOpenGuide')}</span>
+              <span style={{ display: 'block', fontSize: 10, color: 'var(--text-muted)' }}>{t('employees.importGuideSub')}</span>
+            </span>
+          </button>
 
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {unmappedHeaders.map(h => {
-              const fmt = headerFormats[h] || 'text';
-              const available = getAvailableSchemaFields(h, fmt);
-              const selectedValue = mapping[h] || '';
+          <button
+            onClick={(e) => { e.stopPropagation(); handleDownloadSample(); }}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 9, padding: '10px 16px', borderRadius: 10,
+              border: '1px solid var(--border)', background: 'var(--surface)', cursor: 'pointer', textAlign: 'left',
+              boxShadow: '0 1px 2px rgba(13,33,55,0.05)',
+            }}
+          >
+            <Download size={17} color="var(--accent)" style={{ flexShrink: 0 }} />
+            <span>
+              <span style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: 'var(--text-primary)' }}>{t('employees.importDownloadSample')}</span>
+              <span style={{ display: 'block', fontSize: 10, color: 'var(--text-muted)' }}>{t('employees.importSampleSub')}</span>
+            </span>
+          </button>
+        </div>
 
-              const selectOptions = available.map(f => ({
-                value: f.key,
-                label: `${f.label}${f.required ? ' *' : ''}`
-              }));
+        <div style={{ fontSize: 10.5, color: 'var(--text-disabled)', marginTop: 12 }}>{t('employees.importDropHint')}</div>
+      </div>
 
-              if (selectedValue && !available.some(f => f.key === selectedValue)) {
-                const matchedField = SCHEMA_FIELDS.find(f => f.key === selectedValue);
-                selectOptions.push({
-                  value: selectedValue,
-                  label: matchedField ? `${matchedField.label}${matchedField.required ? ' *' : ''}` : selectedValue
-                });
+      <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }}
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ''; }} />
+
+      {error && <Banner tone="err" icon={<AlertCircle size={15} />} title={error} />}
+    </div>
+  );
+
+  /* ── Step 2 ─────────────────────────────────────────────────────────── */
+
+  const renderRowTable = (maxHeight: number) => (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 11, overflow: 'hidden' }}>
+      <div style={{ maxHeight, overflow: 'auto' }}>
+        <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+          <thead style={{ position: 'sticky', top: 0, zIndex: 3 }}>
+            <tr style={{ background: 'var(--surface-warm)' }}>
+              <th style={{ padding: '7px 10px', textAlign: 'left', borderBottom: '1px solid var(--border)', borderRight: '1px solid var(--border)', whiteSpace: 'nowrap', position: 'sticky', left: 0, background: 'var(--surface-warm)', zIndex: 4 }}>
+                <div style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--text-primary)' }}>{t('employees.importRowNumber')}</div>
+                <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-muted)', marginTop: 2 }}>{t('employees.importRowFileRef')}</div>
+              </th>
+              {columns.map((col) => (
+                <th key={col.header} style={{
+                  padding: '7px 10px', textAlign: 'left', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)',
+                  background: col.status === 'unmapped' ? 'rgba(245,158,11,0.10)' : undefined,
+                }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 800, color: col.status === 'unmapped' ? WARN.fg : 'var(--text-primary)' }}>
+                    {col.header}
+                  </div>
+                  <div style={{ fontSize: 9, fontWeight: 600, marginTop: 2, display: 'flex', alignItems: 'center', gap: 3, color: col.status === 'unmapped' ? WARN.fg : 'var(--accent)' }}>
+                    {col.status === 'unmapped'
+                      ? <><Ban size={9} /> {t('employees.importColumnIgnored')}</>
+                      : <><ArrowRight size={9} /> {fieldLabel(col.field, lang)}</>}
+                  </div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {visibleRows.map((v, displayIdx) => {
+              const row = rows.find((r) => r.rowIndex === v.rowIndex)!;
+              const seqNo = validations.findIndex((x) => x.rowIndex === v.rowIndex) + 1;
+              const issuesByField = new Map<string, RowIssue[]>();
+              for (const i of [...v.errors, ...v.warnings]) {
+                issuesByField.set(i.field, [...(issuesByField.get(i.field) ?? []), i]);
               }
-
+              const hasError = v.errors.length > 0;
               return (
-                <div key={h} style={S.row}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{h}</span>
-                    <span style={{ fontSize: '10px', color: 'var(--text-muted)', background: 'var(--surface-warm)', padding: '2px 6px', borderRadius: 4, textTransform: 'uppercase', fontWeight: 700 }}>
-                      {fmt}
-                    </span>
-                  </div>
-
-                  <div style={{ width: '240px' }}>
-                    <CustomSelect
-                      value={selectedValue || null}
-                      onChange={val => handleSelectField(h, val || '')}
-                      options={selectOptions}
-                      placeholder={t('employees.selectTargetField', 'Seleziona campo di destinazione...')}
-                      isClearable={true}
-                      searchable={true}
-                      controlMinHeight={36}
-                    />
-                  </div>
-                </div>
+                <React.Fragment key={v.rowIndex}>
+                  <tr style={{ background: hasError ? ERR.bg : displayIdx % 2 ? 'rgba(13,33,55,0.015)' : undefined }}>
+                    <td style={{
+                      padding: '6px 10px', borderBottom: '1px solid var(--border-light)', borderRight: '1px solid var(--border)',
+                      whiteSpace: 'nowrap', position: 'sticky', left: 0, zIndex: 1,
+                      background: hasError ? '#FBEAEA' : 'var(--surface)',
+                    }}>
+                      <div style={{ fontSize: 11.5, fontWeight: 800, color: 'var(--text-primary)' }}>{seqNo}</div>
+                      <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{v.rowIndex}</div>
+                    </td>
+                    {columns.map((col) => {
+                      const fieldIssues = col.field ? issuesByField.get(col.field) ?? [] : [];
+                      const isError = fieldIssues.some((i) => v.errors.includes(i));
+                      const isWarn = !isError && fieldIssues.length > 0;
+                      return (
+                        <td key={col.header} style={{
+                          padding: 0, borderBottom: '1px solid var(--border-light)',
+                          background: isError ? 'rgba(220,38,38,0.14)' : isWarn ? 'rgba(245,158,11,0.14)' : undefined,
+                        }} title={fieldIssues.map(issueText).join('\n')}>
+                          <input
+                            value={String(row.data[col.header] ?? '')}
+                            onChange={(e) => editCell(v.rowIndex, col.header, e.target.value)}
+                            style={{
+                              width: '100%', minWidth: 118, border: 'none', outline: 'none', background: 'transparent',
+                              padding: '7px 10px', fontSize: 11.5, fontFamily: 'var(--font-body)',
+                              color: col.field ? 'var(--text-primary)' : 'var(--text-disabled)',
+                              fontWeight: isError ? 700 : 500,
+                            }}
+                          />
+                        </td>
+                      );
+                    })}
+                  </tr>
+                  {(v.errors.length > 0 || v.warnings.length > 0) && (
+                    <tr>
+                      <td colSpan={columns.length + 1} style={{ padding: '5px 10px 8px', borderBottom: '1px solid var(--border-light)', background: hasError ? 'rgba(220,38,38,0.045)' : 'rgba(245,158,11,0.055)' }}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                          {[...v.errors.map((i) => ({ i, err: true })), ...v.warnings.map((i) => ({ i, err: false }))].map(({ i, err }, n) => {
+                            const Icon = ISSUE_ICON[i.code] ?? AlertCircle;
+                            const c = err ? ERR : WARN;
+                            return (
+                              <span key={n} style={{
+                                display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700,
+                                color: c.fg, background: 'var(--surface)', border: `1px solid ${c.border}`,
+                                borderRadius: 6, padding: '3px 8px',
+                              }}>
+                                <Icon size={11} />
+                                {issueText(i)}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
               );
             })}
-          </div>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 
-          {/* Prompt to Save as Template */}
-          {showSavePrompt && (
-            <div style={{ marginTop: 16, padding: 12, borderRadius: 10, background: 'rgba(2,132,199,0.06)', border: '1px solid rgba(2,132,199,0.2)', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <input
-                type="text"
-                placeholder={t('employees.templateNamePlaceholder', 'Nome del modello (es. Export Paghe Zucchetti)')}
-                value={templateName}
-                onChange={e => setTemplateName(e.target.value)}
-                style={{ flex: 1, padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 12 }}
-              />
-              <button
-                type="button"
-                onClick={handleSaveTemplateAction}
-                disabled={savingTemplate || !templateName.trim()}
-                style={{ padding: '7px 14px', borderRadius: 6, background: 'var(--primary)', color: '#fff', border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
-              >
-                {t('common.save', 'Salva')}
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowSavePrompt(false)}
-                style={{ padding: '7px 10px', borderRadius: 6, background: 'none', border: '1px solid var(--border)', fontSize: 12, cursor: 'pointer' }}
-              >
-                {t('common.cancel', 'Annulla')}
-              </button>
-            </div>
+  const renderStep2 = () => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(112px, 1fr))', gap: 9 }}>
+        <StatCard value={counts.total} label={t('employees.importTotalRows')} tone="plain" />
+        <StatCard value={counts.valid} label={t('employees.importValidRows')} tone="ok" icon={<CheckCircle2 size={14} />} />
+        <StatCard value={counts.errors} label={t('employees.importErrorRows')} tone="err" icon={<AlertCircle size={14} />} />
+        <StatCard value={counts.warnings} label={t('employees.importWarningRows')} tone="warn" icon={<AlertTriangle size={14} />} />
+        <StatCard value={counts.companies} label={t('employees.importDetectedCompanies')} tone="plain" icon={<Building2 size={14} />} />
+        <StatCard value={counts.stores} label={t('employees.importDetectedStores')} tone="plain" icon={<StoreIcon size={14} />} />
+      </div>
+
+      {/* Scenario-aware messaging: only the conditions that actually apply are
+          shown, and everything disappears once the file is clean. */}
+      {counts.errors === 0 && counts.warnings === 0 && unmappedColumns.length === 0 ? (
+        <Banner tone="ok" icon={<CheckCircle2 size={15} />} title={t('employees.importBannerAllGood')} />
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+          {counts.errors > 0 && (
+            <Banner tone="err" icon={<AlertCircle size={15} />}
+              title={t('employees.importBannerErrors', { count: counts.errors })}
+              body={t('employees.importBannerFixHint')} />
+          )}
+          {counts.warnings > 0 && (
+            <Banner tone="warn" icon={<AlertTriangle size={15} />} title={t('employees.importBannerWarnings', { count: counts.warnings })} />
+          )}
+          {unmappedColumns.length > 0 && (
+            <Banner tone="info" icon={<Info size={15} />}
+              title={t('employees.importBannerUnmapped', { count: unmappedColumns.length })}
+              body={unmappedColumns.map((c) => c.header).join(' · ')} />
           )}
         </div>
+      )}
 
-        <div style={S.footer}>
-          <button
-            type="button"
-            onClick={() => setShowSavePrompt(true)}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', fontSize: 12, fontWeight: 600, cursor: 'pointer', color: 'var(--primary)' }}
-          >
-            <Save size={14} /> {t('employees.saveAsTemplate', 'Salva come modello aziendale')}
-          </button>
-
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={onClose} style={{ ...S.btn, background: 'none', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
-              {t('common.cancel', 'Annulla')}
-            </button>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>{t('employees.importEditCell')}</span>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {counts.errors > 0 && (
             <button
-              onClick={handleSave}
-              style={{ ...S.btn, background: 'var(--primary)', color: '#fff' }}
+              onClick={() => setOnlyErrors((v) => !v)}
+              style={{
+                padding: '6px 12px', borderRadius: 8, fontSize: 11.5, fontWeight: 700, cursor: 'pointer',
+                border: `1px solid ${onlyErrors ? ERR.border : 'var(--border)'}`,
+                background: onlyErrors ? ERR.bg : 'var(--surface)',
+                color: onlyErrors ? ERR.fg : 'var(--text-secondary)',
+              }}
             >
-              {t('employees.confirmMapping', 'Conferma Mappatura')}
+              {onlyErrors ? t('employees.importShowAllRows') : t('employees.importShowOnlyErrors')}
             </button>
+          )}
+          <button
+            onClick={() => setEditorOpen(true)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8,
+              fontSize: 11.5, fontWeight: 700, cursor: 'pointer', border: '1px solid var(--border)',
+              background: 'var(--surface)', color: 'var(--primary)',
+            }}
+          >
+            <Maximize2 size={13} /> {t('employees.importOpenEditor')}
+          </button>
+        </div>
+      </div>
+
+      {renderRowTable(400)}
+    </div>
+  );
+
+  /* ── Step 3 ─────────────────────────────────────────────────────────── */
+
+  const statusPill = (col: ColumnInfo) => {
+    if (col.status === 'duplicate') return <Pill tone="err"><Copy size={9} /> {t('employees.importStatusDuplicate')}</Pill>;
+    if (col.status === 'recognised') return <Pill tone="ok"><Check size={9} /> {t('employees.importStatusRecognised')}</Pill>;
+    if (col.status === 'manual') return <Pill tone="info"><Wand2 size={9} /> {t('employees.importStatusManual')}</Pill>;
+    if (col.suggestion) return <Pill tone="warn"><Wand2 size={9} /> {t('employees.importStatusSuggested')}</Pill>;
+    return <Pill tone="muted"><Ban size={9} /> {t('employees.importStatusUnmapped')}</Pill>;
+  };
+
+  const renderStep3 = () => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
+      <Banner tone="info" icon={<Info size={15} />} title={t('employees.importMappingIntro')} />
+
+      {missingRequired.length > 0 ? (
+        <Banner tone="err" icon={<AlertCircle size={15} />} title={t('employees.importMappingMissing')}
+          body={missingRequired.map((k) => fieldLabel(k, lang)).join(' · ')} />
+      ) : (
+        <Banner tone="ok" icon={<CheckCircle2 size={15} />} title={t('employees.importMappingAllSet')} />
+      )}
+
+      {templates.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-secondary)' }}>{t('employees.importSelectTemplate')}:</span>
+          {templates.map((tpl) => (
+            <button key={tpl.id} onClick={() => applyTemplate(tpl)}
+              style={{ padding: '5px 11px', borderRadius: 999, border: '1px solid var(--border)', background: 'var(--surface-warm)', fontSize: 11.5, fontWeight: 700, color: 'var(--primary)', cursor: 'pointer' }}>
+              {tpl.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div style={{ border: '1px solid var(--border)', borderRadius: 11, overflow: 'visible' }}>
+        <div style={{
+          display: 'grid', gridTemplateColumns: '1.15fr 0.75fr 0.95fr 1.15fr', gap: 10,
+          background: 'var(--surface-warm)', padding: '8px 13px', fontSize: 10,
+          fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--text-muted)',
+          borderBottom: '1px solid var(--border)', borderRadius: '11px 11px 0 0',
+        }}>
+          <div>{t('employees.importMappingYourColumn')}</div>
+          <div>{t('employees.importColMapStatus')}</div>
+          <div>{t('employees.importMappingSample')}</div>
+          <div>{t('employees.importMappingTarget')}</div>
+        </div>
+
+        <div style={{ maxHeight: 380, overflowY: 'auto', overflowX: 'visible' }}>
+          {columns.map((col) => {
+            const def = FIELD_CATALOG.find((f) => f.key === col.field);
+            return (
+              <div key={col.header} style={{
+                display: 'grid', gridTemplateColumns: '1.15fr 0.75fr 0.95fr 1.15fr', gap: 10, alignItems: 'center',
+                padding: '9px 13px', borderBottom: '1px solid var(--border-light)',
+                background: col.status === 'duplicate' ? ERR.bg : undefined,
+              }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {col.header}
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+                  {statusPill(col)}
+                  {col.suggestion && !col.field && (
+                    <button
+                      onClick={() => setMapping((prev) => ({ ...prev, [col.header]: col.suggestion! }))}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 7px', borderRadius: 6, border: `1px solid ${WARN.border}`, background: 'var(--surface)', color: WARN.fg, fontSize: 9.5, fontWeight: 800, cursor: 'pointer' }}
+                    >
+                      {t('employees.importApplySuggestion')}: {fieldLabel(col.suggestion, lang)}
+                    </button>
+                  )}
+                </div>
+
+                <div style={{ fontSize: 11.5, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {col.sample || '—'}
+                </div>
+
+                <div>
+                  <FieldSelect
+                    value={col.field}
+                    invalid={col.status === 'duplicate'}
+                    lang={lang}
+                    onChange={(v) => setMapping((prev) => ({ ...prev, [col.header]: v }))}
+                  />
+                  {col.status === 'duplicate' && (
+                    <div style={{ fontSize: 9.5, color: ERR.fg, fontWeight: 700, marginTop: 3 }}>{t('employees.importMappingDuplicate')}</div>
+                  )}
+                  {def?.storedAs && (
+                    <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 3, fontFamily: 'monospace' }}>→ {def.storedAs}</div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <input value={templateName} onChange={(e) => setTemplateName(e.target.value)} placeholder={t('employees.importTemplateName')}
+          style={{ flex: '1 1 200px', padding: '8px 11px', fontSize: 12.5, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', outline: 'none', color: 'var(--text-primary)' }} />
+        <button onClick={handleSaveTemplate} disabled={!templateName.trim()}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 7, padding: '8px 14px', borderRadius: 8,
+            border: '1px solid var(--border)', background: 'var(--surface-warm)', fontSize: 12.5, fontWeight: 700,
+            color: templateName.trim() ? 'var(--primary)' : 'var(--text-disabled)',
+            cursor: templateName.trim() ? 'pointer' : 'not-allowed',
+          }}>
+          <Save size={14} /> {t('employees.importSaveTemplate')}
+        </button>
+        {templateMsg && <span style={{ fontSize: 11.5, fontWeight: 700, color: OK.fg }}>✓ {templateMsg}</span>}
+      </div>
+    </div>
+  );
+
+  /* ── Step 4 ─────────────────────────────────────────────────────────── */
+
+  const renderStep4 = () => {
+    const skipped = validations.filter((v) => v.errors.length > 0);
+    const warned = validations.filter((v) => v.errors.length === 0 && v.warnings.length > 0);
+
+    const groups = new Map<string, number>();
+    for (const v of creatable) {
+      groups.set(`${v.display.company}||${v.display.store}`, (groups.get(`${v.display.company}||${v.display.store}`) ?? 0) + 1);
+    }
+    const roleCounts = new Map<string, number>();
+    for (const v of creatable) {
+      const r = String(v.payload!.role);
+      roleCounts.set(r, (roleCounts.get(r) ?? 0) + 1);
+    }
+
+    if (doneCount !== null) {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 13, padding: '46px 20px', textAlign: 'center' }}>
+          <div style={{ width: 66, height: 66, borderRadius: '50%', background: OK.bg, border: `1px solid ${OK.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <CheckCircle2 size={34} color={OK.fg} />
+          </div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-display)' }}>{t('employees.importDoneTitle')}</div>
+          <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{t('employees.importDoneCreated', { count: doneCount })}</div>
+        </div>
+      );
+    }
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 9 }}>
+          <StatCard value={creatable.length} label={t('employees.importSummaryCreate')} tone="ok" icon={<CheckCircle2 size={14} />} />
+          <StatCard value={skipped.length} label={t('employees.importSummarySkip')} tone="err" icon={<Ban size={14} />} />
+          <StatCard value={warned.length} label={t('employees.importSummaryWarn')} tone="warn" icon={<AlertTriangle size={14} />} />
+          <StatCard value={counts.companies} label={t('employees.importDetectedCompanies')} tone="plain" icon={<Building2 size={14} />} />
+        </div>
+
+        {skipped.length === 0
+          ? <Banner tone="ok" icon={<CheckCircle2 size={15} />} title={t('employees.importSummaryReady')} />
+          : <Banner tone="warn" icon={<AlertTriangle size={15} />} title={t('employees.importSummaryPartial', { skip: skipped.length, ok: creatable.length })} />}
+
+        {importError && <Banner tone="err" icon={<AlertCircle size={15} />} title={t('employees.importFailedTitle')} body={importError} />}
+
+        {creatable.length === 0 ? (
+          <Banner tone="err" icon={<AlertCircle size={15} />} title={t('employees.importSummaryNothing')} />
+        ) : (
+          <>
+            <div style={{ border: '1px solid var(--border)', borderRadius: 11, overflow: 'hidden' }}>
+              <div style={{ padding: '9px 13px', borderBottom: '1px solid var(--border)', background: 'var(--surface-warm)', fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--text-muted)' }}>
+                {t('employees.importSummaryByCompany')}
+              </div>
+              <div style={{ padding: 9, display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 180, overflowY: 'auto' }}>
+                {[...groups.entries()].map(([key, n]) => {
+                  const [company, store] = key.split('||');
+                  return (
+                    <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 11px', borderRadius: 9, border: '1px solid var(--border)', background: 'var(--surface)' }}>
+                      <Building2 size={15} color="var(--primary)" style={{ flexShrink: 0 }} />
+                      <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-primary)' }}>{company || '—'}</span>
+                      <StoreIcon size={14} color="var(--text-muted)" style={{ flexShrink: 0 }} />
+                      <span style={{ fontSize: 12, color: 'var(--text-secondary)', flex: 1 }}>{store || '—'}</span>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: OK.fg, background: OK.bg, border: `1px solid ${OK.border}`, borderRadius: 999, padding: '2px 10px' }}>+{n}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
+              {[...roleCounts.entries()].map(([role, n]) => (
+                <span key={role} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 11px', borderRadius: 999, border: '1px solid var(--border)', background: 'var(--surface-warm)', fontSize: 11.5, fontWeight: 700, color: 'var(--text-secondary)' }}>
+                  <User size={12} color="var(--primary)" />
+                  {t(`roles.${role}`, role)}
+                  <span style={{ fontWeight: 800, color: 'var(--primary)' }}>{n}</span>
+                </span>
+              ))}
+            </div>
+
+            <Banner tone="info" icon={<Info size={15} />} title={t('employees.importSummaryPasswordNote')} />
+          </>
+        )}
+
+        {skipped.length > 0 && (
+          <div style={{ border: `1px solid ${ERR.border}`, borderRadius: 11, overflow: 'hidden' }}>
+            <div style={{ padding: '9px 13px', background: ERR.bg, fontSize: 11.5, fontWeight: 800, color: ERR.fg, display: 'flex', alignItems: 'center', gap: 7 }}>
+              <Ban size={14} /> {t('employees.importSummarySkippedTitle')} · {skipped.length}
+            </div>
+            <div style={{ maxHeight: 180, overflowY: 'auto', padding: 9, display: 'flex', flexDirection: 'column', gap: 5 }}>
+              {skipped.map((v) => (
+                <div key={v.rowIndex} style={{ display: 'flex', gap: 9, alignItems: 'baseline', fontSize: 11.5, flexWrap: 'wrap' }}>
+                  <span style={{ fontWeight: 800, color: 'var(--text-muted)', flexShrink: 0 }}>{t('employees.importRowLabel')} {v.rowIndex}</span>
+                  <span style={{ fontWeight: 700, color: 'var(--text-primary)', flexShrink: 0 }}>{v.display.name || '—'}</span>
+                  <span style={{ color: ERR.fg }}>{v.errors.map(issueText).join(' · ')}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {warned.length > 0 && (
+          <div style={{ border: `1px solid ${WARN.border}`, borderRadius: 11, overflow: 'hidden' }}>
+            <div style={{ padding: '9px 13px', background: WARN.bg, fontSize: 11.5, fontWeight: 800, color: WARN.fg, display: 'flex', alignItems: 'center', gap: 7 }}>
+              <AlertTriangle size={14} /> {t('employees.importSummaryWarningsTitle')} · {warned.length}
+            </div>
+            <div style={{ maxHeight: 160, overflowY: 'auto', padding: 9, display: 'flex', flexDirection: 'column', gap: 5 }}>
+              {warned.map((v) => (
+                <div key={v.rowIndex} style={{ display: 'flex', gap: 9, alignItems: 'baseline', fontSize: 11.5, flexWrap: 'wrap' }}>
+                  <span style={{ fontWeight: 800, color: 'var(--text-muted)', flexShrink: 0 }}>{t('employees.importRowLabel')} {v.rowIndex}</span>
+                  <span style={{ fontWeight: 700, color: 'var(--text-primary)', flexShrink: 0 }}>{v.display.name || '—'}</span>
+                  <span style={{ color: WARN.fg }}>{v.warnings.map(issueText).join(' · ')}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const stepTitles = [t('employees.importStep1Title'), t('employees.importStep2Title'), t('employees.importStep3Title'), t('employees.importStep4Title')];
+  const stepSubs = [t('employees.importStep1Sub'), t('employees.importStep2Sub'), t('employees.importStep3Sub'), t('employees.importStep4Sub')];
+  const stepLabels = [t('employees.importStep1'), t('employees.importStep2'), t('employees.importStep3'), t('employees.importStep4')];
+
+  return createPortal(
+    <>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(13,33,55,0.55)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+        <div onClick={(e) => e.stopPropagation()} style={{
+          width: 'min(1140px, 100%)', maxHeight: '92vh', background: 'var(--surface)', borderRadius: 16,
+          border: '1px solid var(--border)', boxShadow: '0 28px 70px rgba(13,33,55,0.32)',
+          display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        }}>
+          <div style={{ padding: '15px 20px 12px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 12, flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+              <div style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(13,33,55,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <FileSpreadsheet size={20} color="var(--primary)" />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>{stepTitles[step - 1]}</h3>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{stepSubs[step - 1]}</div>
+              </div>
+              {file && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 10px', borderRadius: 8, background: 'var(--surface-warm)', border: '1px solid var(--border)', maxWidth: 260 }}>
+                  <FileSpreadsheet size={14} color="var(--accent)" style={{ flexShrink: 0 }} />
+                  <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</span>
+                  <span style={{ fontSize: 10.5, color: 'var(--text-muted)', flexShrink: 0 }}>{rows.length}</span>
+                </div>
+              )}
+              <button onClick={onClose} style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--background)', color: 'var(--text-muted)', cursor: 'pointer', flexShrink: 0 }}>
+                <X size={15} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '7px 12px', background: 'var(--background)', borderRadius: 10, border: '1px solid var(--border)' }}>
+              {[1, 2, 3, 4].map((s, idx) => {
+                const active = step === s;
+                const done = step > s;
+                return (
+                  <React.Fragment key={s}>
+                    {idx > 0 && <div style={{ flex: 1, height: 2, background: done || active ? 'var(--accent)' : 'var(--border)', borderRadius: 2 }} />}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                      <div style={{
+                        width: 22, height: 22, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 11, fontWeight: 800,
+                        background: done ? OK.fg : active ? 'var(--accent)' : 'var(--surface)',
+                        color: done || active ? '#fff' : 'var(--text-muted)',
+                        border: `1px solid ${done ? OK.fg : active ? 'var(--accent)' : 'var(--border)'}`,
+                      }}>
+                        {done ? <Check size={12} strokeWidth={3} /> : s}
+                      </div>
+                      <span style={{ fontSize: 11.5, fontWeight: active ? 800 : 600, color: active ? 'var(--text-primary)' : 'var(--text-muted)' }}>{stepLabels[idx]}</span>
+                    </div>
+                  </React.Fragment>
+                );
+              })}
+            </div>
+          </div>
+
+          <div style={{ padding: 20, overflowY: 'auto', flex: 1 }}>
+            {step === 1 && renderStep1()}
+            {step === 2 && renderStep2()}
+            {step === 3 && renderStep3()}
+            {step === 4 && renderStep4()}
+          </div>
+
+          <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, background: 'var(--surface-warm)', flexShrink: 0 }}>
+            <div>
+              {step > 1 && doneCount === null && (
+                <button onClick={() => setStep((s) => (s - 1) as Step)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '9px 15px', borderRadius: 9, border: '1px solid var(--border)', background: 'var(--surface)', fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)', cursor: 'pointer' }}>
+                  <ArrowLeft size={15} /> {t('common.back', 'Back')}
+                </button>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', gap: 9 }}>
+              {doneCount !== null ? (
+                <button onClick={onClose} style={{ padding: '9px 20px', borderRadius: 9, border: 'none', background: OK.fg, color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+                  {t('common.close', 'Close')}
+                </button>
+              ) : step < 4 ? (
+                <button onClick={() => setStep((s) => (s + 1) as Step)} disabled={!canNext}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 7, padding: '9px 18px', borderRadius: 9, border: 'none',
+                    background: canNext ? 'var(--primary)' : 'var(--border)',
+                    color: canNext ? '#fff' : 'var(--text-disabled)',
+                    fontSize: 13, fontWeight: 700, cursor: canNext ? 'pointer' : 'not-allowed',
+                  }}>
+                  {t('common.next', 'Next')} <ArrowRight size={15} />
+                </button>
+              ) : (
+                <button onClick={handleImport} disabled={importing || creatable.length === 0}
+                  style={{
+                    padding: '9px 20px', borderRadius: 9, border: 'none',
+                    background: importing || creatable.length === 0 ? 'var(--border)' : OK.fg,
+                    color: importing || creatable.length === 0 ? 'var(--text-disabled)' : '#fff',
+                    fontSize: 13, fontWeight: 700,
+                    cursor: importing || creatable.length === 0 ? 'not-allowed' : 'pointer',
+                  }}>
+                  {importing ? t('employees.importImporting') : t('employees.importConfirmButton', { count: creatable.length })}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
-    </div>,
-    document.body
+
+      <GuideModal open={guideOpen} onClose={() => setGuideOpen(false)} lang={lang} />
+
+      {/* Expanded editor: the same table with far more room, for files that need
+          real correction work rather than a one-cell fix. */}
+      {editorOpen && createPortal(
+        <div onClick={() => setEditorOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(13,33,55,0.58)', zIndex: 10001, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{
+            width: 'min(1600px, 100%)', height: '92vh', background: 'var(--surface)', borderRadius: 16,
+            border: '1px solid var(--border)', boxShadow: '0 28px 70px rgba(13,33,55,0.32)',
+            display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          }}>
+            <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+              <Maximize2 size={18} color="var(--primary)" />
+              <div style={{ flex: 1 }}>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>{t('employees.importEditorTitle')}</h3>
+                <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>{t('employees.importEditorSub')}</div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <StatCard value={counts.valid} label={t('employees.importValidRows')} tone="ok" />
+                <StatCard value={counts.errors} label={t('employees.importErrorRows')} tone="err" />
+                <button onClick={() => setEditorOpen(false)} style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--background)', color: 'var(--text-muted)', cursor: 'pointer' }}>
+                  <X size={15} />
+                </button>
+              </div>
+            </div>
+            <div style={{ padding: 16, overflow: 'auto', flex: 1 }}>
+              {renderRowTable(window.innerHeight * 0.92 - 150)}
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>,
+    document.body,
   );
 }
 
