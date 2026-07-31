@@ -2644,7 +2644,7 @@ const it = {
     salaryMin: 'Stipendio min (€)',
     salaryMax: 'Stipendio max (€)',
     salaryRange: 'Fascia stipendio',
-    weeklyHoursPlaceholder: '40',
+    weeklyHoursPlaceholder: 'es. 40',
     salaryMinPlaceholder: '1200',
     salaryMaxPlaceholder: '1800',
     jobCountryOverrideLabel: 'Paese',
