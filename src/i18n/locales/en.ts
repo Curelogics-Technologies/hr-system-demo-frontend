@@ -2705,7 +2705,7 @@ const en = {
     salaryMin: 'Salary min (€)',
     salaryMax: 'Salary max (€)',
     salaryRange: 'Salary range',
-    weeklyHoursPlaceholder: '40',
+    weeklyHoursPlaceholder: 'e.g. 40',
     salaryMinPlaceholder: '1200',
     salaryMaxPlaceholder: '1800',
     jobCountryOverrideLabel: 'Country',
