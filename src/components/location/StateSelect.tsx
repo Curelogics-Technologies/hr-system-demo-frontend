@@ -68,22 +68,27 @@ export function StateSelect({
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
+  // Options use the state NAME as their value, but a saved value can be a state
+  // CODE (e.g. the Italian province code "MB", stored by the ATS job form).
+  // Resolve a code to its name for DISPLAY only — without rewriting the parent's
+  // value. Emitting onChange here previously fired the parent's "state changed"
+  // handler on mount, which wiped the already-entered città. See CitySelect too.
+  const displayValue = useMemo(() => {
+    if (!value) return null;
+    if (options.some((option) => option.value === value)) return value; // already a name
+    const matched = states.find((s) => s.value === value); // value is a code
+    return matched ? matched.label : value;
+  }, [value, options, states]);
+
   useEffect(() => {
     if (!value) return;
     if (loading) return; // Wait until options are loaded before validating
 
-    // If options contains value (already name string), we're good
+    // Valid as a name, or resolvable as a code → keep it (display handles the code).
     if (options.some((option) => option.value === value)) return;
+    if (states.some((s) => s.value === value)) return;
 
-    // Otherwise, check if the value is actually the state code/id (e.g. "72")
-    const matchedState = states.find((s) => s.value === value);
-    if (matchedState) {
-      // Auto-correct to name string!
-      onChangeRef.current(matchedState.label);
-      return;
-    }
-
-    // If it doesn't match either, then it's invalid
+    // Neither a known name nor a known code → genuinely invalid, clear it.
     onChangeRef.current(null);
   }, [value, options, states, loading]);
 
@@ -98,7 +103,7 @@ export function StateSelect({
       )}
       <CustomSelect
         options={options}
-        value={value}
+        value={displayValue}
         onChange={onChange}
         placeholder={
           loading
