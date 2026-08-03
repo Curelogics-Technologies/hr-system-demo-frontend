@@ -2340,6 +2340,18 @@ const JobModal: React.FC<JobModalProps> = ({ job, stores, companies, defaultComp
     });
   }, [companyEmployees, selectedCompanyMeta, storeId]);
 
+  // Effective location = what the XML feed actually publishes: the job override
+  // if set, otherwise the company's own location (COALESCE(job_city, company.city)).
+  // Readiness and completion must evaluate THIS, not just the raw override — a
+  // job that correctly inherits the company location publishes fine on Indeed
+  // and should not be reported as incomplete.
+  const selectedCompanyRecord = useMemo(
+    () => companies.find((company) => String(company.id) === companyId) ?? null,
+    [companies, companyId],
+  );
+  const effectiveJobCity = (locationOverride.city || '').trim() || (selectedCompanyRecord?.city || '').trim();
+  const effectiveJobCountry = (locationOverride.country || '').trim() || (selectedCompanyRecord?.country || '').trim();
+
   const formCompletion = useMemo(() => {
     const checks: boolean[] = [
       Boolean(title.trim()),
@@ -2355,8 +2367,8 @@ const JobModal: React.FC<JobModalProps> = ({ job, stores, companies, defaultComp
     ];
 
     if (remoteType && remoteType !== 'remote') {
-      checks.push(Boolean(locationOverride.country));
-      checks.push(Boolean(locationOverride.city));
+      checks.push(Boolean(effectiveJobCountry));
+      checks.push(Boolean(effectiveJobCity));
     }
 
     if (companyId && storesForSelectedCompany.length > 0) {
@@ -2378,8 +2390,8 @@ const JobModal: React.FC<JobModalProps> = ({ job, stores, companies, defaultComp
     salaryMinInput,
     salaryMaxInput,
     tags,
-    locationOverride.country,
-    locationOverride.city,
+    effectiveJobCountry,
+    effectiveJobCity,
     storesForSelectedCompany.length,
     storeId,
   ]);
@@ -2700,8 +2712,7 @@ const JobModal: React.FC<JobModalProps> = ({ job, stores, companies, defaultComp
   // on-site/hybrid roles (province code is normalised automatically on save,
   // postal code is optional). Fully-remote roles need no location at all.
   const isIndeedCheck3Pass = remoteType === 'remote' ||
-                             ((locationOverride.city || '').trim() !== '' &&
-                              (locationOverride.country || '').trim() !== '');
+                             (effectiveJobCity !== '' && effectiveJobCountry !== '');
   const isIndeedCheck4Pass = parseFloat(salaryMinInput) > 0;
   const isIndeedCheck5Pass = questions.length > 0;
 
