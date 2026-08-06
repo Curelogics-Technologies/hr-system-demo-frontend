@@ -2504,7 +2504,7 @@ const OverviewPanel: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
       </div>
 
       {loading ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 12 }}>
           {[1, 2, 3, 4, 5, 6].map((i) => (
             <div key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: 18, display: 'flex', gap: 12, alignItems: 'center' }}>
               <Skel w={44} h={44} r={22} />
@@ -2523,7 +2523,7 @@ const OverviewPanel: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
           <div style={{ fontSize: 13 }}>{t('onboarding.noEmployeesHint')}</div>
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 12 }}>
           {filtered.map((emp) => {
             const pct = emp.percentage;
             const ac  = avatarColor(pct);

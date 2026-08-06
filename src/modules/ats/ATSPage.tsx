@@ -62,6 +62,7 @@ import { getStores } from '../../api/stores';
 import { getCompanies } from '../../api/companies';
 import { getEmployees, createEmployee } from '../../api/employees';
 import { listInterviewers } from '../../api/ats';
+import { getIndeedConfig, saveIndeedConfig, clearIndeedConfig, IndeedConfigStatus } from '../../api/indeedConfig';
 import { getNotificationSettings, type NotificationSetting } from '../../api/documents';
 import { getEmailConfig } from '../../api/email';
 import { Company, Employee, Store } from '../../types';
@@ -8877,6 +8878,161 @@ const IndeedStatCard: React.FC<IndeedStatCardProps> = ({ label, value, icon, acc
   );
 };
 
+// Per-company Indeed Apply credentials (API token + HMAC secret). Admin/HR enter
+// their company's own values (issued by Indeed to that company as a direct
+// employer). Stored encrypted server-side; only a masked status is shown here.
+const IndeedCredentialsCard: React.FC<{ companyId?: number | null }> = ({ companyId }) => {
+  const { t } = useTranslation();
+  const { showToast } = useToast();
+  const [status, setStatus] = useState<IndeedConfigStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [apiToken, setApiToken] = useState('');
+  const [secret, setSecret] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setStatus(await getIndeedConfig(companyId ?? undefined)); }
+    catch { setStatus(null); }
+    finally { setLoading(false); }
+  }, [companyId]);
+  useEffect(() => { void load(); }, [load]);
+
+  const handleSave = async () => {
+    if (!apiToken.trim() && !secret.trim()) {
+      showToast(t('ats.indeedCredNothing', 'Enter a token or secret to save'), 'error');
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload: { apiToken?: string; secret?: string; companyId?: number } = {};
+      if (companyId) payload.companyId = companyId;
+      if (apiToken.trim()) payload.apiToken = apiToken.trim();
+      if (secret.trim()) payload.secret = secret.trim();
+      setStatus(await saveIndeedConfig(payload));
+      setApiToken(''); setSecret(''); setEditing(false);
+      showToast(t('ats.indeedCredSaved', 'Indeed credentials saved'), 'success');
+    } catch (err) {
+      showToast(translateApiError(err, t, t('common.error', 'Something went wrong')) ?? t('common.error', 'Something went wrong'), 'error');
+    } finally { setSaving(false); }
+  };
+
+  const handleClear = async () => {
+    setSaving(true);
+    try {
+      setStatus(await clearIndeedConfig(companyId ?? undefined));
+      setApiToken(''); setSecret('');
+      showToast(t('ats.indeedCredCleared', 'Indeed credentials cleared'), 'success');
+    } catch {
+      showToast(t('common.error', 'Something went wrong'), 'error');
+    } finally { setSaving(false); }
+  };
+
+  const renderStatus = (configured: boolean | undefined, mask: string | null | undefined, source: string | undefined, label: string) => {
+    const isCompany = source === 'company';
+    const sourceLabel = source === 'company'
+      ? t('ats.indeedCredSourceCompany', 'this company')
+      : source === 'environment'
+        ? t('ats.indeedCredSourceEnv', 'server')
+        : '';
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '8px 10px', background: 'var(--background)', border: '1px solid var(--border)', borderRadius: 8 }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>{label}</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5 }}>
+          {configured ? (
+            <>
+              <span style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>{mask}</span>
+              <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 99, background: isCompany ? 'rgba(16,185,129,0.12)' : 'rgba(245,158,11,0.12)', color: isCompany ? '#10B981' : '#B45309' }}>
+                {sourceLabel}
+              </span>
+            </>
+          ) : (
+            <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 99, background: 'rgba(148,163,184,0.15)', color: 'var(--text-muted)' }}>
+              {t('ats.indeedCredNotSet', 'Not set')}
+            </span>
+          )}
+        </span>
+      </div>
+    );
+  };
+
+  const inputStyle: React.CSSProperties = {
+    width: '100%', boxSizing: 'border-box', padding: '8px 12px', fontSize: 13,
+    borderRadius: 'var(--radius)', border: '1px solid var(--border)', outline: 'none', background: '#fff',
+  };
+
+  return (
+    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, display: 'grid', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 15 }}>🔑</span>
+        <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-display)' }}>
+          {t('ats.indeedCredTitle', 'Indeed Apply Credentials')}
+        </span>
+      </div>
+      <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+        {t('ats.indeedCredIntro', 'These are issued by Indeed to your company once you set up Apply on Indeed in your own Indeed employer account. Job posting and applications already work without them — they only enable the native "apply inside Indeed" flow. Values are stored encrypted.')}
+      </p>
+
+      {status?.encryptionAvailable === false && (
+        <div style={{ padding: '8px 10px', borderRadius: 8, background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: '#991B1B', fontSize: 11.5 }}>
+          ⚠️ {t('ats.indeedCredNoEncryption', 'The server has no encryption key configured, so credentials cannot be stored securely yet. Contact your administrator.')}
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gap: 8 }}>
+        {loading ? (
+          <>
+            <div className="skeleton" style={{ height: 36, borderRadius: 8 }} />
+            <div className="skeleton" style={{ height: 36, borderRadius: 8 }} />
+          </>
+        ) : (
+          <>
+            {renderStatus(status?.apiTokenConfigured, status?.apiTokenMask, status?.apiTokenSource, t('ats.indeedCredApiToken', 'API Token'))}
+            {renderStatus(status?.secretConfigured, status?.secretMask, status?.secretSource, t('ats.indeedCredSecret', 'HMAC Secret'))}
+          </>
+        )}
+      </div>
+
+      {editing ? (
+        <div style={{ display: 'grid', gap: 8 }}>
+          <input
+            type="password" autoComplete="off" value={apiToken}
+            onChange={(e) => setApiToken(e.target.value)}
+            placeholder={t('ats.indeedCredApiTokenPlaceholder', 'New API token (leave blank to keep current)')}
+            style={inputStyle}
+          />
+          <input
+            type="password" autoComplete="off" value={secret}
+            onChange={(e) => setSecret(e.target.value)}
+            placeholder={t('ats.indeedCredSecretPlaceholder', 'New HMAC secret (leave blank to keep current)')}
+            style={inputStyle}
+          />
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <Button variant="secondary" size="sm" onClick={() => { setEditing(false); setApiToken(''); setSecret(''); }} disabled={saving}>
+              {t('common.cancel', 'Cancel')}
+            </Button>
+            <Button variant="primary" size="sm" onClick={() => void handleSave()} loading={saving}>
+              {t('common.save', 'Save')}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          {(status?.apiTokenSource === 'company' || status?.secretSource === 'company') && (
+            <Button variant="secondary" size="sm" onClick={() => void handleClear()} loading={saving}>
+              {t('ats.indeedCredClear', 'Clear')}
+            </Button>
+          )}
+          <Button variant="secondary" size="sm" onClick={() => setEditing(true)} disabled={status?.encryptionAvailable === false}>
+            {t('ats.indeedCredEdit', 'Set credentials')}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const IndeedPanel: React.FC<{ canEdit: boolean; companyId?: number }> = ({ canEdit, companyId }) => {
   const { t, i18n } = useTranslation();
   const { showToast } = useToast();
@@ -9256,6 +9412,8 @@ const IndeedPanel: React.FC<{ canEdit: boolean; companyId?: number }> = ({ canEd
             </div>
           </div>
         </div>
+
+        {canEdit && <IndeedCredentialsCard companyId={defaultCompanyId} />}
 
         {/* Collapsible API Reference */}
         <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
@@ -9862,6 +10020,8 @@ const KanbanPanel: React.FC<{
   const [selected, setSelected] = useState<Candidate | null>(null);
   const [saving, setSaving] = useState(false);
   const [filterJob, setFilterJob] = useState<string>('');
+  const [draggedCandidateId, setDraggedCandidateId] = useState<number | null>(null);
+  const [dragOverStage, setDragOverStage] = useState<CandidateStatus | null>(null);
 
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -10213,8 +10373,9 @@ const KanbanPanel: React.FC<{
       return;
     }
 
-    const parsedAddJobId = Number.parseInt(addJobId, 10);
-    if (Number.isNaN(parsedAddJobId)) {
+    const isSpontaneous = addJobId === 'spontaneous';
+    const parsedAddJobId = isSpontaneous ? undefined : Number.parseInt(addJobId, 10);
+    if (!isSpontaneous && (parsedAddJobId === undefined || Number.isNaN(parsedAddJobId))) {
       showToast(t('ats.noPosition', 'No position selected'), 'error');
       return;
     }
@@ -10238,7 +10399,7 @@ const KanbanPanel: React.FC<{
         email: addEmail.trim() || undefined,
         phone: addPhone.trim() || undefined,
         jobPostingId: parsedAddJobId,
-        storeId: addSelectedJob?.storeId ?? undefined,
+        storeId: addSelectedJob && 'storeId' in addSelectedJob ? (addSelectedJob as any).storeId ?? undefined : undefined,
         linkedinUrl: addLinkedinUrl.trim() || undefined,
         coverLetter: addCoverLetter.trim() || undefined,
         gdprConsent: addGdprConsent,
@@ -10297,7 +10458,9 @@ const KanbanPanel: React.FC<{
   const publishedJobs = addSelectionJobs.filter((j) => String(j.status).toLowerCase() === 'published');
   const draftJobs = addSelectionJobs.filter((j) => String(j.status).toLowerCase() === 'draft');
   const closedJobs = addSelectionJobs.filter((j) => String(j.status).toLowerCase() === 'closed');
-  const addSelectedJob = addSelectionJobs.find((job) => String(job.id) === addJobId) ?? null;
+  const addSelectedJob = addJobId === 'spontaneous'
+    ? { id: 'spontaneous', title: t('ats.spontaneousApplication', 'Candidatura Spontanea'), storeName: '' }
+    : addSelectionJobs.find((job) => String(job.id) === addJobId) ?? null;
 
   const resetAddCandidateForm = useCallback(() => {
     setAddStep(1);
@@ -10481,6 +10644,9 @@ const KanbanPanel: React.FC<{
 
   const openAddCandidateModal = () => {
     resetAddCandidateForm();
+    if (filterJob) {
+      setAddJobId(filterJob);
+    }
     setShowAddModal(true);
   };
 
@@ -10580,14 +10746,61 @@ const KanbanPanel: React.FC<{
             const sc = STAGE_COLOR[stage];
             const sb = STAGE_BG[stage];
             const cols = byStage(stage);
+            const isTargetOver = dragOverStage === stage;
+
             return (
               <div
                 key={stage}
+                onDragOver={(e) => {
+                  if (!canEdit) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  if (dragOverStage !== stage) {
+                    setDragOverStage(stage);
+                  }
+                }}
+                onDragLeave={(e) => {
+                  if (!canEdit) return;
+                  if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                    setDragOverStage(null);
+                  }
+                }}
+                onDrop={async (e) => {
+                  if (!canEdit) return;
+                  e.preventDefault();
+                  setDragOverStage(null);
+                  setDraggedCandidateId(null);
+                  const rawId = e.dataTransfer.getData('text/plain');
+                  const candidateId = Number.parseInt(rawId, 10);
+                  if (Number.isNaN(candidateId)) return;
+
+                  const targetCand = candidates.find(cand => cand.id === candidateId);
+                  if (!targetCand || targetCand.status === stage) return;
+
+                  setCandidates((prev) => prev.map((cand) => (
+                    cand.id === candidateId
+                      ? { ...cand, status: stage, unread: false }
+                      : cand
+                  )));
+
+                  try {
+                    const updated = await updateCandidateStage(candidateId, stage);
+                    if (updated) {
+                      setCandidates((prev) => prev.map((cand) => (
+                        cand.id === candidateId ? updated : cand
+                      )));
+                    }
+                  } catch (err: unknown) {
+                    showToast(translateApiError(err, t, t('ats.errorSave')) ?? t('ats.errorSave'), 'error');
+                    void fetch();
+                  }
+                }}
                 style={{
                   minWidth: 252, width: 252, flexShrink: 0,
-                  background: 'var(--background)',
+                  background: isTargetOver ? 'rgba(201,151,58,0.06)' : 'var(--background)',
                   borderRadius: 14, overflow: 'hidden',
-                  border: '1px solid var(--border)',
+                  border: isTargetOver ? '2px dashed #C9973A' : '1px solid var(--border)',
+                  transition: 'all 0.15s ease',
                 }}
               >
                 {/* Column top bar */}
@@ -10629,19 +10842,33 @@ const KanbanPanel: React.FC<{
                   )}
                   {cols.map((c) => {
                     const jobName = jobs.find((j) => j.id === c.jobPostingId)?.title;
+                    const isBeingDragged = draggedCandidateId === c.id;
+
                     return (
                       <button
                         key={c.id}
+                        draggable={canEdit}
+                        onDragStart={(e) => {
+                          if (!canEdit) return;
+                          e.dataTransfer.setData('text/plain', String(c.id));
+                          e.dataTransfer.effectAllowed = 'move';
+                          setDraggedCandidateId(c.id);
+                        }}
+                        onDragEnd={() => {
+                          setDraggedCandidateId(null);
+                          setDragOverStage(null);
+                        }}
                         onClick={() => openCandidateModal(c)}
                         style={{
                           background: 'var(--surface)',
                           border: `1px solid ${c.unread ? sc : 'var(--border)'}`,
                           borderRadius: 10, padding: '10px 10px',
-                          textAlign: 'left', cursor: 'pointer', width: '100%',
+                          textAlign: 'left', cursor: canEdit ? 'grab' : 'pointer', width: '100%',
+                          opacity: isBeingDragged ? 0.4 : 1,
                           boxShadow: c.unread
                             ? `0 0 0 2px ${sc}22, 0 2px 8px rgba(0,0,0,0.07)`
                             : '0 1px 3px rgba(0,0,0,0.05)',
-                          transition: 'box-shadow 0.15s, transform 0.15s',
+                          transition: 'box-shadow 0.15s, transform 0.15s, opacity 0.15s',
                         }}
                         onMouseEnter={(e) => {
                           e.currentTarget.style.boxShadow = `0 4px 16px rgba(0,0,0,0.10)`;
@@ -10819,7 +11046,23 @@ const KanbanPanel: React.FC<{
           }}>
             {[1, 2].map((currentStep, index) => (
               <React.Fragment key={currentStep}>
-                <div style={{ display: 'grid', gap: 4, justifyItems: 'center' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (currentStep === 1 || addJobId) {
+                      setAddStep(currentStep as 1 | 2);
+                    }
+                  }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: (currentStep === 1 || addJobId) ? 'pointer' : 'default',
+                    display: 'grid',
+                    gap: 4,
+                    justifyItems: 'center',
+                    padding: 0,
+                  }}
+                >
                   <div style={{
                     width: 28,
                     height: 28,
@@ -10846,7 +11089,7 @@ const KanbanPanel: React.FC<{
                   }}>
                     {currentStep === 1 ? t('ats.position', 'Position') : t('ats.candidateProfile', 'Candidate profile')}
                   </span>
-                </div>
+                </button>
                 {index === 0 && (
                   <div style={{
                     flex: 1,
@@ -10878,6 +11121,53 @@ const KanbanPanel: React.FC<{
                     </div>
                   ) : (
                     <div style={{ display: 'grid', gap: 12, maxHeight: 340, overflowY: 'auto', paddingRight: 2 }}>
+                      {/* Spontaneous Application option */}
+                      <button
+                        type="button"
+                        onClick={() => setAddJobId('spontaneous')}
+                        onDoubleClick={() => {
+                          setAddJobId('spontaneous');
+                          setAddStep(2);
+                        }}
+                        style={{
+                          border: addJobId === 'spontaneous' ? '1px solid rgba(201,151,58,0.62)' : '1px solid var(--border)',
+                          borderRadius: 10,
+                          padding: '10px 11px',
+                          background: addJobId === 'spontaneous' ? 'rgba(201,151,58,0.12)' : '#fff',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 8,
+                          textAlign: 'left',
+                        }}
+                      >
+                        <div style={{ display: 'grid', gap: 2, minWidth: 0 }}>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+                            {t('ats.spontaneousApplication', 'Candidatura Spontanea / Spontaneous Application')}
+                          </span>
+                          <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                            {t('ats.spontaneousApplicationHint', 'General candidate profile without a specific job posting')}
+                          </span>
+                        </div>
+                        <span style={{
+                          width: 20,
+                          height: 20,
+                          borderRadius: '50%',
+                          border: addJobId === 'spontaneous' ? '1px solid rgba(201,151,58,0.9)' : '1px solid rgba(148,163,184,0.4)',
+                          background: addJobId === 'spontaneous' ? '#C9973A' : '#fff',
+                          color: '#fff',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: 11,
+                          fontWeight: 700,
+                          flexShrink: 0,
+                        }}>
+                          {addJobId === 'spontaneous' ? '✓' : ''}
+                        </span>
+                      </button>
+
                       <div style={{ display: 'grid', gap: 8 }}>
                         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: '#166534', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                           <BadgeCheck size={13} /> {t('ats.status_published', 'Published')}
@@ -10895,6 +11185,10 @@ const KanbanPanel: React.FC<{
                               key={jobOption.id}
                               type="button"
                               onClick={() => setAddJobId(String(jobOption.id))}
+                              onDoubleClick={() => {
+                                setAddJobId(String(jobOption.id));
+                                setAddStep(2);
+                              }}
                               style={{
                                 border: isSelected ? '1px solid rgba(201,151,58,0.62)' : '1px solid var(--border)',
                                 borderRadius: 10,
@@ -10949,6 +11243,10 @@ const KanbanPanel: React.FC<{
                               key={`draft-${jobOption.id}`}
                               type="button"
                               onClick={() => setAddJobId(String(jobOption.id))}
+                              onDoubleClick={() => {
+                                setAddJobId(String(jobOption.id));
+                                setAddStep(2);
+                              }}
                               style={{
                                 border: isSelected ? '1px solid rgba(201,151,58,0.62)' : '1px solid rgba(245,158,11,0.28)',
                                 borderRadius: 10,
@@ -11220,10 +11518,10 @@ const KanbanPanel: React.FC<{
                     <Input
                       label={t('employees.jobTypeField', 'Job type')}
                       value={
-                        addSelectedJob?.jobType === 'fulltime' ? t('employees.workingTypeFull', 'Full time') :
-                          addSelectedJob?.jobType === 'parttime' ? t('employees.workingTypePart', 'Part time') :
-                            addSelectedJob?.jobType === 'contract' ? t('employees.contractTypeContract', 'Contract') :
-                              addSelectedJob?.jobType === 'internship' ? t('employees.contractInternship', 'Internship') : ''
+                        (addSelectedJob as any)?.jobType === 'fulltime' ? t('employees.workingTypeFull', 'Full time') :
+                          (addSelectedJob as any)?.jobType === 'parttime' ? t('employees.workingTypePart', 'Part time') :
+                            (addSelectedJob as any)?.jobType === 'contract' ? t('employees.contractTypeContract', 'Contract') :
+                              (addSelectedJob as any)?.jobType === 'internship' ? t('employees.contractInternship', 'Internship') : ''
                       }
                       disabled
                       style={{ background: 'var(--surface-warm)', cursor: 'not-allowed' }}
@@ -11231,7 +11529,7 @@ const KanbanPanel: React.FC<{
                     />
                     <Input
                       label={t('employees.weeklyHoursField', 'Working hours (availability)')}
-                      value={addSelectedJob?.weeklyHours ? `${addSelectedJob.weeklyHours}` : ''}
+                      value={(addSelectedJob as any)?.weeklyHours ? `${(addSelectedJob as any).weeklyHours}` : ''}
                       disabled
                       style={{ background: 'var(--surface-warm)', cursor: 'not-allowed' }}
                       placeholder={t('common.notSet', 'Not set')}
@@ -12208,6 +12506,7 @@ export default function ATSPage() {
       { key: 'candidates', label: t('ats.tabCandidates'), icon: '👥' },
       { key: 'interviews', label: t('ats.tabInterviews', 'Interviews'), icon: '📋' },
       { key: 'calendar', label: t('ats.tabCalendar', 'Calendar'), icon: '📅' },
+      { key: 'alerts', label: t('ats.tabAlerts'), icon: '🔔' },
     ]
     : [
       ...(canViewJobs ? [{ key: 'jobs', label: t('ats.tabJobs'), icon: '💼' }] : []),
@@ -12220,7 +12519,7 @@ export default function ATSPage() {
 
   // Keep store managers on their allowed tabs only
   useEffect(() => {
-    if (isStoreManager && !['candidates', 'interviews', 'calendar'].includes(tab)) {
+    if (isStoreManager && !['candidates', 'interviews', 'calendar', 'alerts'].includes(tab)) {
       setTab('candidates');
     }
   }, [isStoreManager, tab]);
