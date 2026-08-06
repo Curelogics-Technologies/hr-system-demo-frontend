@@ -62,6 +62,7 @@ import { getStores } from '../../api/stores';
 import { getCompanies } from '../../api/companies';
 import { getEmployees, createEmployee } from '../../api/employees';
 import { listInterviewers } from '../../api/ats';
+import { getIndeedConfig, saveIndeedConfig, clearIndeedConfig, IndeedConfigStatus } from '../../api/indeedConfig';
 import { getNotificationSettings, type NotificationSetting } from '../../api/documents';
 import { getEmailConfig } from '../../api/email';
 import { Company, Employee, Store } from '../../types';
@@ -8877,6 +8878,161 @@ const IndeedStatCard: React.FC<IndeedStatCardProps> = ({ label, value, icon, acc
   );
 };
 
+// Per-company Indeed Apply credentials (API token + HMAC secret). Admin/HR enter
+// their company's own values (issued by Indeed to that company as a direct
+// employer). Stored encrypted server-side; only a masked status is shown here.
+const IndeedCredentialsCard: React.FC<{ companyId?: number | null }> = ({ companyId }) => {
+  const { t } = useTranslation();
+  const { showToast } = useToast();
+  const [status, setStatus] = useState<IndeedConfigStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [apiToken, setApiToken] = useState('');
+  const [secret, setSecret] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setStatus(await getIndeedConfig(companyId ?? undefined)); }
+    catch { setStatus(null); }
+    finally { setLoading(false); }
+  }, [companyId]);
+  useEffect(() => { void load(); }, [load]);
+
+  const handleSave = async () => {
+    if (!apiToken.trim() && !secret.trim()) {
+      showToast(t('ats.indeedCredNothing', 'Enter a token or secret to save'), 'error');
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload: { apiToken?: string; secret?: string; companyId?: number } = {};
+      if (companyId) payload.companyId = companyId;
+      if (apiToken.trim()) payload.apiToken = apiToken.trim();
+      if (secret.trim()) payload.secret = secret.trim();
+      setStatus(await saveIndeedConfig(payload));
+      setApiToken(''); setSecret(''); setEditing(false);
+      showToast(t('ats.indeedCredSaved', 'Indeed credentials saved'), 'success');
+    } catch (err) {
+      showToast(translateApiError(err, t, t('common.error', 'Something went wrong')) ?? t('common.error', 'Something went wrong'), 'error');
+    } finally { setSaving(false); }
+  };
+
+  const handleClear = async () => {
+    setSaving(true);
+    try {
+      setStatus(await clearIndeedConfig(companyId ?? undefined));
+      setApiToken(''); setSecret('');
+      showToast(t('ats.indeedCredCleared', 'Indeed credentials cleared'), 'success');
+    } catch {
+      showToast(t('common.error', 'Something went wrong'), 'error');
+    } finally { setSaving(false); }
+  };
+
+  const renderStatus = (configured: boolean | undefined, mask: string | null | undefined, source: string | undefined, label: string) => {
+    const isCompany = source === 'company';
+    const sourceLabel = source === 'company'
+      ? t('ats.indeedCredSourceCompany', 'this company')
+      : source === 'environment'
+        ? t('ats.indeedCredSourceEnv', 'server')
+        : '';
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '8px 10px', background: 'var(--background)', border: '1px solid var(--border)', borderRadius: 8 }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>{label}</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5 }}>
+          {configured ? (
+            <>
+              <span style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>{mask}</span>
+              <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 99, background: isCompany ? 'rgba(16,185,129,0.12)' : 'rgba(245,158,11,0.12)', color: isCompany ? '#10B981' : '#B45309' }}>
+                {sourceLabel}
+              </span>
+            </>
+          ) : (
+            <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 99, background: 'rgba(148,163,184,0.15)', color: 'var(--text-muted)' }}>
+              {t('ats.indeedCredNotSet', 'Not set')}
+            </span>
+          )}
+        </span>
+      </div>
+    );
+  };
+
+  const inputStyle: React.CSSProperties = {
+    width: '100%', boxSizing: 'border-box', padding: '8px 12px', fontSize: 13,
+    borderRadius: 'var(--radius)', border: '1px solid var(--border)', outline: 'none', background: '#fff',
+  };
+
+  return (
+    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, display: 'grid', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 15 }}>🔑</span>
+        <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-display)' }}>
+          {t('ats.indeedCredTitle', 'Indeed Apply Credentials')}
+        </span>
+      </div>
+      <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+        {t('ats.indeedCredIntro', 'These are issued by Indeed to your company once you set up Apply on Indeed in your own Indeed employer account. Job posting and applications already work without them — they only enable the native "apply inside Indeed" flow. Values are stored encrypted.')}
+      </p>
+
+      {status?.encryptionAvailable === false && (
+        <div style={{ padding: '8px 10px', borderRadius: 8, background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: '#991B1B', fontSize: 11.5 }}>
+          ⚠️ {t('ats.indeedCredNoEncryption', 'The server has no encryption key configured, so credentials cannot be stored securely yet. Contact your administrator.')}
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gap: 8 }}>
+        {loading ? (
+          <>
+            <div className="skeleton" style={{ height: 36, borderRadius: 8 }} />
+            <div className="skeleton" style={{ height: 36, borderRadius: 8 }} />
+          </>
+        ) : (
+          <>
+            {renderStatus(status?.apiTokenConfigured, status?.apiTokenMask, status?.apiTokenSource, t('ats.indeedCredApiToken', 'API Token'))}
+            {renderStatus(status?.secretConfigured, status?.secretMask, status?.secretSource, t('ats.indeedCredSecret', 'HMAC Secret'))}
+          </>
+        )}
+      </div>
+
+      {editing ? (
+        <div style={{ display: 'grid', gap: 8 }}>
+          <input
+            type="password" autoComplete="off" value={apiToken}
+            onChange={(e) => setApiToken(e.target.value)}
+            placeholder={t('ats.indeedCredApiTokenPlaceholder', 'New API token (leave blank to keep current)')}
+            style={inputStyle}
+          />
+          <input
+            type="password" autoComplete="off" value={secret}
+            onChange={(e) => setSecret(e.target.value)}
+            placeholder={t('ats.indeedCredSecretPlaceholder', 'New HMAC secret (leave blank to keep current)')}
+            style={inputStyle}
+          />
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <Button variant="secondary" size="sm" onClick={() => { setEditing(false); setApiToken(''); setSecret(''); }} disabled={saving}>
+              {t('common.cancel', 'Cancel')}
+            </Button>
+            <Button variant="primary" size="sm" onClick={() => void handleSave()} loading={saving}>
+              {t('common.save', 'Save')}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          {(status?.apiTokenSource === 'company' || status?.secretSource === 'company') && (
+            <Button variant="secondary" size="sm" onClick={() => void handleClear()} loading={saving}>
+              {t('ats.indeedCredClear', 'Clear')}
+            </Button>
+          )}
+          <Button variant="secondary" size="sm" onClick={() => setEditing(true)} disabled={status?.encryptionAvailable === false}>
+            {t('ats.indeedCredEdit', 'Set credentials')}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const IndeedPanel: React.FC<{ canEdit: boolean; companyId?: number }> = ({ canEdit, companyId }) => {
   const { t, i18n } = useTranslation();
   const { showToast } = useToast();
@@ -9256,6 +9412,8 @@ const IndeedPanel: React.FC<{ canEdit: boolean; companyId?: number }> = ({ canEd
             </div>
           </div>
         </div>
+
+        {canEdit && <IndeedCredentialsCard companyId={defaultCompanyId} />}
 
         {/* Collapsible API Reference */}
         <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
