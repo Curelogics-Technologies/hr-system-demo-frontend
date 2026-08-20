@@ -37,6 +37,9 @@ export interface Company {
   ownerSurname?: string | null;
   ownerAvatarFilename?: string | null;
   registrationNumber?: string | null;
+  vatNumber?: string | null;
+  sdiRecipientCode?: string | null;
+  pecEmail?: string | null;
   companyEmail?: string | null;
   companyPhoneNumbers?: string | null;
   officesLocations?: string | null;

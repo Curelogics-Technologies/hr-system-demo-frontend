@@ -22,6 +22,12 @@ import { getCompanyGroups } from '../../api/companyGroups';
 import { getEmployees } from '../../api/employees';
 import { getCompanyLogoUrl, getCompanyBannerUrl, getAvatarUrl } from '../../api/client';
 import { getApiErrorCode, translateApiError } from '../../utils/apiErrors';
+import {
+  EMPTY_FISCAL_ERRORS,
+  FiscalFieldErrors,
+  hasFiscalErrors,
+  validateFiscalFields,
+} from '../../utils/italianFiscal';
 import { Company } from '../../types';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
@@ -132,6 +138,9 @@ function toCompanySlug(company: Company): string {
 
 type CompanyProfileForm = {
   registrationNumber: string;
+  vatNumber: string;
+  sdiRecipientCode: string;
+  pecEmail: string;
   companyEmail: string;
   companyPhoneNumbers: string;
   officesLocations: string;
@@ -154,6 +163,9 @@ type CompanyProfileForm = {
 
 const EMPTY_COMPANY_PROFILE_FORM: CompanyProfileForm = {
   registrationNumber: '',
+  vatNumber: '',
+  sdiRecipientCode: '',
+  pecEmail: '',
   companyEmail: '',
   companyPhoneNumbers: '',
   officesLocations: '',
@@ -178,6 +190,9 @@ function profileFromCompany(company: Company | null): CompanyProfileForm {
   if (!company) return { ...EMPTY_COMPANY_PROFILE_FORM };
   return {
     registrationNumber: company.registrationNumber ?? '',
+    vatNumber: company.vatNumber ?? '',
+    sdiRecipientCode: company.sdiRecipientCode ?? '',
+    pecEmail: company.pecEmail ?? '',
     companyEmail: company.companyEmail ?? '',
     companyPhoneNumbers: company.companyPhoneNumbers ?? '',
     officesLocations: company.officesLocations ?? '',
@@ -207,6 +222,9 @@ function normalizeProfileValue(value: string): string | null {
 function payloadFromProfileForm(profile: CompanyProfileForm) {
   return {
     registrationNumber: normalizeProfileValue(profile.registrationNumber),
+    vatNumber: normalizeProfileValue(profile.vatNumber),
+    sdiRecipientCode: normalizeProfileValue(profile.sdiRecipientCode),
+    pecEmail: normalizeProfileValue(profile.pecEmail),
     companyEmail: normalizeProfileValue(profile.companyEmail),
     companyPhoneNumbers: normalizeProfileValue(profile.companyPhoneNumbers),
     officesLocations: normalizeProfileValue(profile.officesLocations),
@@ -323,6 +341,7 @@ export default function SystemCompanyManagement() {
 
   const [formName, setFormName] = useState('');
   const [formNameError, setFormNameError] = useState<string | undefined>();
+  const [formFiscalErrors, setFormFiscalErrors] = useState<FiscalFieldErrors>(EMPTY_FISCAL_ERRORS);
   const [formGroupId, setFormGroupId] = useState<number | null>(null);
   const [formOwnerUserId, setFormOwnerUserId] = useState<number | null>(null);
   const [formProfile, setFormProfile] = useState<CompanyProfileForm>({ ...EMPTY_COMPANY_PROFILE_FORM });
@@ -381,6 +400,8 @@ export default function SystemCompanyManagement() {
         c.name.toLowerCase().includes(query) ||
         (c.companyEmail && c.companyEmail.toLowerCase().includes(query)) ||
         (c.registrationNumber && c.registrationNumber.toLowerCase().includes(query)) ||
+        (c.vatNumber && c.vatNumber.toLowerCase().includes(query)) ||
+        (c.pecEmail && c.pecEmail.toLowerCase().includes(query)) ||
         (c.city && c.city.toLowerCase().includes(query));
 
       const matchesGroup = selectedGroupId === 'all' ||
@@ -438,6 +459,7 @@ export default function SystemCompanyManagement() {
     setEditingCompanyId(null);
     setFormName('');
     setFormNameError(undefined);
+    setFormFiscalErrors(EMPTY_FISCAL_ERRORS);
     setFormGroupId(null);
     setFormOwnerUserId(null);
     setFormProfile({ ...EMPTY_COMPANY_PROFILE_FORM });
@@ -455,6 +477,7 @@ export default function SystemCompanyManagement() {
     setEditingCompanyId(company.id);
     setFormName(company.name);
     setFormNameError(undefined);
+    setFormFiscalErrors(EMPTY_FISCAL_ERRORS);
     setFormGroupId(company.groupId ?? null);
     setFormOwnerUserId(company.ownerUserId ?? null);
     setFormProfile(profileFromCompany(company));
@@ -471,6 +494,7 @@ export default function SystemCompanyManagement() {
     setFormSaving(false);
     setFormError(null);
     setFormNameError(undefined);
+    setFormFiscalErrors(EMPTY_FISCAL_ERRORS);
     setLogoUploading(false);
     setLogoError(null);
     setFormProfile({ ...EMPTY_COMPANY_PROFILE_FORM });
@@ -665,6 +689,16 @@ export default function SystemCompanyManagement() {
 
   const submit = async () => {
     if (!formName.trim()) { setFormNameError(t('companies.validationName')); return; }
+
+    // Optional fields: only a malformed value blocks the save, so companies
+    // created before these existed can still be edited with them left blank.
+    const fiscalErrors = validateFiscalFields(formProfile, t);
+    setFormFiscalErrors(fiscalErrors);
+    if (hasFiscalErrors(fiscalErrors)) {
+      setFormError(t('companies.validationFiscal', 'Check the electronic invoicing fields'));
+      return;
+    }
+
     setFormSaving(true);
     setFormError(null);
     try {
@@ -1253,6 +1287,66 @@ export default function SystemCompanyManagement() {
               value={formProfile.currency}
               onChange={(e) => setFormProfile((prev) => ({ ...prev, currency: e.target.value }))}
               disabled={formSaving}
+            />
+          </div>
+
+          {/* Italian e-invoicing block — kept together and mirrored from the
+              company detail modal so both entry points look the same. */}
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+              paddingTop: 12,
+              borderTop: '1px solid var(--border)',
+            }}
+          >
+            <div
+              style={{
+                fontSize: '12.5px',
+                fontWeight: 600,
+                color: 'var(--text-primary)',
+                letterSpacing: '0.01em',
+              }}
+            >
+              {t('companies.eInvoicingSection', 'Electronic invoicing')}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 10 }}>
+              <Input
+                label={t('companies.vatNumber', 'VAT number')}
+                value={formProfile.vatNumber}
+                onChange={(e) => setFormProfile((prev) => ({ ...prev, vatNumber: e.target.value }))}
+                disabled={formSaving}
+                error={formFiscalErrors.vatNumber}
+                hint={t('companies.vatNumberHint', '11 digits, e.g. 12345678903')}
+                placeholder="12345678903"
+                inputMode="numeric"
+              />
+              <Input
+                label={t('companies.sdiRecipientCode', 'SDI recipient code')}
+                value={formProfile.sdiRecipientCode}
+                onChange={(e) =>
+                  setFormProfile((prev) => ({ ...prev, sdiRecipientCode: e.target.value.toUpperCase() }))
+                }
+                disabled={formSaving}
+                error={formFiscalErrors.sdiRecipientCode}
+                hint={t('companies.sdiRecipientCodeHint', '7 characters, or 0000000 if invoiced via PEC')}
+                placeholder="0000000"
+                maxLength={7}
+                style={{ textTransform: 'uppercase' }}
+              />
+            </div>
+
+            <Input
+              label={t('companies.pecEmail', 'Certified email (PEC)')}
+              type="email"
+              value={formProfile.pecEmail}
+              onChange={(e) => setFormProfile((prev) => ({ ...prev, pecEmail: e.target.value }))}
+              disabled={formSaving}
+              error={formFiscalErrors.pecEmail}
+              hint={t('companies.pecEmailHint', 'Certified mailbox used for electronic invoices')}
+              placeholder="azienda@pec.it"
             />
           </div>
 
