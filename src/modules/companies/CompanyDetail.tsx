@@ -57,6 +57,12 @@ import { DatePicker } from '../../components/ui/DatePicker';
 import { LocationFieldGroup } from '../../components/location';
 import { getCountryDisplayName } from '../../utils/country';
 import { getCompanies } from '../../api/companies';
+import {
+  EMPTY_FISCAL_ERRORS,
+  FiscalFieldErrors,
+  hasFiscalErrors,
+  validateFiscalFields,
+} from '../../utils/italianFiscal';
 
 function parseCompanyIdFromSlug(slug?: string): number | null {
   if (!slug) return null;
@@ -85,6 +91,9 @@ function initials(name: string): string {
 
 type CompanyProfileForm = {
   registrationNumber: string;
+  vatNumber: string;
+  sdiRecipientCode: string;
+  pecEmail: string;
   companyEmail: string;
   companyPhoneNumbers: string;
   officesLocations: string;
@@ -106,6 +115,9 @@ type CompanyProfileForm = {
 
 const EMPTY_PROFILE_FORM: CompanyProfileForm = {
   registrationNumber: '',
+  vatNumber: '',
+  sdiRecipientCode: '',
+  pecEmail: '',
   companyEmail: '',
   companyPhoneNumbers: '',
   officesLocations: '',
@@ -129,6 +141,9 @@ function profileFromCompany(company: Company | null): CompanyProfileForm {
   if (!company) return { ...EMPTY_PROFILE_FORM };
   return {
     registrationNumber: company.registrationNumber ?? '',
+    vatNumber: company.vatNumber ?? '',
+    sdiRecipientCode: company.sdiRecipientCode ?? '',
+    pecEmail: company.pecEmail ?? '',
     companyEmail: company.companyEmail ?? '',
     companyPhoneNumbers: company.companyPhoneNumbers ?? '',
     officesLocations: company.officesLocations ?? '',
@@ -157,6 +172,9 @@ function normalizeProfileValue(value: string): string | null {
 function profilePayload(profile: CompanyProfileForm) {
   return {
     registrationNumber: normalizeProfileValue(profile.registrationNumber),
+    vatNumber: normalizeProfileValue(profile.vatNumber),
+    sdiRecipientCode: normalizeProfileValue(profile.sdiRecipientCode),
+    pecEmail: normalizeProfileValue(profile.pecEmail),
     companyEmail: normalizeProfileValue(profile.companyEmail),
     companyPhoneNumbers: normalizeProfileValue(profile.companyPhoneNumbers),
     officesLocations: normalizeProfileValue(profile.officesLocations),
@@ -206,6 +224,7 @@ export default function CompanyDetail() {
   const [editProfile, setEditProfile] = useState<CompanyProfileForm>({ ...EMPTY_PROFILE_FORM });
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [editFiscalErrors, setEditFiscalErrors] = useState<FiscalFieldErrors>(EMPTY_FISCAL_ERRORS);
 
   const [mediaOpen, setMediaOpen] = useState(false);
   const [logoHover, setLogoHover] = useState(false);
@@ -419,6 +438,7 @@ export default function CompanyDetail() {
     setEditOwnerUserId(company.ownerUserId != null ? String(company.ownerUserId) : '');
     setEditProfile(profileFromCompany(company));
     setEditError(null);
+    setEditFiscalErrors(EMPTY_FISCAL_ERRORS);
     setEditOpen(true);
   }
 
@@ -426,6 +446,15 @@ export default function CompanyDetail() {
     if (!company) return;
     if (!editName.trim()) {
       setEditError(t('companies.validationName'));
+      return;
+    }
+
+    // Blank e-invoicing fields are allowed; only malformed input blocks saving,
+    // so editing a pre-existing company never becomes impossible.
+    const fiscalErrors = validateFiscalFields(editProfile, t);
+    setEditFiscalErrors(fiscalErrors);
+    if (hasFiscalErrors(fiscalErrors)) {
+      setEditError(t('companies.validationFiscal', 'Check the electronic invoicing fields'));
       return;
     }
 
@@ -610,6 +639,9 @@ export default function CompanyDetail() {
 
   const companyInsights: Array<{ label: string; value: string | null | undefined }> = [
     { label: t('companies.registrationNumber', 'Registration number'), value: company.registrationNumber },
+    { label: t('companies.vatNumber', 'VAT number'), value: company.vatNumber },
+    { label: t('companies.sdiRecipientCode', 'SDI recipient code'), value: company.sdiRecipientCode },
+    { label: t('companies.pecEmail', 'Certified email (PEC)'), value: company.pecEmail },
     { label: t('companies.companyEmail', 'Company email'), value: company.companyEmail },
     { label: t('companies.companyPhoneNumbers', 'Company phone numbers'), value: company.companyPhoneNumbers },
     { label: t('companies.officesLocations', 'Offices locations'), value: company.officesLocations },
@@ -1260,6 +1292,73 @@ export default function CompanyDetail() {
                 onChange={(event) => setEditProfile((prev) => ({ ...prev, companyEmail: event.target.value }))}
                 disabled={editSaving}
               />
+
+              {/* Italian e-invoicing block — grouped so the three billing
+                  identifiers read as one unit rather than loose fields. */}
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 10,
+                  paddingTop: 12,
+                  borderTop: '1px solid var(--border)',
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: '12.5px',
+                    fontWeight: 600,
+                    color: 'var(--text-primary)',
+                    letterSpacing: '0.01em',
+                  }}
+                >
+                  {t('companies.eInvoicingSection', 'Electronic invoicing')}
+                </div>
+
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                    gap: 10,
+                  }}
+                >
+                  <Input
+                    label={t('companies.vatNumber', 'VAT number')}
+                    value={editProfile.vatNumber}
+                    onChange={(event) => setEditProfile((prev) => ({ ...prev, vatNumber: event.target.value }))}
+                    disabled={editSaving}
+                    error={editFiscalErrors.vatNumber}
+                    hint={t('companies.vatNumberHint', '11 digits, e.g. 12345678903')}
+                    placeholder="12345678903"
+                    inputMode="numeric"
+                  />
+
+                  <Input
+                    label={t('companies.sdiRecipientCode', 'SDI recipient code')}
+                    value={editProfile.sdiRecipientCode}
+                    onChange={(event) =>
+                      setEditProfile((prev) => ({ ...prev, sdiRecipientCode: event.target.value.toUpperCase() }))
+                    }
+                    disabled={editSaving}
+                    error={editFiscalErrors.sdiRecipientCode}
+                    hint={t('companies.sdiRecipientCodeHint', '7 characters, or 0000000 if invoiced via PEC')}
+                    placeholder="0000000"
+                    maxLength={7}
+                    style={{ textTransform: 'uppercase' }}
+                  />
+                </div>
+
+                <Input
+                  label={t('companies.pecEmail', 'Certified email (PEC)')}
+                  type="email"
+                  value={editProfile.pecEmail}
+                  onChange={(event) => setEditProfile((prev) => ({ ...prev, pecEmail: event.target.value }))}
+                  disabled={editSaving}
+                  error={editFiscalErrors.pecEmail}
+                  hint={t('companies.pecEmailHint', 'Certified mailbox used for electronic invoices')}
+                  placeholder="azienda@pec.it"
+                />
+              </div>
 
               <Input
                 label={t('companies.officesLocations', 'Offices locations')}
