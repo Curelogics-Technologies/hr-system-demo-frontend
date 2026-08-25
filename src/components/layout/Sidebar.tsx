@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
+import billingApi from '../../api/billing';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../context/AuthContext';
 import { LanguageSwitcher } from '../ui/LanguageSwitcher';
@@ -52,6 +53,12 @@ const IconSmartphone = () => (
 const IconShield = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+  </svg>
+);
+const IconCreditCard = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2" y="5" width="20" height="14" rx="2" />
+    <line x1="2" y1="10" x2="22" y2="10" />
   </svg>
 );
 const IconScale = () => (
@@ -199,6 +206,22 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, mobileOpen, onMobileClose 
 
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [avatarImgError, setAvatarImgError] = useState(false);
+  const [billingRestricted, setBillingRestricted] = useState(false);
+
+  // Cheap status probe. Super admins and terminals are never restricted, and a
+  // failure here must leave navigation fully open rather than hide everything.
+  useEffect(() => {
+    if (!user || user.isSuperAdmin === true || user.role === 'store_terminal') {
+      setBillingRestricted(false);
+      return;
+    }
+    let cancelled = false;
+    billingApi
+      .getStatus()
+      .then((s) => { if (!cancelled) setBillingRestricted(!!s.restricted); })
+      .catch(() => { if (!cancelled) setBillingRestricted(false); });
+    return () => { cancelled = true; };
+  }, [user?.id, user?.isSuperAdmin, user?.role, location.pathname]);
 
   useEffect(() => {
     if (!user || user.role === 'store_terminal') return;
@@ -246,6 +269,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, mobileOpen, onMobileClose 
       { labelKey: 'nav.permissions', path: '/impostazioni/permessi', icon: <IconShield />, permissionKey: 'gestione_accessi' },
       { labelKey: 'nav.automazioni', path: '/automazioni', icon: <IconZap />, permissionKey: 'automazioni' },
       { labelKey: 'nav.reports', path: '/reports', icon: <IconReports />, permissionKey: 'report' },
+      { labelKey: 'nav.billing', path: '/impostazioni/fatturazione', icon: <IconCreditCard />, permissionKey: 'impostazioni' },
       { labelKey: 'nav.settings', path: '/impostazioni', icon: <IconSettings />, permissionKey: 'impostazioni' },
     ],
     hr: [
@@ -326,9 +350,23 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, mobileOpen, onMobileClose 
     store_terminal: [],
   };
 
+  // While the company's subscription is unpaid, navigation collapses to the
+  // set needed to fix that: the company record (where VAT / SDI / PEC live),
+  // billing itself, settings, access configuration and messages. Everything
+  // operational is hidden — the API blocks it too, so showing it would only
+  // produce dead links.
+  const BILLING_RESTRICTED_PATHS = [
+    '/aziende',
+    '/impostazioni',
+    '/impostazioni/fatturazione',
+    '/impostazioni/permessi',
+    '/hr-chat',
+  ];
+
   const navItems = NAV_ITEMS[user.role].filter((item) => {
     if (item.superAdminOnly && user.isSuperAdmin !== true) return false;
     if (item.hideForSuperAdmin && user.isSuperAdmin === true) return false;
+    if (billingRestricted && !BILLING_RESTRICTED_PATHS.includes(item.path)) return false;
     if (!item.permissionKey) return true;
     if (user.isSuperAdmin === true) return true;
     return permissions[item.permissionKey] === true;

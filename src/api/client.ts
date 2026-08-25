@@ -89,7 +89,32 @@ client.interceptors.response.use(
     }
     return res;
   },
-  (err) => Promise.reject(err)
+  (err) => {
+    if (err.response?.status === 402 && err.response?.data?.code === 'LICENSE_LIMIT_REACHED') {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('license-limit', { detail: err.response.data })
+        );
+      }
+    }
+
+    if (err.response?.status === 403) {
+      const code = err.response?.data?.code || err.response?.data?.error;
+      if (code === 'SUBSCRIPTION_REQUIRED' || code === 'SUBSCRIPTION_BLOCKED') {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('billing-restriction', {
+              detail: {
+                code,
+                message: err.response.data.message,
+              },
+            })
+          );
+        }
+      }
+    }
+    return Promise.reject(err);
+  }
 );
 
 const TOKEN_KEY = 'hr_token';

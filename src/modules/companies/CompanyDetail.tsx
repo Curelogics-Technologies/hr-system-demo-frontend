@@ -25,6 +25,8 @@ import {
   Receipt,
   Tag,
   LayoutDashboard,
+  CreditCard,
+  AlertTriangle,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -45,7 +47,8 @@ import { getCompanyGroups } from '../../api/companyGroups';
 import { getStores } from '../../api/stores';
 import { getEmployees } from '../../api/employees';
 import { getAvatarUrl, getCompanyBannerUrl, getCompanyLogoUrl, getStoreLogoUrl } from '../../api/client';
-import { Company, Employee, Store } from '../../types';
+import { Company, Employee, Store, BillingOverview } from '../../types';
+import { billingApi } from '../../api/billing';
 import { translateApiError } from '../../utils/apiErrors';
 import { Button } from '../../components/ui/Button';
 import { Alert } from '../../components/ui/Alert';
@@ -205,6 +208,10 @@ export default function CompanyDetail() {
   const companyId = useMemo(() => parseCompanyIdFromSlug(slug), [slug]);
   const locale = i18n.language?.startsWith('it') ? 'it-IT' : 'en-GB';
   const canManageStatus = user?.isSuperAdmin === true;
+  // Billing is visible to super admins and to company admins for their own
+  // company. HR and area managers never see it.
+  const canSeeBillingTab =
+    user?.isSuperAdmin === true || user?.role === 'admin' || user?.role === 'hr';
   const isSuperAdmin = !!user?.isSuperAdmin || (user?.role as string) === 'super_admin';
 
   const [company, setCompany] = useState<Company | null>(null);
@@ -248,6 +255,10 @@ export default function CompanyDetail() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<'overview' | 'billing'>('overview');
+
+  // Real subscription data from billing API (Super Admin only)
+  const [billingData, setBillingData] = useState<BillingOverview | null>(null);
+  const [billingLoading, setBillingLoading] = useState(false);
 
   const bannerUrl = getCompanyBannerUrl(company?.bannerFilename);
   const logoUrl = getCompanyLogoUrl(company?.logoFilename);
@@ -301,6 +312,28 @@ export default function CompanyDetail() {
       setBannerSize(null);
     }
   }, [bannerUrl]);
+
+  // Fetch real subscription data when Super Admin opens the billing tab
+  useEffect(() => {
+    if (activeTab !== 'billing' || !company?.id) return;
+    let cancelled = false;
+    const fetchBilling = async () => {
+      try {
+        setBillingLoading(true);
+        const data = await billingApi.getAdminCompanyBilling(company.id);
+        if (!cancelled) setBillingData(data);
+      } catch (err) {
+        // Leave the tab empty rather than blocking the page, but say so in the
+        // console — a silent catch here is what made this look like "no data".
+        console.warn('[CompanyDetail] Billing data unavailable for company', company.id, err);
+        if (!cancelled) setBillingData(null);
+      } finally {
+        if (!cancelled) setBillingLoading(false);
+      }
+    };
+    fetchBilling();
+    return () => { cancelled = true; };
+  }, [activeTab, company?.id]);
 
   const formatBytes = (bytes: number) => {
     if (bytes === 0) return '0 Bytes';
@@ -858,7 +891,7 @@ export default function CompanyDetail() {
         marginBottom: 10,
         alignSelf: 'flex-start',
       }}>
-        {(['overview', 'billing'] as const).map((tab) => {
+        {(canSeeBillingTab ? (['overview', 'billing'] as const) : (['overview'] as const)).map((tab: 'overview' | 'billing') => {
           const isActive = activeTab === tab;
           const label = tab === 'overview' ? 'Overview' : 'Billing';
           const icon = tab === 'overview' ? <LayoutDashboard size={14} /> : <Receipt size={14} />;
@@ -1047,6 +1080,209 @@ export default function CompanyDetail() {
 
         return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+            {/* ── Live Subscription Status (from billing API) ── */}
+            {billingLoading ? (
+              <div style={{ ...sectionStyle, padding: '32px 18px', textAlign: 'center' }}>
+                <div style={{ display: 'inline-block', width: 20, height: 20, border: '2px solid var(--border)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 10 }}>Loading subscription data…</div>
+              </div>
+            ) : billingData?.subscription ? (() => {
+              const sub = billingData.subscription;
+              const statusConfig: Record<string, { bg: string; color: string; label: string; dot: string }> = {
+                active: { bg: 'rgba(34,197,94,0.1)', color: '#16a34a', label: 'Active', dot: '🟢' },
+                past_due: { bg: 'rgba(239,68,68,0.1)', color: '#dc2626', label: 'Past Due', dot: '🟡' },
+                canceled: { bg: 'rgba(107,114,128,0.1)', color: '#6b7280', label: 'Canceled', dot: '⚪' },
+                unpaid: { bg: 'rgba(239,68,68,0.1)', color: '#dc2626', label: 'Blocked', dot: '🔴' },
+                pending: { bg: 'rgba(234,179,8,0.1)', color: '#ca8a04', label: 'Pending', dot: '⏳' },
+                incomplete: { bg: 'rgba(234,179,8,0.1)', color: '#ca8a04', label: 'Incomplete', dot: '⚠️' },
+              };
+              const sc = statusConfig[sub.status] || statusConfig.pending;
+              const fmtDate = (d?: string | null) => d ? new Date(d).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+
+              return (
+                <>
+                  {/* Subscription Status Card */}
+                  <div style={sectionStyle}>
+                    <div style={{ ...sectionHeaderStyle, justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ width: 34, height: 34, borderRadius: 8, background: 'rgba(201,151,58,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent)', flexShrink: 0 }}>
+                          <CreditCard size={16} />
+                        </span>
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>Subscription Status</div>
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>Live data from payment gateway</div>
+                        </div>
+                      </div>
+                      <span style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 6,
+                        padding: '5px 14px', borderRadius: 999,
+                        background: sc.bg, color: sc.color,
+                        fontSize: 12, fontWeight: 700,
+                      }}>
+                        {sc.dot} {sc.label}
+                      </span>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1fr', gap: 1, background: 'var(--border-light)' }}>
+                      <div style={{ padding: '14px 18px', background: 'var(--surface)' }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>GATEWAY</div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', textTransform: 'capitalize' }}>{sub.provider}</div>
+                      </div>
+                      <div style={{ padding: '14px 18px', background: 'var(--surface)' }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>BILLING PERIOD</div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{fmtDate(sub.currentPeriodStart)} — {fmtDate(sub.currentPeriodEnd)}</div>
+                      </div>
+                      <div style={{ padding: '14px 18px', background: 'var(--surface)' }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>MONTHLY CHARGE</div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
+                          €{((sub.seatQuantity * sub.unitPriceEmployee + sub.deviceQuantity * sub.unitPriceDevice)).toFixed(2)}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Billed vs Live quantities */}
+                    <div style={{ padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>BILLED VS LIVE QUANTITIES</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 10 }}>
+                        <div style={{ padding: '10px 14px', background: 'var(--background)', borderRadius: 8, border: '1px solid var(--border-light)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Employees</span>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+                              {sub.seatQuantity} billed
+                              {billingData.liveUsage && billingData.liveUsage.employeeCount !== sub.seatQuantity && (
+                                <span style={{ color: billingData.liveUsage.employeeCount > sub.seatQuantity ? 'var(--warning)' : 'var(--success)', marginLeft: 6, fontSize: 11 }}>
+                                  ({billingData.liveUsage.employeeCount > sub.seatQuantity ? '+' : ''}{billingData.liveUsage.employeeCount - sub.seatQuantity} live)
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                          {sub.pendingSeatQuantity != null && (
+                            <div style={{ fontSize: 11, color: 'var(--warning)', marginTop: 4 }}>↓ Pending reduction to {sub.pendingSeatQuantity} at renewal</div>
+                          )}
+                        </div>
+                        <div style={{ padding: '10px 14px', background: 'var(--background)', borderRadius: 8, border: '1px solid var(--border-light)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Terminals</span>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+                              {sub.deviceQuantity} billed
+                              {billingData.liveUsage && billingData.liveUsage.deviceCount !== sub.deviceQuantity && (
+                                <span style={{ color: billingData.liveUsage.deviceCount > sub.deviceQuantity ? 'var(--warning)' : 'var(--success)', marginLeft: 6, fontSize: 11 }}>
+                                  ({billingData.liveUsage.deviceCount > sub.deviceQuantity ? '+' : ''}{billingData.liveUsage.deviceCount - sub.deviceQuantity} live)
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                          {sub.pendingDeviceQuantity != null && (
+                            <div style={{ fontSize: 11, color: 'var(--warning)', marginTop: 4 }}>↓ Pending reduction to {sub.pendingDeviceQuantity} at renewal</div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Grace period warning */}
+                    {sub.status === 'past_due' && sub.gracePeriodEndsAt && (
+                      <div style={{ margin: '0 18px 14px', padding: '10px 14px', background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <AlertTriangle size={16} style={{ color: '#dc2626', flexShrink: 0 }} />
+                        <span style={{ fontSize: 12, color: '#dc2626', fontWeight: 600 }}>
+                          Grace period expires: {fmtDate(sub.gracePeriodEndsAt)} — access will be blocked after this date
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Cancel at period end notice */}
+                    {sub.cancelAtPeriodEnd && (
+                      <div style={{ margin: '0 18px 14px', padding: '10px 14px', background: 'rgba(107,114,128,0.06)', border: '1px solid rgba(107,114,128,0.2)', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <AlertTriangle size={16} style={{ color: '#6b7280', flexShrink: 0 }} />
+                        <span style={{ fontSize: 12, color: '#6b7280', fontWeight: 600 }}>
+                          Subscription set to cancel at end of current period ({fmtDate(sub.currentPeriodEnd)})
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Recent Transactions from Billing API */}
+                  {billingData.transactions && billingData.transactions.length > 0 && (
+                    <div style={sectionStyle}>
+                      <div style={sectionHeaderStyle}>
+                        <span style={{ width: 34, height: 34, borderRadius: 8, background: 'rgba(201,151,58,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent)', flexShrink: 0 }}>
+                          <Receipt size={16} />
+                        </span>
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>Recent Transactions</div>
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>Last {billingData.transactions.length} payment records</div>
+                        </div>
+                      </div>
+                      <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                          <thead>
+                            <tr style={{ borderBottom: '1px solid var(--border-light)' }}>
+                              <th style={{ padding: '10px 18px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Date</th>
+                              <th style={{ padding: '10px 14px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Description</th>
+                              <th style={{ padding: '10px 14px', textAlign: 'right', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Amount</th>
+                              <th style={{ padding: '10px 14px', textAlign: 'center', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Status</th>
+                              <th style={{ padding: '10px 18px', textAlign: 'right', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Receipt</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {billingData.transactions.map((tx: any) => {
+                              const txStatusMap: Record<string, { bg: string; color: string; label: string }> = {
+                                paid: { bg: 'rgba(34,197,94,0.1)', color: '#16a34a', label: 'Paid' },
+                                failed: { bg: 'rgba(239,68,68,0.1)', color: '#dc2626', label: 'Failed' },
+                                refunded: { bg: 'rgba(107,114,128,0.1)', color: '#6b7280', label: 'Refunded' },
+                                pending: { bg: 'rgba(234,179,8,0.1)', color: '#ca8a04', label: 'Pending' },
+                              };
+                              const ts = txStatusMap[tx.status] || txStatusMap.pending;
+                              return (
+                                <tr key={tx.id} style={{ borderBottom: '1px solid var(--border-light)' }}>
+                                  <td style={{ padding: '10px 18px', fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                                    {fmtDate(tx.paidAt || tx.createdAt)}
+                                  </td>
+                                  <td style={{ padding: '10px 14px', fontSize: 12, color: 'var(--text-primary)', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    {tx.description || 'Payment'}
+                                    {tx.failureMessage && <div style={{ fontSize: 11, color: '#dc2626', marginTop: 2 }}>{tx.failureMessage}</div>}
+                                  </td>
+                                  <td style={{ padding: '10px 14px', textAlign: 'right', fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
+                                    €{((tx.amountCents || 0) / 100).toFixed(2)}
+                                  </td>
+                                  <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                                    <span style={{
+                                      display: 'inline-block', padding: '3px 10px', borderRadius: 999,
+                                      background: ts.bg, color: ts.color, fontSize: 11, fontWeight: 700,
+                                    }}>
+                                      {ts.label}
+                                    </span>
+                                  </td>
+                                  <td style={{ padding: '10px 18px', textAlign: 'right' }}>
+                                    {tx.invoiceUrl ? (
+                                      <a href={tx.invoiceUrl} target="_blank" rel="noopener noreferrer"
+                                        style={{ fontSize: 11, color: 'var(--primary)', textDecoration: 'none', fontWeight: 600 }}>
+                                        View ↗
+                                      </a>
+                                    ) : (
+                                      <span style={{ fontSize: 11, color: 'var(--text-disabled)' }}>—</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </>
+              );
+            })() : (
+              <div style={{ ...sectionStyle, padding: '24px 18px', textAlign: 'center' }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>No Active Subscription</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>This company has not activated a billing subscription yet.</div>
+              </div>
+            )}
+
+            {/* ── Pricing Reference (existing sections below) ── */}
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 6, marginBottom: -6 }}>
+              PRICING REFERENCE (LIVE CALCULATION)
+            </div>
 
             {/* Employees */}
             <div style={sectionStyle}>

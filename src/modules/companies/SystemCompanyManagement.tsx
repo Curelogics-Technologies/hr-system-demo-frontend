@@ -2,10 +2,11 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import ReactCountryFlag from 'react-country-flag';
-import { ArrowRight, Building2, Users, Store, Plus, Layers, Smartphone, HardDrive, CalendarClock, Search } from 'lucide-react';
+import { ArrowRight, Building2, Users, Store, Plus, Layers, Smartphone, HardDrive, CalendarClock, Search, CreditCard } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
 import { useBreakpoint } from '../../hooks/useBreakpoint';
 import { useAuth } from '../../context/AuthContext';
+import { CompanyBillingConfigModal } from './CompanyBillingConfigModal';
 import {
   createCompany,
   getCompanies,
@@ -337,6 +338,7 @@ export default function SystemCompanyManagement() {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<ModalMode>('create');
   const [currentStep, setCurrentStep] = useState<1 | 2>(1);
+  const [billingConfigCompany, setBillingConfigCompany] = useState<Company | null>(null);
   const [editingCompanyId, setEditingCompanyId] = useState<number | null>(null);
 
   const [formName, setFormName] = useState('');
@@ -1013,6 +1015,33 @@ export default function SystemCompanyManagement() {
 
                   {/* Actions */}
                   <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                    {user?.isSuperAdmin && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setBillingConfigCompany(c);
+                        }}
+                        title={t('companies.billingRates', 'Tariffe & Parametri di Fatturazione')}
+                        style={{
+                          height: 32,
+                          padding: '0 10px',
+                          borderRadius: 'var(--radius-sm)',
+                          border: '1px solid rgba(201,151,58,0.3)',
+                          background: 'rgba(201,151,58,0.08)',
+                          color: 'var(--accent)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 6,
+                          fontSize: 11,
+                          fontWeight: 700,
+                          transition: 'all 0.15s',
+                        }}
+                      >
+                        <CreditCard size={12} /> {t('companies.billingRatesShort', 'Tariffe')}
+                      </button>
+                    )}
                     <button
                       onClick={() => navigate(`/aziende/${c.id}`)}
                       title={t('common.open')}
@@ -1616,6 +1645,20 @@ export default function SystemCompanyManagement() {
           </p>
         </div>
       </Modal>
+
+      {/* ── Super Admin Dedicated Billing Config Modal ── */}
+      {billingConfigCompany && (
+        <CompanyBillingConfigModal
+          company={billingConfigCompany}
+          isOpen={!!billingConfigCompany}
+          onClose={() => setBillingConfigCompany(null)}
+          onSuccess={(updated) => {
+            setCompanies((prev) =>
+              prev.map((comp) => (comp.id === updated.id ? { ...comp, ...updated } : comp))
+            );
+          }}
+        />
+      )}
     </div>
   );
 }
