@@ -7,7 +7,7 @@ import { Badge } from '../../components/ui/Badge';
 import { Spinner } from '../../components/ui/Spinner';
 import { ExternalLink, UserPlus, UserMinus, Smartphone, Users } from 'lucide-react';
 import billingApi from '../../api/billing';
-import { billingErrorMessage } from './billingErrors';
+import { billingErrorMessage, billingTransactionLabel } from './billingErrors';
 import { updateCompany } from '../../api/companies';
 import type { BillingOverview, BillingTransaction, LicenseSnapshot } from '../../types';
 
@@ -240,9 +240,9 @@ export const ReceiptModal: React.FC<{
           </strong>
         </div>
 
-        {tx.description && (
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>{tx.description}</div>
-        )}
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
+          {billingTransactionLabel(tx, t)}
+        </div>
         {tx.failureMessage && (
           <div style={{ fontSize: 12, color: 'var(--danger, #dc2626)', marginTop: 6 }}>{tx.failureMessage}</div>
         )}
