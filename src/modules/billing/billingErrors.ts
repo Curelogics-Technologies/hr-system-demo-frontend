@@ -1,4 +1,31 @@
 import type { TFunction } from 'i18next';
+import type { BillingTransaction } from '../../types';
+
+/**
+ * Wording for a payment row.
+ *
+ * The sentence is built here rather than read from the database: a description
+ * stored at insert time is frozen in whatever language the server happened to
+ * use and can never follow the language the reader selected. The stored text
+ * is used only for rows written before payments recorded their kind.
+ */
+export function billingTransactionLabel(tx: BillingTransaction, t: TFunction): string {
+  const employees = tx.seatQuantity ?? 0;
+  const terminals = tx.deviceQuantity ?? 0;
+
+  switch (tx.kind) {
+    case 'activation':
+      return t('billing.txKindActivation', { employees, terminals });
+    case 'license_upgrade':
+      return t('billing.txKindUpgrade', { employees, terminals });
+    case 'renewal':
+      return t('billing.txKindRenewal', { employees, terminals });
+    case 'failed':
+      return t('billing.txKindFailed');
+    default:
+      return tx.description || t('billing.txKindRenewal', { employees, terminals });
+  }
+}
 
 /**
  * Turns a billing API failure into a message in the user's language.

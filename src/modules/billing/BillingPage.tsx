@@ -14,7 +14,7 @@ import {
   ReceiptModal,
   HeadcountHistoryModal,
 } from './BillingModals';
-import { billingErrorMessage } from './billingErrors';
+import { billingErrorMessage, billingTransactionLabel } from './billingErrors';
 import { LicenseModal } from './LicenseModal';
 import {
   CreditCard,
@@ -868,7 +868,7 @@ export const BillingPage: React.FC = () => {
                       {formatDate(tx.createdAt)}
                     </td>
                     <td style={{ padding: '12px', color: 'var(--text-primary)' }}>
-                      {tx.description || t('billing.subscriptionPayment', 'Canone mensile VeylOHR')}
+                      {billingTransactionLabel(tx, t)}
                     </td>
                     <td style={{ padding: '12px', color: 'var(--text-secondary)', textTransform: 'capitalize' }}>
                       {tx.provider}

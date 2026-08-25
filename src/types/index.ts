@@ -320,7 +320,15 @@ export interface Subscription {
   createdAt?: string;
 }
 
+export type BillingTransactionKind =
+  | 'activation'
+  | 'renewal'
+  | 'license_upgrade'
+  | 'failed';
+
 export interface BillingTransaction {
+  /** What the payment was, so its label can be translated. */
+  kind?: BillingTransactionKind | null;
   id: number;
   provider: PaymentProvider;
   amountCents: number;

@@ -228,10 +228,14 @@ export const LicenseModal: React.FC<Props> = ({
   const { t, i18n } = useTranslation();
   const locale = i18n.language?.startsWith('en') ? 'en' : 'it';
 
-  const minEmployees = licenses?.employeesInUse ?? 0;
-  const minTerminals = licenses?.terminalsInUse ?? 0;
-  const currentEmployees = licenses?.employeesLicensed ?? 0;
-  const currentTerminals = licenses?.terminalsLicensed ?? 0;
+  // Server truth for the allowance, refreshed every time the modal opens.
+  const [liveLicenses, setLiveLicenses] = useState<LicenseSnapshot | null>(null);
+  const effective = liveLicenses ?? licenses ?? null;
+
+  const minEmployees = effective?.employeesInUse ?? 0;
+  const minTerminals = effective?.terminalsInUse ?? 0;
+  const currentEmployees = effective?.employeesLicensed ?? 0;
+  const currentTerminals = effective?.terminalsLicensed ?? 0;
 
   const [employees, setEmployees] = useState(0);
   const [terminals, setTerminals] = useState(0);
@@ -262,6 +266,21 @@ export const LicenseModal: React.FC<Props> = ({
     }
   };
 
+  // Pull the current allowance first, so the steppers start from what the
+  // server actually holds rather than from a possibly stale prop.
+  useEffect(() => {
+    if (!open) {
+      setLiveLicenses(null);
+      return;
+    }
+    let cancelled = false;
+    billingApi
+      .getLicenses(companyId || undefined)
+      .then((snap) => { if (!cancelled) setLiveLicenses(snap); })
+      .catch(() => { /* fall back to the prop */ });
+    return () => { cancelled = true; };
+  }, [open, companyId]);
+
   useEffect(() => {
     if (!open) return;
     setEmployees(Math.max(currentEmployees, minEmployees, mode === 'activate' ? 1 : 0));
@@ -291,8 +310,11 @@ export const LicenseModal: React.FC<Props> = ({
     return () => clearTimeout(id);
   }, [refreshQuote]);
 
-  const addingEmployees = Math.max(0, employees - currentEmployees);
-  const addingTerminals = Math.max(0, terminals - currentTerminals);
+  // Taken from the quote whenever there is one: the server priced the change,
+  // so it decides how much is actually being added. Falling back to the local
+  // difference only while the first quote is still in flight.
+  const addingEmployees = quote ? quote.extraEmployees : Math.max(0, employees - currentEmployees);
+  const addingTerminals = quote ? quote.extraTerminals : Math.max(0, terminals - currentTerminals);
 
   const monthlyTotal = useMemo(
     () => employees * unitPriceEmployee + terminals * unitPriceDevice,
@@ -304,7 +326,7 @@ export const LicenseModal: React.FC<Props> = ({
 
   // PayPal can only change what the next cycle bills, so an increase there is
   // scheduled rather than charged now.
-  const isPayPal = licenses?.hasSubscription === true && provider === 'paypal';
+  const isPayPal = effective?.hasSubscription === true && provider === 'paypal';
 
   const handleApply = async () => {
     if (!dirty) return;
@@ -356,7 +378,7 @@ export const LicenseModal: React.FC<Props> = ({
     }
   };
 
-  const pendingUpgrade = licenses?.pendingUpgrade;
+  const pendingUpgrade = effective?.pendingUpgrade;
 
   return (
     <Modal
@@ -381,7 +403,7 @@ export const LicenseModal: React.FC<Props> = ({
                 submitting ||
                 !!pendingUpgrade ||
                 quoting ||
-                (!isReduction && (!!quoteError || !quote))
+                (!isReduction && (!!quoteError || !quote || quote.amountDueNowCents <= 0))
               }
             >
               {submitting
