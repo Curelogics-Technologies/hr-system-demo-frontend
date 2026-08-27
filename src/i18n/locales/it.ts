@@ -1,6 +1,8 @@
 const it = {
   // ─── Common ───────────────────────────────────────────────────────────────
   common: {
+    errorOccurred: "Si è verificato un errore",
+    deletePermanently: "Elimina definitivamente",
     preview: 'Anteprima',
     view: 'Visualizza',
     warning: 'Attenzione',
@@ -358,6 +360,8 @@ const it = {
 
   // ─── Employees ────────────────────────────────────────────────────────────
   employees: {
+    trainingStartDateRequired: "La data di inizio è obbligatoria",
+    medicalStartDateRequired: "La data di inizio è obbligatoria",
     title: 'Dipendenti',
     subtitle: 'Gestione completa del personale',
     filters: 'Filtri',
@@ -968,6 +972,7 @@ const it = {
 
   // ─── Companies ────────────────────────────────────────────────────────────
   companies: {
+    extraStoragePrice: "Imposta prezzo spazio extra (per GB)",
     owner: 'Proprietario',
     title: 'La mia azienda',
     editCompany: 'Modifica Azienda',
@@ -1233,6 +1238,10 @@ const it = {
     INVALID_YEAR: 'Anno non valido.',
     INVALID_LEAVE_TYPE: 'Tipo di permesso non valido.',
     BALANCE_NOT_CONFIGURED: 'Saldo ferie non configurato per questo dipendente. Configura prima i giorni disponibili, poi approva la richiesta.',
+    NEEDS_REOPEN: "Questa richiesta risulta gia' approvata, ma da nessuna persona. Usa Riapri per rimandarla a HR per una decisione reale.",
+    REOPEN_ADMIN_ONLY: "Solo un amministratore puo' riaprire una richiesta approvata automaticamente.",
+    REOPEN_NOT_UNVERIFIED: "Questa richiesta e' stata approvata da una persona e non puo' essere riaperta.",
+    ROLE_NOT_IN_CHAIN: 'Il tuo ruolo non è un passaggio della catena di approvazione di questa azienda.',
     LEAVE_CONFLICT: 'Il dipendente ha un permesso approvato in questa data.',
     OFF_DAY_SHIFT_BLOCKED: 'Questo dipendente e in giorno off nella data selezionata, quindi la creazione del turno e bloccata.',
     OFF_DAY_STATUS_LOCKED: 'Lo stato del turno non puo essere modificato perche il turno ricade in un giorno off.',
@@ -1291,6 +1300,8 @@ const it = {
   },
   // ─── Shifts ───────────────────────────────────────────────────────────────
   shifts: {
+    status_confirmed: "Confermato",
+    status_scheduled: "Programmato",
     title: 'Turni',
     employees: 'Collaboratori',
     templates: 'Template',
@@ -1706,6 +1717,8 @@ const it = {
 
   // ─── Transfers ───────────────────────────────────────────────────────────
   transfers: {
+    deletedTargetShifts: "Turni destinazione eliminati",
+    day: "giorno",
     title: 'Trasferimenti temporanei',
     subtitle: 'Gestisci assegnazioni temporanee tra negozi e monitora i turni impattati.',
     new: 'Nuovo trasferimento',
@@ -1806,6 +1819,7 @@ const it = {
 
   // ─── Attendance ───────────────────────────────────────────────────────────
   attendance: {
+    infoTitle: "Come funzionano le anomalie",
     title: 'Presenze',
     logTitle: 'Registro Presenze',
     filterTitle: 'Filtra Anomalie',
@@ -2144,6 +2158,7 @@ const it = {
 
   // ─── Pagina Scansione QR ──────────────────────────────────────────────────
   scan: {
+    uploadSuccess: "Codice QR rilevato con successo!",
     checkin:      'ENTRATA',
     breakStart:   'INIZIO PAUSA',
     breakEnd:     'FINE PAUSA',
@@ -2212,6 +2227,8 @@ const it = {
   },
 
   deviceReset: {
+
+    noDeviceRegistered: "Nessun dispositivo registrato",
     terminalBlockedSelfRecoverHint: 'Se questo è il dispositivo corretto del punto vendita, puoi riassociarlo confermando le credenziali del terminale.',
     reRegisterButton: 'Riassocia dispositivo',
     title: 'Gestione Dispositivi',
@@ -2284,6 +2301,13 @@ const it = {
 
   // ─── Leave ────────────────────────────────────────────────────────────────
   leave: {
+    search_employee_placeholder: "Cerca dipendente...",
+    archive_success: "Richiesta archiviata con successo",
+    delete_confirm_title: "Elimina richiesta",
+    delete_confirm_msg: "Sei sicuro di voler eliminare definitivamente questa richiesta?",
+    deleted_success: "Richiesta di permesso eliminata",
+    delete_tooltip: "Elimina richiesta",
+    shifts_to_cancel_title: "Turni in questo periodo",
     page_title: 'Permessi e Ferie',
     page_subtitle: 'Gestisci le tue richieste di ferie e permessi',
     filterTitle: 'Filtra Richieste',
@@ -2370,6 +2394,8 @@ const it = {
     balance_edit_btn: 'Modifica',
     balance_no_data: 'Nessun saldo configurato per questo anno.',
     balance_missing: 'Nessun saldo configurato',
+    balance_of_employee: 'Saldo del dipendente',
+    balance_missing_approve: 'Nessun saldo configurato per questo dipendente e anno. Configuralo nella scheda Saldi prima di approvare.',
     balance_exhausted_hint: 'Nessun giorno residuo: non è possibile approvare altri permessi finché il saldo non viene aggiornato.',
     balance_exhausted_employee: 'Hai esaurito i giorni disponibili. Non puoi inviare nuove richieste finché le Risorse Umane non aggiornano il tuo saldo.',
     balance_over_hint: 'Giorni approvati superiori al saldo assegnato.',
@@ -2377,6 +2403,9 @@ const it = {
     badge_cancelled: 'ANNULLATA',
     badge_rejected: 'RIFIUTATA',
     badge_approved: 'APPROVATA',
+    reopen_action: "Riapri e rimanda a HR",
+    reopen_success: "Richiesta riaperta e riassegnata a HR",
+    unverified_explain: "Questa richiesta risulta approvata ma nessuna persona l’ha decisa: e' stata approvata automaticamente per inattivita'. Non puo' essere approvata di nuovo.",
     badge_unverified: 'DA VERIFICARE',
     badge_unverified_hint: 'Approvata senza alcuna decisione umana (approvazione automatica per inattività). Da rivedere.',
     badge_escalated: 'SOLLECITATA',
@@ -3136,6 +3165,10 @@ const it = {
 
   // ─── Documents ────────────────────────────────────────────────────────────
   documents: {
+    emptyTrashPrompt: "Sei sicuro di voler svuotare il cestino? Tutti i {{count}} documenti saranno eliminati definitivamente.",
+    trashEmptiedSuccess: "Cestino svuotato con successo",
+    errorEmptyTrash: "Errore durante lo svuotamento del cestino",
+    createFirstCategory: "Crea la prima categoria",
     title: 'Documenti',
     subtitle: 'Gestisci e consulta i documenti dei dipendenti',
     myTitle: 'I Miei Documenti',

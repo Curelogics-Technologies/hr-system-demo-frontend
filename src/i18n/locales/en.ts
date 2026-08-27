@@ -1,6 +1,8 @@
 const en = {
   // ─── Common ───────────────────────────────────────────────────────────────
   common: {
+    errorOccurred: "Something went wrong",
+    deletePermanently: "Delete permanently",
     preview: 'Preview',
     view: 'View',
     warning: 'Warning',
@@ -364,6 +366,8 @@ const en = {
 
   // ─── Employees ────────────────────────────────────────────────────────────
   employees: {
+    trainingStartDateRequired: "The start date is required",
+    medicalStartDateRequired: "The start date is required",
     title: 'Employees',
     subtitle: 'Complete personnel management',
     filters: 'Filters',
@@ -974,6 +978,7 @@ const en = {
 
   // ─── Companies ────────────────────────────────────────────────────────────
   companies: {
+    extraStoragePrice: "Set extra storage price (per GB)",
     owner: 'Owner',
     title: 'My Company',
     editCompany: 'Edit Company',
@@ -1239,6 +1244,10 @@ const en = {
     INVALID_YEAR: 'Invalid year.',
     INVALID_LEAVE_TYPE: 'Invalid leave type.',
     BALANCE_NOT_CONFIGURED: 'Leave balance not configured for this employee. Configure the available days first, then approve the request.',
+    NEEDS_REOPEN: "This request is already approved, but by nobody. Use Reopen to send it back to HR for a real decision.",
+    REOPEN_ADMIN_ONLY: "Only an administrator can reopen an automatically-approved request.",
+    REOPEN_NOT_UNVERIFIED: "This request was approved by a person and cannot be reopened.",
+    ROLE_NOT_IN_CHAIN: "Your role is not a step in this company's approval chain.",
     LEAVE_CONFLICT: 'The employee has approved leave on this date.',
     OFF_DAY_SHIFT_BLOCKED: 'This employee is off on the selected day, so shift creation is blocked.',
     OFF_DAY_STATUS_LOCKED: 'Shift status cannot be changed because the shift falls on an off-day.',
@@ -1297,6 +1306,8 @@ const en = {
   },
   // ─── Shifts ───────────────────────────────────────────────────────────────
   shifts: {
+    status_confirmed: "Confirmed",
+    status_scheduled: "Scheduled",
     title: 'Shifts',
     employees: 'Employees',
     templates: 'Templates',
@@ -1712,6 +1723,8 @@ const en = {
 
   // ─── Transfers ───────────────────────────────────────────────────────────
   transfers: {
+    deletedTargetShifts: "Destination shifts deleted",
+    day: "day",
     title: 'Temporary Transfers',
     subtitle: 'Manage temporary assignments across stores and monitor impacted shifts.',
     new: 'New transfer',
@@ -1812,6 +1825,8 @@ const en = {
 
   // ─── Attendance ───────────────────────────────────────────────────────────
   attendance: {
+    infoTitle: "How anomalies work",
+    info_missing_break_desc: "Raised when the shift includes a mandatory break that was never recorded.",
     title: 'Attendance',
     logTitle: 'Attendance Log',
     filterTitle: 'Filter Anomalies',
@@ -2148,6 +2163,7 @@ const en = {
 
   // ─── QR Scan Landing Page ─────────────────────────────────────────────────
   scan: {
+    uploadSuccess: "QR code detected successfully!",
     checkin:     'CHECK-IN',
     breakStart:  'START BREAK',
     breakEnd:    'END BREAK',
@@ -2216,6 +2232,8 @@ const en = {
   },
 
   deviceReset: {
+
+    noDeviceRegistered: "No device registered",
     terminalBlockedSelfRecoverHint: 'If this is the correct store device, you can re-bind it by confirming the terminal credentials.',
     reRegisterButton: 'Re-bind device',
     title: 'Device Management',
@@ -2288,6 +2306,13 @@ const en = {
 
   // ─── Leave ────────────────────────────────────────────────────────────────
   leave: {
+    search_employee_placeholder: "Search employee...",
+    archive_success: "Request archived",
+    delete_confirm_title: "Delete request",
+    delete_confirm_msg: "Permanently delete this request?",
+    deleted_success: "Leave request deleted",
+    delete_tooltip: "Delete request",
+    shifts_to_cancel_title: "Shifts in this period",
     page_title: 'Leave & Holidays',
     page_subtitle: 'Manage your holiday and leave requests',
     filterTitle: 'Filter Leave Requests',
@@ -2374,6 +2399,8 @@ const en = {
     balance_edit_btn: 'Edit',
     balance_no_data: 'No balances configured for this year.',
     balance_missing: 'No balance configured',
+    balance_of_employee: 'Employee balance',
+    balance_missing_approve: 'No balance configured for this employee and year. Set it in the Balances tab before approving.',
     balance_exhausted_hint: 'No days remaining: no further leave can be approved until the balance is updated.',
     balance_exhausted_employee: 'You have used all your available days. You cannot submit new requests until HR updates your balance.',
     balance_over_hint: 'Approved days exceed the allocated balance.',
@@ -2381,6 +2408,9 @@ const en = {
     badge_cancelled: 'CANCELLED',
     badge_rejected: 'REJECTED',
     badge_approved: 'APPROVED',
+    reopen_action: "Reopen and send back to HR",
+    reopen_success: "Request reopened and reassigned to HR",
+    unverified_explain: "This request shows as approved but nobody decided it - it was approved automatically for inactivity. It cannot be approved again.",
     badge_unverified: 'NEEDS REVIEW',
     badge_unverified_hint: 'Approved with no human decision (auto-approved for inactivity). Needs review.',
     badge_escalated: 'CHASED',
@@ -3131,6 +3161,10 @@ const en = {
 
   // ─── Documents ────────────────────────────────────────────────────────────
   documents: {
+    emptyTrashPrompt: "Empty the trash? All {{count}} documents will be permanently deleted.",
+    trashEmptiedSuccess: "Trash emptied",
+    errorEmptyTrash: "Could not empty the trash",
+    createFirstCategory: "Create the first category",
     title: 'Documents',
     subtitle: 'Manage and browse employee documents',
     myTitle: 'My Documents',
