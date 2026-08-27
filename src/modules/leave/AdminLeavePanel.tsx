@@ -11,6 +11,7 @@ import {
   rejectLeaveRequest,
   createLeaveOnBehalf,
   deleteLeaveRequest,
+  reopenLeaveRequest,
   archiveLeaveRequest,
   downloadCertificate,
   getLeaveBalance,
@@ -1333,6 +1334,17 @@ export default function AdminLeavePanel() {
 
   // ── Reject modal ───────────────────────────────────────────────────────────
   const [approveTarget, setApproveTarget] = useState<LeaveRequest | null>(null);
+  /** Shown inside the dialog, so a refusal appears where the click happened. */
+  const [approveError, setApproveError] = useState<string | null>(null);
+  const [approveSaving, setApproveSaving] = useState(false);
+  const [reopening, setReopening] = useState(false);
+  /**
+   * The employee's allocation for the year of the request. An approver deciding
+   * whether to grant leave needs to see what it will be deducted from — and
+   * whether an allocation exists at all, since approval is refused without one.
+   */
+  const [targetBalances, setTargetBalances] = useState<LeaveBalance[] | null>(null);
+  const [targetBalanceLoading, setTargetBalanceLoading] = useState(false);
   const [shiftsForTarget, setShiftsForTarget] = useState<Shift[]>([]);
   const [shiftsLoading, setShiftsLoading] = useState(false);
   const [cancelShiftsChecked, setCancelShiftsChecked] = useState(true);
@@ -1342,12 +1354,27 @@ export default function AdminLeavePanel() {
       setShiftsForTarget([]);
       setShiftsLoading(false);
       setCancelShiftsChecked(true);
+      setApproveError(null);
+      setTargetBalances(null);
       return;
     }
 
     let active = true;
     setShiftsLoading(true);
     setShiftsForTarget([]);
+    setApproveError(null);
+
+    // The allocation is read for the year the leave STARTS in, which is the
+    // year approval will deduct from.
+    setTargetBalanceLoading(true);
+    setTargetBalances(null);
+    getLeaveBalance({
+      userId: approveTarget.userId,
+      year: new Date(approveTarget.startDate).getFullYear(),
+    })
+      .then((res) => { if (active) setTargetBalances(res.balances ?? []); })
+      .catch(() => { if (active) setTargetBalances([]); })
+      .finally(() => { if (active) setTargetBalanceLoading(false); });
 
     listShifts({
       user_id: approveTarget.userId,
@@ -1638,13 +1665,26 @@ export default function AdminLeavePanel() {
   }
 
   // ── Approve ────────────────────────────────────────────────────────────────
-  async function handleApprove(req: LeaveRequest, cancelShifts?: boolean) {
+  /**
+   * Returns whether it succeeded, so the caller can keep the dialog open on
+   * failure. It used to close the dialog first and report the error somewhere
+   * else entirely, which read as "the click did nothing".
+   */
+  async function handleApprove(req: LeaveRequest, cancelShifts?: boolean): Promise<boolean> {
+    setApproveError(null);
+    setApproveSaving(true);
     try {
       await approveLeaveRequest(req.id, undefined, cancelShifts);
       showFlash(t('leave.approved_success'));
       fetchRequests();
+      return true;
     } catch (err: unknown) {
-      setError(translateApiError(err, t, t('common.error')) ?? t('common.error'));
+      const msg = translateApiError(err, t, t('common.error')) ?? t('common.error');
+      setApproveError(msg);
+      setError(msg);
+      return false;
+    } finally {
+      setApproveSaving(false);
     }
   }
 
@@ -2930,8 +2970,20 @@ export default function AdminLeavePanel() {
             style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
             onClick={(e) => { if (e.target === e.currentTarget) setApproveTarget(null); }}
           >
-            <div style={{ background: 'var(--surface)', borderRadius: 16, boxShadow: '0 24px 64px rgba(0,0,0,0.3)', width: '100%', maxWidth: 460, border: '1px solid var(--border)', padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
-              
+            {/* Capped at the viewport with its own scroll. The dialog grew with
+                its content — shifts, balance, warnings — until the buttons were
+                pushed off screen on a laptop. Now only the body scrolls. */}
+            <div style={{
+              background: 'var(--surface)', borderRadius: 16,
+              boxShadow: '0 24px 64px rgba(0,0,0,0.3)',
+              width: '100%', maxWidth: 460, border: '1px solid var(--border)',
+              padding: 20,
+              display: 'flex', flexDirection: 'column', gap: 12,
+              maxHeight: 'calc(100vh - 48px)',
+              overflowY: 'auto',
+              overscrollBehavior: 'contain',
+            }}>
+
               {/* Header */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <span style={{
@@ -3036,6 +3088,57 @@ export default function AdminLeavePanel() {
                 )}
               </div>
 
+              {/* The allocation this approval will draw from. An approver was
+                  previously deciding blind, and only discovered a missing or
+                  exhausted balance when the request was refused. */}
+              <div style={{
+                padding: '8px 10px', borderRadius: 8,
+                background: 'var(--surface-warm)', border: '1px solid var(--border)',
+              }}>
+                <div style={{
+                  fontSize: 9.5, fontWeight: 800, letterSpacing: '0.06em',
+                  textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: 5,
+                }}>
+                  {t('leave.balance_of_employee', 'Saldo del dipendente')} · {new Date(approveTarget.startDate).getFullYear()}
+                </div>
+
+                {targetBalanceLoading ? (
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('common.loading')}</div>
+                ) : !targetBalances || targetBalances.length === 0 ? (
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, fontSize: 12, color: '#b45309', fontWeight: 600, lineHeight: 1.45 }}>
+                    <span aria-hidden>⚠</span>
+                    <span>{t('leave.balance_missing_approve', 'Nessun saldo configurato per questo dipendente e anno. Configuralo nella scheda Saldi prima di approvare.')}</span>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                    {targetBalances.map((b) => {
+                      const exhausted = b.remainingDays <= 0;
+                      const isRequestType = b.leaveType === approveTarget.leaveType;
+                      return (
+                        <div key={b.leaveType} style={{
+                          display: 'flex', flexDirection: 'column', gap: 2,
+                          padding: '6px 10px', borderRadius: 6,
+                          // The type being requested is the one that matters here.
+                          background: isRequestType ? 'var(--surface)' : 'transparent',
+                          border: isRequestType ? '1px solid var(--border)' : '1px solid transparent',
+                        }}>
+                          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
+                            {t(`leave.type_${b.leaveType}`)}{isRequestType ? ' ←' : ''}
+                          </span>
+                          <span style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>
+                            <strong>{b.usedDays}</strong>
+                            <span style={{ color: 'var(--text-muted)' }}> / {b.totalDays}</span>
+                            <span style={{ color: exhausted ? '#dc2626' : '#16a34a', fontWeight: exhausted ? 700 : 400, marginLeft: 5 }}>
+                              ({b.remainingDays} {t('leave.balance_remaining_short').toLowerCase()})
+                            </span>
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
               {/* Checkbox and Logic Guide Text */}
               {shiftsForTarget.length > 0 && (
                 <div style={{
@@ -3064,6 +3167,59 @@ export default function AdminLeavePanel() {
                 </div>
               )}
 
+              {/* An auto-approved request cannot be approved again — it is
+                  already terminal. Reopening is the actual remedy, so it is
+                  offered right where the attempt failed. */}
+              {leaveVisual(approveTarget).state === 'unverified' && (
+                <div style={{
+                  margin: '4px 0 10px', padding: '10px 12px', borderRadius: 8,
+                  background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.28)',
+                }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: '#b91c1c', marginBottom: 4 }}>
+                    ⚠ {t('leave.badge_unverified', 'Da verificare')}
+                  </div>
+                  <p style={{ fontSize: 12, color: '#7f1d1d', margin: '0 0 8px', lineHeight: 1.45 }}>
+                    {t('leave.unverified_explain', 'Questa richiesta risulta approvata ma nessuna persona l\'ha decisa: è stata approvata automaticamente per inattività. Non può essere approvata di nuovo.')}
+                  </p>
+                  <button
+                    disabled={reopening}
+                    onClick={async () => {
+                      setReopening(true); setApproveError(null);
+                      try {
+                        await reopenLeaveRequest(approveTarget.id);
+                        showFlash(t('leave.reopen_success', 'Richiesta riaperta e riassegnata a HR'));
+                        setApproveTarget(null);
+                        fetchRequests();
+                      } catch (err: unknown) {
+                        setApproveError(translateApiError(err, t, t('common.error')) ?? t('common.error'));
+                      } finally { setReopening(false); }
+                    }}
+                    style={{
+                      padding: '8px 14px', borderRadius: 8, border: 'none',
+                      background: reopening ? '#9ca3af' : '#b91c1c', color: '#fff',
+                      fontSize: 12.5, fontWeight: 700, cursor: reopening ? 'wait' : 'pointer',
+                    }}
+                  >
+                    {reopening ? t('common.loading') : t('leave.reopen_action', 'Riapri e rimanda a HR')}
+                  </button>
+                </div>
+              )}
+
+              {/* The refusal appears here, beside the button that caused it,
+                  instead of the dialog vanishing and the message surfacing
+                  somewhere the approver was no longer looking. */}
+              {approveError && (
+                <div style={{
+                  display: 'flex', alignItems: 'flex-start', gap: 7,
+                  margin: '4px 0 10px', padding: '10px 12px', borderRadius: 8,
+                  background: 'var(--danger-bg)', border: '1px solid var(--danger-border)',
+                  color: 'var(--danger)', fontSize: 12.5, fontWeight: 600, lineHeight: 1.45,
+                }}>
+                  <span aria-hidden>⚠</span>
+                  <span>{approveError}</span>
+                </div>
+              )}
+
               {/* Action Buttons */}
               <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
                 <button
@@ -3073,14 +3229,23 @@ export default function AdminLeavePanel() {
                   {t('common.cancel')}
                 </button>
                 <button
+                  disabled={approveSaving}
                   onClick={async () => {
                     const target = approveTarget;
-                    setApproveTarget(null);
-                    if (target) await handleApprove(target, cancelShiftsChecked && shiftsForTarget.length > 0);
+                    if (!target) return;
+                    // Close only once it has actually worked, so a refusal stays
+                    // on screen next to the button that caused it.
+                    const ok = await handleApprove(target, cancelShiftsChecked && shiftsForTarget.length > 0);
+                    if (ok) setApproveTarget(null);
                   }}
-                  style={{ flex: 2, padding: '10px 0', borderRadius: 8, border: 'none', background: '#16a34a', color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}
+                  style={{
+                    flex: 2, padding: '10px 0', borderRadius: 8, border: 'none',
+                    background: approveSaving ? '#9ca3af' : '#16a34a', color: '#fff',
+                    fontSize: 14, fontWeight: 700,
+                    cursor: approveSaving ? 'wait' : 'pointer',
+                  }}
                 >
-                  {t('common.confirm', 'Confirm')}
+                  {approveSaving ? t('common.loading') : t('common.confirm', 'Confirm')}
                 </button>
               </div>
             </div>
