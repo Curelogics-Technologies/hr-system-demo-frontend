@@ -273,18 +273,23 @@ export default function ApprovalConfigPanel() {
                 let stepTitle = '';
                 let stepDesc = '';
                 
+                // These descriptions are the only place the rules are explained
+                // to the person configuring the chain, so they must match what
+                // the code actually does: below HR the inactivity job may carry
+                // a stage forward, at HR and above it never can, and nothing is
+                // granted without a configured balance.
                 if (level.role === 'store_manager') {
                   stepTitle = t('leave.flow_sm_title', 'Approvazione Store Manager');
-                  stepDesc = t('leave.flow_sm_desc', 'Se questa fase è abilitata, la richiesta passa al Store Manager del punto vendita. Se il responsabile è in ferie o assente, lo step viene saltato automaticamente ed escalato. In caso di mancata approvazione entro i limiti di tempo, la richiesta passa alla fase successiva.');
+                  stepDesc = t('leave.flow_sm_desc', 'Se questa fase è abilitata, la richiesta passa allo Store Manager del punto vendita. Se il responsabile è in ferie o assente, lo step viene saltato. Se non decide entro 2 giorni, la richiesta viene inoltrata automaticamente al livello successivo: la fase risulta superata, ma il permesso NON è approvato e nessun saldo viene scalato.');
                 } else if (level.role === 'area_manager') {
                   stepTitle = t('leave.flow_am_title', 'Approvazione Area Manager');
-                  stepDesc = t('leave.flow_am_desc', "Se abilitata, la richiesta passa all'Area Manager. Se non viene approvata entro i limiti di tempo, la richiesta scala automaticamente al livello superiore.");
+                  stepDesc = t('leave.flow_am_desc', "Se abilitata, la richiesta passa all'Area Manager. Come per lo Store Manager, dopo 2 giorni di inattività viene inoltrata automaticamente al livello successivo senza essere approvata.");
                 } else if (level.role === 'hr') {
                   stepTitle = t('leave.flow_hr_title', 'Approvazione HR (Risorse Umane)');
-                  stepDesc = t('leave.flow_hr_desc', "Se abilitata, la richiesta passa al reparto Risorse Umane. L'approvazione decrementa il saldo ferie/permessi del dipendente e cancella automaticamente i turni schedulati.");
+                  stepDesc = t('leave.flow_hr_desc', "Se abilitata, la richiesta passa alle Risorse Umane. Questa decisione non è mai automatica: in caso di inattività HR viene solo sollecitata, la richiesta resta in attesa. L'approvazione HR scala il saldo del dipendente ed è bloccata se il saldo non è ancora configurato. I turni programmati vengono annullati solo se si seleziona l'apposita opzione in fase di approvazione.");
                 } else if (level.role === 'admin') {
                   stepTitle = t('leave.flow_admin_title', 'Approvazione Finale Amministratore');
-                  stepDesc = t('leave.flow_admin_desc', "Se abilitata (sempre attiva come ultimo livello), l'Amministratore concede l'approvazione finale. La richiesta è ufficialmente completata.");
+                  stepDesc = t('leave.flow_admin_desc', "Se abilitata (sempre attiva come ultimo livello), l'Amministratore concede l'approvazione finale. Anche questa decisione non è mai automatica e richiede un saldo configurato.");
                 }
 
                 return (

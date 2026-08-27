@@ -17,6 +17,7 @@ export interface EmployeeSearchResult {
   email: string;
   uniqueId: string;
   role: string;
+  avatarFilename?: string | null;
   companyId: number;
   companyName: string;
 }

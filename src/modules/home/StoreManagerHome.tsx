@@ -1082,7 +1082,7 @@ export const StoreManagerHome: React.FC<StoreManagerHomeProps> = ({ data }) => {
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {anomaly.userSurname} {anomaly.userName}
+                        {anomaly.userName} {anomaly.userSurname}
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>
                         {t(`attendance.anomaly_${anomaly.anomalyType}`)}

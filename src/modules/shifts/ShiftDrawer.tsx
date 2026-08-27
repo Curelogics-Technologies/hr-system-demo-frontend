@@ -143,6 +143,10 @@ export default function ShiftDrawer({
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [overlapConflict, setOverlapConflict] = useState(false);
+  /** Approved leave the server flagged on this date; non-null = warning shown, saving again confirms. */
+  const [leaveConflict, setLeaveConflict] = useState<{
+    leave_type?: string; start_date?: string; end_date?: string;
+  } | null>(null);
   const [formErrors, setFormErrors] = useState<FormErrors>({});
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
@@ -788,17 +792,30 @@ export default function ShiftDrawer({
         notes: form.notes || null,
         status: statusOut,
       };
+      // Once the operator has acknowledged the leave warning, resend the same
+      // payload with the override so the server lets it through.
+      const outgoing = leaveConflict
+        ? { ...payload, confirm_leave_conflict: true }
+        : payload;
+
       if (shift) {
-        await updateShift(shift.id, payload);
+        await updateShift(shift.id, outgoing);
       } else {
-        await createShift(payload);
+        await createShift(outgoing);
       }
       setFormErrors({});
+      setLeaveConflict(null);
       onClose(true);
     } catch (err: any) {
       const code: string | undefined = err?.response?.data?.code;
       if (code === 'OVERLAP_CONFLICT') {
         setOverlapConflict(true);
+        setError(null);
+      } else if (code === 'LEAVE_CONFLICT') {
+        // Not a failure: the shift is allowed, the operator just has to see the
+        // clash first. Saving again confirms it.
+        setLeaveConflict(err?.response?.data?.details?.leave ?? {});
+        setOverlapConflict(false);
         setError(null);
       } else {
         setError(code ? t(`errors.${code}`, t('errors.DEFAULT')) : t('errors.DEFAULT'));
@@ -900,6 +917,38 @@ export default function ShiftDrawer({
                 </div>
                 <p style={{ fontSize: 12, color: '#92400e', margin: 0, lineHeight: 1.5 }}>
                   {t('shifts.overlapHint')}
+                </p>
+              </div>
+            )}
+
+            {leaveConflict && (
+              <div style={{
+                background: 'rgba(3,105,161,0.08)', border: '1px solid rgba(3,105,161,0.35)',
+                borderRadius: 'var(--radius-sm)', padding: '12px 14px', marginBottom: 16,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                    stroke="#0369a1" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" />
+                  </svg>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: '#075985' }}>
+                    {t('shifts.leaveConflictTitle', 'Permesso approvato in questa data')}
+                  </span>
+                </div>
+                <p style={{ fontSize: 12, color: '#0c4a6e', margin: 0, lineHeight: 1.5 }}>
+                  {leaveConflict.start_date && leaveConflict.end_date
+                    ? t('shifts.leaveConflictRange', {
+                        defaultValue: 'Il dipendente è in permesso dal {{from}} al {{to}} ({{type}}).',
+                        from: leaveConflict.start_date,
+                        to: leaveConflict.end_date,
+                        type: leaveConflict.leave_type === 'sick'
+                          ? t('leave.type_sick', 'malattia')
+                          : t('leave.type_vacation', 'ferie'),
+                      })
+                    : t('shifts.leaveConflictGeneric', 'Il dipendente ha un permesso approvato in questa data.')}
+                  {' '}
+                  {t('shifts.leaveConflictHint', 'Salva di nuovo per creare comunque il turno.')}
                 </p>
               </div>
             )}

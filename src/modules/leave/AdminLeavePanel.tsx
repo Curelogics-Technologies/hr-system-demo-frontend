@@ -14,6 +14,7 @@ import {
   archiveLeaveRequest,
   downloadCertificate,
   getLeaveBalance,
+  getAllLeaveBalances,
   setLeaveBalance,
   exportLeaveBalances,
   importLeaveBalances,
@@ -39,6 +40,8 @@ import { Store as StoreModel } from '../../types';
 import { useBreakpoint } from '../../hooks/useBreakpoint';
 import { useToast } from '../../context/ToastContext';
 import { formatEmployeeName, matchesEmployeeName } from '../../utils/employeeName';
+import { leaveVisual } from './leaveStatus';
+import { SelectMenu } from '../../components/ui/SelectMenu';
 
 // ── Status badge ───────────────────────────────────────────────────────────
 
@@ -63,53 +66,35 @@ const STATUS_COLORS: Record<string, { bg: string; color: string }> = {
   'admin approved':                { bg: 'rgba(22,163,74,0.06)',   color: '#16a34a' },
 };
 
+/**
+ * Decides what a leave request's badge should say.
+ *
+ * Keyed off `approvedBy` (who granted it) rather than off the status string.
+ * A request that shows an approved-looking status with no approving user is
+ * the exact state the inactivity job used to create, and the old badge painted
+ * it solid green "APPROVED" — indistinguishable from a real approval. It now
+ * reads DA VERIFICARE so those rows are visible on sight.
+ */
 function StatusBadge({ req }: { req: LeaveRequest }) {
   const { t } = useTranslation();
-  const status = req.status;
-  const normalized = (status ?? '').toLowerCase().replace(/ /g, '_');
-  const latestActionRole = req.latestActionByRole;
-  const isAuto = req.escalated === true || latestActionRole === 'system';
-
-  let label = 'PENDING';
-  let bg = 'rgba(107,114,128,0.06)'; // default gray
-  let color = '#6b7280';
-
-  if (normalized === 'cancelled') {
-    label = 'CANCELLED';
-    bg = 'rgba(107,114,128,0.06)';
-    color = '#6b7280';
-  } else if (normalized.includes('rejected') || normalized === 'rejected') {
-    label = 'REJECTED';
-    bg = 'rgba(220,38,38,0.06)';
-    color = '#dc2626'; // red
-  } else if (normalized === 'hr_approved' || normalized === 'approved' || normalized === 'admin_approved') {
-    label = 'APPROVED';
-    bg = 'rgba(22,163,74,0.06)';
-    color = '#16a34a'; // green
-  } else {
-    // It is pending!
-    label = 'PENDING';
-    if (normalized === 'pending') {
-      bg = 'rgba(107,114,128,0.06)';
-      color = '#6b7280'; // gray
-    } else if (isAuto) {
-      bg = 'rgba(245,158,11,0.06)';
-      color = '#d97706'; // yellow/amber
-    } else {
-      bg = 'rgba(59,130,246,0.06)';
-      color = '#3b82f6'; // blue
-    }
-  }
+  // Shared with the calendar chip — see leaveStatus.ts. Keeping one derivation
+  // is why the two views can no longer disagree about the same request.
+  const visual = leaveVisual(req);
 
   return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', padding: '3px 10px', borderRadius: 20,
-      fontSize: 11, fontWeight: 700, letterSpacing: '0.5px',
-      background: bg, color: color,
-      border: `1px solid ${color}30`,
-      textTransform: 'uppercase', whiteSpace: 'nowrap',
-    }}>
-      {label}
+    <span
+      title={visual.hintKey ? t(`leave.${visual.hintKey}`) : undefined}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 10px', borderRadius: 20,
+        fontSize: 11, fontWeight: 700, letterSpacing: '0.5px',
+        background: visual.fill, color: visual.color,
+        border: `1px solid ${visual.border}`,
+        textTransform: 'uppercase', whiteSpace: 'nowrap',
+        cursor: visual.hintKey ? 'help' : undefined,
+      }}
+    >
+      {visual.state === 'unverified' && <span aria-hidden>⚠</span>}
+      {t(`leave.${visual.labelKey}`)}
     </span>
   );
 }
@@ -243,6 +228,15 @@ interface BalancesTabProps {
   showFlash: (msg: string) => void;
 }
 
+/** Rows rendered per page. "Load more" adds another page. */
+const BALANCE_PAGE_SIZE = 25;
+/**
+ * The server caps /employees at 100 for a single-company user and 500 for a
+ * cross-company one, so asking for 200 silently returned at most 100. Ask for
+ * the cross-company ceiling and show the server's own total alongside.
+ */
+const EMPLOYEE_FETCH_LIMIT = 500;
+
 export function BalancesTab({ showFlash }: BalancesTabProps) {
   const { t } = useTranslation();
   const { isMobile } = useBreakpoint();
@@ -283,25 +277,70 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
     textTransform: 'uppercase' as const, letterSpacing: '0.8px',
   };
 
-  const selectStyle = {
-    padding: '8px 12px', borderRadius: 8,
-    border: '1.5px solid #d1d5db', background: '#ffffff',
-    color: '#111827', fontSize: 13, outline: 'none', cursor: 'pointer',
+  // Chevron drawn in, because the native select arrow varies wildly between
+  // browsers and looked unfinished next to the rest of the toolbar.
+  const selectStyle: React.CSSProperties = {
+    padding: '9px 32px 9px 13px',
+    borderRadius: 10,
+    border: '1.5px solid var(--border)',
+    background: 'var(--surface)',
+    color: 'var(--text-primary)',
+    fontSize: 13,
+    fontWeight: 600,
+    outline: 'none',
+    cursor: 'pointer',
+    appearance: 'none',
+    backgroundImage:
+      "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>\")",
+    backgroundRepeat: 'no-repeat',
+    backgroundPosition: 'right 11px center',
+    boxShadow: 'var(--shadow-xs)',
   };
 
   const [empError, setEmpError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  /**
+   * Company scope for this tab. Without it a Super Admin's employee list mixes
+   * every company they can reach, so the (previously hard-capped) rows shown
+   * were an arbitrary slice across companies.
+   */
+  const [companyFilter, setCompanyFilter] = useState('');
+  const [companyOptions, setCompanyOptions] = useState<Array<{ id: number; name: string }>>([]);
 
-  // Load employees once
+  useEffect(() => {
+    getCompanies()
+      .then((list) => setCompanyOptions(list.map((c: any) => ({ id: c.id, name: c.name }))))
+      .catch(() => setCompanyOptions([]));
+  }, []);
+
+  /** Server-reported total, so the UI can say how many people actually exist. */
+  const [employeeTotal, setEmployeeTotal] = useState(0);
+  /** How many rows are rendered. Grows via "load more" instead of a hard cut at 50. */
+  const [visibleCount, setVisibleCount] = useState(BALANCE_PAGE_SIZE);
+
+  // Load employees. The old call asked for 200 with no company filter and then
+  // truncated to 50 twice — so a Super Admin with 103 people saw 50 and never
+  // even requested the rest. It also silently hit the server's own cap (100 for
+  // a single-company user), which is why simply deleting the slices was not
+  // enough.
   useEffect(() => {
     setEmpError(null);
-    getEmployees({ limit: 200, status: 'active' })
-      .then((r) => setEmployees(r.employees.map((e) => ({ id: e.id, name: e.name, surname: e.surname, role: e.role, avatarFilename: e.avatarFilename ?? null }))))
+    const targetCompanyId = companyFilter ? parseInt(companyFilter, 10) : undefined;
+    getEmployees({
+      limit: EMPLOYEE_FETCH_LIMIT,
+      status: 'active',
+      targetCompanyId: Number.isFinite(targetCompanyId as number) ? targetCompanyId : undefined,
+    })
+      .then((r) => {
+        setEmployees(r.employees.map((e) => ({ id: e.id, name: e.name, surname: e.surname, role: e.role, avatarFilename: e.avatarFilename ?? null })));
+        setEmployeeTotal(r.total ?? r.employees.length);
+      })
       .catch(() => {
         setEmpError(t('common.error'));
         setEmployees([]);
+        setEmployeeTotal(0);
       });
-  }, [t]);
+  }, [t, companyFilter]);
 
   const filteredEmployees = useMemo(() => {
     if (!searchQuery.trim()) return employees;
@@ -312,32 +351,32 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
     });
   }, [employees, searchQuery]);
 
-  // Load balances when filtered employees or year changes
-  const loadBalances = useCallback(async (emps: Array<{ id: number; name: string; surname: string; avatarFilename?: string | null }>, selectedYear: number) => {
-    if (emps.length === 0) return;
+  // Reset paging whenever the underlying list changes.
+  useEffect(() => { setVisibleCount(BALANCE_PAGE_SIZE); }, [searchQuery, companyFilter, year]);
+
+  const visibleEmployees = useMemo(
+    () => filteredEmployees.slice(0, visibleCount),
+    [filteredEmployees, visibleCount],
+  );
+
+  // Balances for EVERY employee in scope, in one request rather than one call
+  // per person — which is what made the 50-row cap necessary in the first place.
+  const loadBalances = useCallback(async (selectedYear: number, companyId?: number) => {
     setLoading(true);
-    const balanceMap: Record<number, LeaveBalance[]> = {};
-    await Promise.all(
-      emps.slice(0, 50).map(async (emp) => {
-        try {
-          const res = await getLeaveBalance({ userId: emp.id, year: selectedYear });
-          balanceMap[emp.id] = res.balances;
-        } catch {
-          balanceMap[emp.id] = [];
-        }
-      })
-    );
-    setBalances(balanceMap);
-    setLoading(false);
+    try {
+      const res = await getAllLeaveBalances({ year: selectedYear, companyId });
+      setBalances(res.balances ?? {});
+    } catch {
+      setBalances({});
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    if (filteredEmployees.length > 0) {
-      loadBalances(filteredEmployees, year);
-    } else {
-      setBalances({});
-    }
-  }, [filteredEmployees, year, loadBalances]);
+    const targetCompanyId = companyFilter ? parseInt(companyFilter, 10) : undefined;
+    loadBalances(year, Number.isFinite(targetCompanyId as number) ? targetCompanyId : undefined);
+  }, [year, companyFilter, loadBalances]);
 
   function openEdit(emp: { id: number; name: string; surname: string }) {
     const empBalances = balances[emp.id] ?? [];
@@ -390,8 +429,8 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
     try {
       const result = await importLeaveBalances(importFile);
       setImportResult(result);
-      if (result.imported > 0 && filteredEmployees.length > 0) {
-        loadBalances(filteredEmployees, year);
+      if (result.imported > 0) {
+        loadBalances(year, companyFilter ? parseInt(companyFilter, 10) : undefined);
       }
     } catch (err: any) {
       const errMsg = err?.response?.data?.error ?? err?.message ?? t('common.error');
@@ -410,10 +449,25 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
 
   async function handleSave() {
     if (!editTarget) return;
-    const vacTotal = parseFloat(editTarget.vacationTotal);
-    const sickTotal = parseFloat(editTarget.sickTotal);
 
-    if (isNaN(vacTotal) || vacTotal < 0 || isNaN(sickTotal) || sickTotal < 0) {
+    /**
+     * An empty box means "remove this allocation"; a typed 0 means "allocated
+     * zero days". They are different intentions and the old code collapsed both
+     * into NaN, so emptying one field failed the whole save — including the
+     * other field, which had a perfectly good value in it.
+     */
+    const parseField = (raw: string): number | null | 'invalid' => {
+      const trimmed = (raw ?? '').trim();
+      if (trimmed === '') return null;          // clear
+      const n = parseFloat(trimmed);
+      if (Number.isNaN(n) || n < 0) return 'invalid';
+      return n;                                  // includes 0
+    };
+
+    const vacTotal = parseField(editTarget.vacationTotal);
+    const sickTotal = parseField(editTarget.sickTotal);
+
+    if (vacTotal === 'invalid' || sickTotal === 'invalid') {
       setEditError(t('leave.balance_set_error'));
       return;
     }
@@ -424,39 +478,53 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
     const origVac = (balances[editTarget.userId] ?? []).find((b) => b.leaveType === 'vacation');
     const origSick = (balances[editTarget.userId] ?? []).find((b) => b.leaveType === 'sick');
 
-    const newBalances: LeaveBalance[] = [...(balances[editTarget.userId] ?? [])];
+    let newBalances: LeaveBalance[] = [...(balances[editTarget.userId] ?? [])];
     let hasError = false;
 
-    // Save vacation if changed
-    if (origVac === undefined || vacTotal !== origVac.totalDays) {
+    /** A clear drops the row; anything else replaces it. */
+    const applyResult = (type: LeaveType, result: LeaveBalance | { cleared: true }) => {
+      if ('cleared' in result) {
+        newBalances = newBalances.filter((b) => b.leaveType !== type);
+        return;
+      }
+      const idx = newBalances.findIndex((b) => b.leaveType === type);
+      if (idx >= 0) newBalances[idx] = result;
+      else newBalances.push(result);
+    };
+
+    /**
+     * True when the box now says something different from what is stored.
+     * `null` (cleared) only counts as a change if an allocation existed — so
+     * leaving an already-empty box empty sends nothing.
+     */
+    const changed = (next: number | null, current: LeaveBalance | undefined) =>
+      next === null ? current !== undefined : current === undefined || next !== current.totalDays;
+
+    // Each field is saved independently, so a failure on one never discards a
+    // good value in the other.
+    if (changed(vacTotal, origVac)) {
       try {
-        const updated = await setLeaveBalance({
+        applyResult('vacation', await setLeaveBalance({
           userId: editTarget.userId,
           year,
           leaveType: 'vacation',
           totalDays: vacTotal,
-        });
-        const idx = newBalances.findIndex((b) => b.leaveType === 'vacation');
-        if (idx >= 0) newBalances[idx] = updated;
-        else newBalances.push(updated);
+        }));
       } catch (err: unknown) {
         setEditError(translateApiError(err, t, t('leave.balance_set_error')) ?? t('leave.balance_set_error'));
         hasError = true;
       }
     }
 
-    // Save sick if changed (even if vacation failed — attempt both)
-    if (origSick === undefined || sickTotal !== origSick.totalDays) {
+    // Attempted even if vacation failed, for the same reason.
+    if (changed(sickTotal, origSick)) {
       try {
-        const updated = await setLeaveBalance({
+        applyResult('sick', await setLeaveBalance({
           userId: editTarget.userId,
           year,
           leaveType: 'sick',
           totalDays: sickTotal,
-        });
-        const idx = newBalances.findIndex((b) => b.leaveType === 'sick');
-        if (idx >= 0) newBalances[idx] = updated;
-        else newBalances.push(updated);
+        }));
       } catch (err: unknown) {
         if (!hasError) {
           setEditError(translateApiError(err, t, t('leave.balance_set_error')) ?? t('leave.balance_set_error'));
@@ -480,13 +548,45 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
     const empBalances = balances[empId] ?? [];
     const b = empBalances.find((x) => x.leaveType === type);
     if (!b) {
-      return <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>— / — (—)</span>;
+      // Deliberately understated. The consequence of a missing allocation is
+      // enforced where it matters — HR/Admin cannot approve without one — so
+      // the table stays quiet rather than shouting on every unconfigured row.
+      // The tooltip carries the explanation for anyone who wonders.
+      return (
+        <span
+          title={t('leave.balance_missing_hint')}
+          style={{ color: 'var(--text-muted)', fontSize: 13, cursor: 'help' }}
+        >
+          — / — (—)
+        </span>
+      );
     }
+    // Three states worth distinguishing:
+    //   over      more approved than allocated — should not happen now, but it
+    //             is what the old un-deducted approvals produce once a balance
+    //             is finally set, so it must be visible
+    //   exhausted nothing left; no further leave can be approved
+    //   normal    days remaining
+    const over = b.remainingDays < 0;
+    const exhausted = !over && b.remainingDays === 0;
+    const remainingColor = over ? '#dc2626' : exhausted ? '#b45309' : '#16a34a';
     return (
       <span style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>
         <span style={{ fontWeight: 700, color: 'var(--text)' }}>{b.usedDays}</span>
         <span style={{ color: 'var(--text-muted)' }}> / {b.totalDays}</span>
-        <span style={{ color: '#16a34a', fontSize: 11, marginLeft: 4 }}>
+        <span
+          title={
+            over ? t('leave.balance_over_hint')
+              : exhausted ? t('leave.balance_exhausted_hint')
+                : undefined
+          }
+          style={{
+            color: remainingColor, fontSize: 11, marginLeft: 4,
+            fontWeight: (over || exhausted) ? 700 : 400,
+            cursor: (over || exhausted) ? 'help' : undefined,
+          }}
+        >
+          {(over || exhausted) && <span aria-hidden>⚠ </span>}
           ({b.remainingDays} {t('leave.balance_remaining_short').toLowerCase()})
         </span>
       </span>
@@ -499,15 +599,13 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <label style={{ ...labelStyle, marginBottom: 0 }}>{t('leave.balance_year')}</label>
-          <select
-            value={year}
-            onChange={(e) => setYear(Number(e.target.value))}
-            style={selectStyle}
-          >
-            {yearOptions.map((y) => (
-              <option key={y} value={y}>{y}</option>
-            ))}
-          </select>
+          <SelectMenu
+            minWidth={110}
+            ariaLabel={t('leave.balance_year')}
+            value={String(year)}
+            onChange={(v) => setYear(Number(v))}
+            options={yearOptions.map((y) => ({ value: String(y), label: String(y) }))}
+          />
         </div>
 
         {/* Search bar inside section at top */}
@@ -559,6 +657,20 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
             </button>
           )}
         </div>
+
+        {/* Only worth showing when the account actually spans companies. */}
+        {companyOptions.length > 1 && (
+          <SelectMenu
+            minWidth={200}
+            ariaLabel={t('leave.filter_company', 'Azienda')}
+            value={companyFilter}
+            onChange={setCompanyFilter}
+            options={[
+              { value: '', label: t('leave.all_companies', 'Tutte le aziende') },
+              ...companyOptions.map((c) => ({ value: String(c.id), label: c.name })),
+            ]}
+          />
+        )}
 
         {loading && (
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('common.loading')}</span>
@@ -644,7 +756,7 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
                 </tr>
               </thead>
               <tbody>
-                {filteredEmployees.slice(0, 50).map((emp) => {
+                {visibleEmployees.map((emp) => {
                   const avatarUrl = getAvatarUrl(emp.avatarFilename ?? null);
                   const initials = initialsForPerson(emp.name, emp.surname);
                   const fallbackColor = avatarColorFromName(`${emp.name ?? ''} ${emp.surname ?? ''}`.trim() || String(emp.id));
@@ -709,6 +821,36 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
               </tbody>
             </table>
           </div>
+          {/* Row count + load more. The list used to stop dead at 50 with no
+              indication that anyone was missing. */}
+          {!loading && filteredEmployees.length > 0 && (
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              gap: 12, flexWrap: 'wrap', padding: '14px 20px',
+              borderTop: '1px solid var(--border)',
+            }}>
+              <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                {t('leave.balance_shown_count', {
+                  defaultValue: 'Mostrati {{shown}} di {{total}} dipendenti',
+                  shown: visibleEmployees.length,
+                  total: searchQuery.trim() ? filteredEmployees.length : (employeeTotal || filteredEmployees.length),
+                })}
+              </span>
+              {visibleCount < filteredEmployees.length && (
+                <button
+                  type="button"
+                  onClick={() => setVisibleCount((n) => n + BALANCE_PAGE_SIZE)}
+                  style={{
+                    padding: '8px 16px', borderRadius: 8, cursor: 'pointer',
+                    border: '1.5px solid var(--border)', background: 'var(--surface)',
+                    color: 'var(--text-primary)', fontSize: 13, fontWeight: 600,
+                  }}
+                >
+                  {t('leave.balance_load_more', 'Carica altri')}
+                </button>
+              )}
+            </div>
+          )}
           {!loading && employees.length === 0 && (
             <div style={{ padding: '56px 32px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: 14 }}>
               {t('leave.balance_no_data')}
@@ -1649,10 +1791,24 @@ export default function AdminLeavePanel() {
 
   // ─────────────────────────────────────────────────────────────────────────────
 
-  const selectStyle = {
-    padding: '8px 12px', borderRadius: 8,
-    border: '1.5px solid #d1d5db', background: '#ffffff',
-    color: '#111827', fontSize: 13, outline: 'none', cursor: 'pointer',
+  // Chevron drawn in, because the native select arrow varies wildly between
+  // browsers and looked unfinished next to the rest of the toolbar.
+  const selectStyle: React.CSSProperties = {
+    padding: '9px 32px 9px 13px',
+    borderRadius: 10,
+    border: '1.5px solid var(--border)',
+    background: 'var(--surface)',
+    color: 'var(--text-primary)',
+    fontSize: 13,
+    fontWeight: 600,
+    outline: 'none',
+    cursor: 'pointer',
+    appearance: 'none',
+    backgroundImage:
+      "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>\")",
+    backgroundRepeat: 'no-repeat',
+    backgroundPosition: 'right 11px center',
+    boxShadow: 'var(--shadow-xs)',
   };
 
   const filterControlStyle = {
@@ -2151,7 +2307,7 @@ export default function AdminLeavePanel() {
                                 </span>
                                 <span style={{ minWidth: 0 }}>
                                   <span style={{ display: 'block', fontSize: 14, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {req.userSurname} {req.userName}
+                                    {req.userName} {req.userSurname}
                                   </span>
                                   <span style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>
                                     #{req.id} · {new Date(req.createdAt).toLocaleDateString(locale === 'en' ? 'en-GB' : 'it-IT')}
@@ -2802,7 +2958,7 @@ export default function AdminLeavePanel() {
                     {t('leave.action_approve_title', 'Approva Permesso')}
                   </h3>
                   <p style={{ margin: '2px 0 0', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>
-                    {approveTarget.userSurname} {approveTarget.userName}
+                    {approveTarget.userName} {approveTarget.userSurname}
                   </p>
                 </div>
               </div>
@@ -2943,7 +3099,7 @@ export default function AdminLeavePanel() {
               {t('leave.reject_title')}
             </h3>
             <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--text-secondary)' }}>
-              {rejectTarget.userSurname} {rejectTarget.userName} · {fmtDate(rejectTarget.startDate, locale)} → {fmtDate(rejectTarget.endDate, locale)}
+              {rejectTarget.userName} {rejectTarget.userSurname} · {fmtDate(rejectTarget.startDate, locale)} → {fmtDate(rejectTarget.endDate, locale)}
             </p>
             {rejectError && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{rejectError}</div>}
             <textarea
@@ -2984,7 +3140,7 @@ export default function AdminLeavePanel() {
               {t('leave.admin_delete_confirm')}
             </h3>
             <p style={{ margin: '0 0 24px', fontSize: 13, color: 'var(--text-secondary)' }}>
-              {deleteTarget.userSurname} {deleteTarget.userName} · {t(`leave.type_${deleteTarget.leaveType}`)} · {fmtDate(deleteTarget.startDate, locale)} → {fmtDate(deleteTarget.endDate, locale)}
+              {deleteTarget.userName} {deleteTarget.userSurname} · {t(`leave.type_${deleteTarget.leaveType}`)} · {fmtDate(deleteTarget.startDate, locale)} → {fmtDate(deleteTarget.endDate, locale)}
             </p>
             <div style={{ display: 'flex', gap: 10 }}>
               <button onClick={() => setDeleteTarget(null)} disabled={deleting} style={{ flex: 1, padding: '10px 0', borderRadius: 8, border: '1.5px solid var(--border)', background: 'var(--background)', color: 'var(--text-secondary)', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>

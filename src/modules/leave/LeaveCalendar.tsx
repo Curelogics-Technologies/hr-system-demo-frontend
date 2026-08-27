@@ -11,6 +11,9 @@ import { StatusBadge, ApprovalStepper } from './LeaveApprovalList';
 import { translateApiError } from '../../utils/apiErrors';
 import { useBreakpoint } from '../../hooks/useBreakpoint';
 import { listShifts, Shift } from '../../api/shifts';
+import { CalendarPopover, rectOf } from './CalendarPopover';
+import { SelectMenu } from '../../components/ui/SelectMenu';
+import { leaveVisual, LEAVE_TYPE_TINT } from './leaveStatus';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -85,6 +88,48 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
   const [rejectNotes, setRejectNotes] = useState('');
   const [rejectError, setRejectError] = useState<string | null>(null);
   const [hoveredBlockKey, setHoveredBlockKey] = useState<string | null>(null);
+  /**
+   * Anchor rects for the floating cards. Held here rather than derived at
+   * render time because the cards are portalled out of the scroll container —
+   * see CalendarPopover for why that matters.
+   */
+  const [blockAnchor, setBlockAnchor] = useState<DOMRect | null>(null);
+  const [dayAnchor, setDayAnchor] = useState<DOMRect | null>(null);
+
+  /**
+   * Closing the day card is deferred by a beat, because the card is portalled:
+   * the moment the pointer leaves the cell on its way to the card, the cell's
+   * mouseleave fires. The delay gives the card a chance to say "I have it".
+   */
+  const dayCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelDayClose = useCallback(() => {
+    if (dayCloseTimer.current) {
+      clearTimeout(dayCloseTimer.current);
+      dayCloseTimer.current = null;
+    }
+  }, []);
+
+  const closeDayCard = useCallback(() => {
+    cancelDayClose();
+    dayCloseTimer.current = setTimeout(() => {
+      setHoveredDay(null);
+      setDayAnchor(null);
+    }, 140);
+  }, [cancelDayClose]);
+
+  // A pending close must not fire after the component is gone.
+  useEffect(() => cancelDayClose, [cancelDayClose]);
+
+  // Opening a request from inside the day card should dismiss the card, or it
+  // floats above the modal that replaced it.
+  useEffect(() => {
+    if (!selectedRequest) return;
+    cancelDayClose();
+    setHoveredDay(null);
+    setDayAnchor(null);
+    setHoveredBlockKey(null);
+  }, [selectedRequest, cancelDayClose]);
 
   const [shiftsForTarget, setShiftsForTarget] = useState<Shift[]>([]);
   const [shiftsLoading, setShiftsLoading] = useState(false);
@@ -330,99 +375,123 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
       border: '1px solid var(--border)',
       boxShadow: 'var(--shadow-sm)',
     }}>
-      {/* Navigation */}
+      {/* Navigation — flat navy, no gradient. A gradient behind a row of small
+          controls muddies their edges; a single solid tone keeps them crisp. */}
       <div style={{
-        display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20,
+        display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18,
         flexWrap: 'wrap',
+        padding: (isMobile || isTablet) ? '10px 12px' : '14px 18px',
+        borderRadius: 14,
+        background: '#12395F',
+        border: '1px solid rgba(255,255,255,0.07)',
+        boxShadow: '0 4px 14px rgba(13,33,55,0.16)',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0,
+          background: 'rgba(255,255,255,0.10)', borderRadius: 10, padding: 3,
+          border: '1px solid rgba(255,255,255,0.14)',
+        }}>
           <button
             onClick={prevMonth}
+            aria-label={t('common.previous', 'Previous')}
             style={{
-              padding: '6px 8px', color: 'var(--text-primary)', borderRadius: 6,
-              background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center'
+              padding: '6px 8px', color: '#fff', borderRadius: 8,
+              background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center',
             }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.16)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
           >
             <ChevronLeft size={18} />
           </button>
           <div style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center',
-            minWidth: 130, textAlign: 'center', userSelect: 'none', padding: '0 4px',
+            minWidth: 118, textAlign: 'center', userSelect: 'none', padding: '0 4px',
           }}>
             <span style={{
-              fontFamily: 'var(--font-display)', fontWeight: 700,
-              fontSize: 14, color: 'var(--primary)', lineHeight: 1.1,
-              textTransform: 'capitalize', whiteSpace: 'nowrap',
+              fontFamily: 'var(--font-display)', fontWeight: 800,
+              fontSize: 15, color: '#fff', lineHeight: 1.1,
+              textTransform: 'capitalize', whiteSpace: 'nowrap', letterSpacing: '-0.01em',
             }}>
               {monthLabel.split(' ')[0]}
             </span>
             <span style={{
-              fontSize: 10, color: 'var(--text-muted)', marginTop: 2,
-              fontWeight: 500, whiteSpace: 'nowrap',
+              fontSize: 10, color: 'rgba(255,255,255,0.62)', marginTop: 2,
+              fontWeight: 600, whiteSpace: 'nowrap', letterSpacing: '0.06em',
             }}>
               {monthLabel.split(' ')[1] || new Date().getFullYear()}
             </span>
           </div>
           <button
             onClick={nextMonth}
+            aria-label={t('common.next', 'Next')}
             style={{
-              padding: '6px 8px', color: 'var(--text-primary)', borderRadius: 6,
-              background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center'
+              padding: '6px 8px', color: '#fff', borderRadius: 8,
+              background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center',
             }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.16)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
           >
             <ChevronRight size={18} />
           </button>
         </div>
 
-        {!isMobile && <div style={{ width: 1, height: 20, background: 'var(--border)', flexShrink: 0, margin: '0 12px' }} />}
-
-        <button onClick={goToday} style={{
-          ...navBtnStyle, fontSize: 12, padding: '6px 14px', borderRadius: 8,
-        }}>
+        <button
+          onClick={goToday}
+          style={{
+            fontSize: 12, fontWeight: 700, padding: '8px 16px', borderRadius: 10,
+            background: 'var(--accent)',
+            color: '#fff', border: 'none', cursor: 'pointer',
+            whiteSpace: 'nowrap',
+          }}
+        >
           {t('common.today', 'Today')}
         </button>
 
         {canFilterByStore && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 12 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-              {t('employees.store_label', 'Store')}:
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
+            <span style={{
+              fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.62)',
+              whiteSpace: 'nowrap', textTransform: 'uppercase', letterSpacing: '0.07em',
+            }}>
+              {t('employees.store_label', 'Store')}
             </span>
-            <select
-              value={selectedStoreId}
+            {/* Custom menu rather than a native select: the OS popup ignores
+                our styling entirely and rendered an unreadable plain list. The
+                company name becomes a secondary hint instead of being crammed
+                into the label in brackets. */}
+            <SelectMenu
+              tone="dark"
+              // Store names carry a company suffix, so a narrow control forced
+              // the list to truncate exactly the part that distinguishes them.
+              minWidth={300}
               disabled={fetchingStores}
-              onChange={(e) => {
-                const val = e.target.value;
-                setSelectedStoreId(val === 'all' ? 'all' : parseInt(val, 10));
-              }}
-              style={{
-                padding: '6px 12px',
-                borderRadius: 8,
-                border: '1px solid var(--border)',
-                background: 'var(--surface)',
-                fontSize: 13,
-                fontWeight: 600,
-                color: 'var(--text)',
-                cursor: 'pointer',
-                outline: 'none',
-                minWidth: 180,
-                boxShadow: 'var(--shadow-xs)'
-              }}
-            >
-              <option value="all">{t('common.all_stores', 'All Stores')}</option>
-              {stores.map(s => (
-                <option key={s.id} value={s.id}>
-                  {s.name} {s.groupName ? `(${s.groupName})` : (s.companyName ? `(${s.companyName})` : '')}
-                </option>
-              ))}
-            </select>
+              ariaLabel={t('employees.store_label', 'Store')}
+              value={String(selectedStoreId)}
+              onChange={(val) => setSelectedStoreId(val === 'all' ? 'all' : parseInt(val, 10))}
+              options={[
+                { value: 'all', label: t('common.all_stores', 'All Stores') },
+                ...stores.map(s => ({
+                  value: String(s.id),
+                  label: s.name,
+                  hint: s.groupName ?? s.companyName ?? undefined,
+                })),
+              ]}
+            />
           </div>
         )}
+      </div>
 
-        {/* Legend */}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-          <LegendDot color="#3b82f6" label={t('leave.type_vacation')} icon={<Palmtree size={12} />} />
-          <LegendDot color="#ef4444" label={t('leave.type_sick')} icon={<Thermometer size={12} />} />
-        </div>
+      {/* Legend — outside the dark banner so it stays readable, and now covers
+          the states as well as the types, since the chips encode both. */}
+      <div style={{
+        display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap',
+        marginBottom: 14, paddingLeft: 2,
+      }}>
+        <LegendDot color={LEAVE_TYPE_TINT.vacation.rail} label={t('leave.type_vacation')} icon={<Palmtree size={12} color={LEAVE_TYPE_TINT.vacation.rail} />} />
+        <LegendDot color={LEAVE_TYPE_TINT.sick.rail} label={t('leave.type_sick')} icon={<Thermometer size={12} color={LEAVE_TYPE_TINT.sick.rail} />} />
+        <span style={{ width: 1, height: 14, background: 'var(--border)' }} />
+        <LegendDot color="#d97706" label={t('leave.badge_escalated', 'Sollecitata')} />
+        <LegendDot color="#dc2626" label={t('leave.badge_unverified', 'Da verificare')} />
       </div>
 
       {loading && (
@@ -437,16 +506,31 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
       )}
 
       {!loading && (
-        <div style={{ padding: 0, overflowX: (isMobile || isTablet) ? 'visible' : 'auto' }}>
-          <div style={{ minWidth: '100%', width: '100%' }}>
+        <div style={{ padding: 0, overflowX: 'visible' }}>
+          {/* No min-width and no horizontal scroll: the grid fits whatever
+              width it is given. Entry chips shrink and ellipsise instead, so
+              the month is always readable in one view. */}
+          <div style={{ width: '100%' }}>
             {/* Day headers */}
             {!isMobile && !isTablet && (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 4, marginBottom: 8 }}>
-                {DAY_LABELS.map((label) => (
+              <div style={{
+                display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
+                gap: 6, marginBottom: 8,
+              }}>
+                {DAY_LABELS.map((label, i) => (
                   <div key={label} style={{
-                    textAlign: 'center', fontWeight: 600,
-                    fontFamily: 'var(--font-display)', color: 'var(--primary)',
-                    padding: '4px 0', fontSize: '0.85rem',
+                    textAlign: 'center',
+                    fontWeight: 700,
+                    fontFamily: 'var(--font-display)',
+                    // Weekend headers muted, so the week reads at a glance.
+                    color: i >= 5 ? 'var(--text-muted)' : 'var(--primary)',
+                    padding: '7px 0',
+                    fontSize: '0.72rem',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.08em',
+                    background: 'var(--surface-warm)',
+                    borderRadius: 8,
+                    border: '1px solid var(--border)',
                   }}>
                     {label}
                   </div>
@@ -458,7 +542,7 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
             <div style={{
               display: 'grid',
               gridTemplateColumns: isMobile ? '1fr' : isTablet ? 'repeat(2, minmax(0, 1fr))' : 'repeat(7, minmax(0, 1fr))',
-              gap: (isMobile || isTablet) ? 12 : 4
+              gap: (isMobile || isTablet) ? 12 : 6
             }}>
               {cells.map((date, idx) => {
                 if (!date) {
@@ -469,28 +553,39 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
               const isToday = dateStr === todayStr;
               const isHovered = hoveredDay === dateStr;
               const hasLeaves = dayReqs.length > 0;
+              const dow = date.getDay();
+              const isWeekend = dow === 0 || dow === 6;
 
               return (
                 <div
                   key={dateStr}
                   style={{
                     minWidth: 0,
-                    minHeight: 92,
-                    borderRadius: 6,
+                    minHeight: 118,
+                    borderRadius: 10,
                     border: isToday ? '2px solid var(--accent)' : '1px solid var(--border)',
-                    padding: 7,
+                    padding: 8,
                     cursor: 'pointer',
-                    background: isToday ? 'rgba(201, 151, 58, 0.06)' : 'var(--surface)',
-                    transition: 'background 0.15s',
+                    // Flat fills. Weekends sit back a shade so the working week
+                    // stands out, the same cue the shifts calendar uses.
+                    background: isToday
+                      ? 'rgba(201,151,58,0.07)'
+                      : isWeekend
+                        ? 'var(--surface-warm)'
+                        : 'var(--surface)',
+                    transition: 'box-shadow 0.15s, transform 0.15s',
                     position: 'relative',
-                    boxShadow: hasLeaves ? 'var(--shadow-xs)' : undefined,
+                    transform: isHovered ? 'translateY(-1px)' : undefined,
+                    boxShadow: isHovered
+                      ? '0 6px 18px rgba(15,23,42,0.10)'
+                      : hasLeaves ? 'var(--shadow-xs)' : undefined,
                   }}
-                  onMouseEnter={() => {
+                  onMouseEnter={(e) => {
+                    cancelDayClose();
                     setHoveredDay(dateStr);
+                    setDayAnchor(rectOf(e));
                   }}
-                  onMouseLeave={() => {
-                    setHoveredDay(null);
-                  }}
+                  onMouseLeave={closeDayCard}
                   onClick={(e) => {
                     // Only open day click if we didn't click a specific leave item
                     if (e.target === e.currentTarget && onDayClick) {
@@ -542,18 +637,25 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                       {dayReqs.slice(0, MAX_VISIBLE).map((req) => {
                         const isVacation = req.leaveType === 'vacation';
-                        const normStatus = (req.status ?? '').toLowerCase().replace(/ /g, '_');
-                        const isApproved = normStatus === 'approved' || normStatus === 'admin_approved' || normStatus === 'hr_approved';
-                        const isPending = !isApproved && normStatus !== 'cancelled' && !normStatus.includes('rejected');
+                        // Type sets the hue, state sets the treatment — so a
+                        // reader can tell vacation from sick AND settled from
+                        // still-open at a glance, which one colour cannot do.
+                        const tint = LEAVE_TYPE_TINT[isVacation ? 'vacation' : 'sick'];
+                        const visual = leaveVisual(req);
+                        const isApproved = visual.state === 'approved';
+                        const needsAttention = visual.state === 'unverified' || visual.state === 'escalated';
+                        const isPending = !isApproved && !needsAttention
+                          && visual.state !== 'cancelled' && visual.state !== 'rejected';
 
-                        const color = isVacation ? '#1e40af' : '#9a3412';
-                        const bg = isVacation
-                          ? (isPending ? 'rgba(219,234,254,0.5)' : 'rgba(219,234,254,0.8)')
-                          : (isPending ? 'rgba(255,237,213,0.5)' : 'rgba(255,237,213,0.8)');
-                        const borderLeft = isVacation
-                          ? (isPending ? 'rgba(37,99,235,0.45)' : '#2563eb')
-                          : (isPending ? 'rgba(234,88,12,0.45)' : '#ea580c');
-                        const border = isVacation ? 'rgba(37,99,235,0.18)' : 'rgba(234,88,12,0.18)';
+                        const color = needsAttention ? visual.color : tint.color;
+                        // Flat fills, no gradients: at chip size a gradient just
+                        // reads as a smudge. Open entries sit lighter than
+                        // settled ones, which carries the same information.
+                        const bg = needsAttention
+                          ? visual.fill
+                          : (isPending ? `${tint.rail}14` : `${tint.rail}24`);
+                        const borderLeft = needsAttention ? visual.rail : tint.rail;
+                        const border = needsAttention ? visual.border : `${tint.rail}2e`;
                         const Icon = isVacation ? Palmtree : Thermometer;
 
                         return (
@@ -585,10 +687,12 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
                             onMouseEnter={(e) => {
                               e.currentTarget.style.transform = 'scale(1.02)';
                               setHoveredBlockKey(`${req.id}-${dateStr}`);
+                              setBlockAnchor(rectOf(e));
                             }}
                             onMouseLeave={(e) => {
                               e.currentTarget.style.transform = 'scale(1)';
                               setHoveredBlockKey(null);
+                              setBlockAnchor(null);
                             }}
                           >
                             <Icon size={11} strokeWidth={2.5} style={{ flexShrink: 0 }} />
@@ -610,56 +714,95 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
                             </div>
 
                             {hoveredBlockKey === `${req.id}-${dateStr}` && (
-                              <div style={{
-                                position: 'absolute',
-                                top: 'calc(100% + 4px)',
-                                left: 0,
-                                zIndex: 110,
-                                minWidth: 200,
-                                padding: 10,
-                                background: 'var(--surface)',
-                                border: '1px solid var(--border)',
-                                borderRadius: 8,
-                                boxShadow: '0 10px 25px rgba(0,0,0,0.15)',
-                                color: 'var(--text)',
-                                textAlign: 'left',
-                                textTransform: 'none',
-                                letterSpacing: 'normal',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                gap: 4,
-                                pointerEvents: 'none',
-                              }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 11 }}>
-                                  {req.userName} {req.userSurname}
+                              <CalendarPopover anchor={blockAnchor}>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                                    {renderAvatar(req, 24)}
+                                    <div style={{ minWidth: 0 }}>
+                                      <div style={{ fontWeight: 800, fontSize: 12, lineHeight: 1.25 }}>
+                                        {req.userName} {req.userSurname}
+                                      </div>
+                                      <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
+                                        {req.storeName ?? t('employees.noStore', 'No store')}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div style={{ height: 1, background: 'var(--border)', margin: '2px 0' }} />
+
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
+                                    <Icon size={12} strokeWidth={2.5} style={{ color: tint.rail }} />
+                                    <span style={{ fontWeight: 700, color: tint.color }}>
+                                      {isVacation ? t('leave.type_vacation', 'Vacation') : t('leave.type_sick', 'Sick leave')}
+                                    </span>
+                                  </div>
+
+                                  <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                                    {req.leaveDurationType === 'short_leave'
+                                      ? `${new Date(req.startDate).toLocaleDateString(locale === 'it' ? 'it-IT' : 'en-GB')} · ${req.shortStartTime ?? '--:--'} – ${req.shortEndTime ?? '--:--'}`
+                                      : `${new Date(req.startDate).toLocaleDateString(locale === 'it' ? 'it-IT' : 'en-GB')} → ${new Date(req.endDate).toLocaleDateString(locale === 'it' ? 'it-IT' : 'en-GB')}`}
+                                  </div>
+
+                                  {/* Same state vocabulary as the list badge — an
+                                      auto-approved request reads DA VERIFICARE here too. */}
+                                  <span
+                                    title={visual.hintKey ? t(`leave.${visual.hintKey}`) : undefined}
+                                    style={{
+                                      marginTop: 2, alignSelf: 'flex-start',
+                                      fontSize: 9.5, fontWeight: 800, letterSpacing: '0.04em',
+                                      padding: '3px 8px', borderRadius: 20,
+                                      background: visual.fill,
+                                      color: visual.color,
+                                      border: `1px solid ${visual.border}`,
+                                    }}
+                                  >
+                                    {t(`leave.${visual.labelKey}`)}
+                                  </span>
                                 </div>
-                                <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
-                                  {req.storeName ?? t('employees.noStore', 'No store')}
-                                </div>
-                                <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
-                                  {req.leaveDurationType === 'short_leave'
-                                    ? `${new Date(req.startDate).toLocaleDateString(locale === 'it' ? 'it-IT' : 'en-GB')} · ${req.shortStartTime ?? '--:--'} - ${req.shortEndTime ?? '--:--'}`
-                                    : `${new Date(req.startDate).toLocaleDateString(locale === 'it' ? 'it-IT' : 'en-GB')} → ${new Date(req.endDate).toLocaleDateString(locale === 'it' ? 'it-IT' : 'en-GB')}`}
-                                </div>
-                                <div style={{ 
-                                  marginTop: 4,
-                                  fontSize: 9, 
-                                  fontWeight: 800, 
-                                  alignSelf: 'flex-start',
-                                  padding: '2px 6px',
-                                  borderRadius: 4,
-                                  background: isApproved ? 'rgba(22,163,74,0.1)' : 'rgba(245,158,11,0.1)',
-                                  color: isApproved ? '#16a34a' : '#d97706'
-                                }}>
-                                  {req.status}
-                                </div>
-                              </div>
+                              </CalendarPopover>
                             )}
                           </div>
                         );
                       })}
+                      {/* A chip like the others, not loose text: it is the
+                          control that reveals the rest of the day, so it has to
+                          look like something you can act on. Hovering it opens
+                          the full day list, where each row can be hovered for
+                          detail or clicked to open the request. */}
                       {dayReqs.length > MAX_VISIBLE && (
-                        <div style={{ fontSize: '0.55rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                        <div
+                          onMouseEnter={(e) => {
+                            e.stopPropagation();
+                            setHoveredBlockKey(null);   // let the day card win
+                            setHoveredDay(dateStr);
+                            setDayAnchor(rectOf(e));
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setHoveredDay(dateStr);
+                            setDayAnchor(rectOf(e));
+                          }}
+                          style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                            borderRadius: 4,
+                            border: '1px dashed var(--border)',
+                            background: 'var(--surface-warm)',
+                            color: 'var(--text-secondary)',
+                            padding: '3px 7px',
+                            fontSize: '0.62rem',
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                            transition: 'background 0.12s, color 0.12s',
+                          }}
+                          onMouseOver={(e) => {
+                            e.currentTarget.style.background = 'var(--surface)';
+                            e.currentTarget.style.color = 'var(--primary)';
+                          }}
+                          onMouseOut={(e) => {
+                            e.currentTarget.style.background = 'var(--surface-warm)';
+                            e.currentTarget.style.color = 'var(--text-secondary)';
+                          }}
+                        >
                           +{dayReqs.length - MAX_VISIBLE} {t('common.more', 'more')}
                         </div>
                       )}
@@ -667,14 +810,22 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
                   )}
 
                   {/* Hover tooltip for full list */}
-                  {isHovered && hasLeaves && (
-                    <div style={{ 
-                      ...summaryHoverCardStyle, 
-                      top: idx >= cells.length - 7 ? 'auto' : 'calc(100% + 4px)',
-                      bottom: idx >= cells.length - 7 ? 'calc(100% + 4px)' : 'auto',
-                      right: (idx % 7 > 3) ? 0 : 'auto', 
-                      left: (idx % 7 > 3) ? 'auto' : 0 
-                    }}>
+                  {/* Portalled: an absolutely-positioned card here used to push
+                      the scroll container and shift the grid under the pointer.
+                      CalendarPopover also handles the flip-up / edge cases that
+                      the manual top/bottom/left/right juggling approximated. */}
+                  {/* Only when no individual entry is hovered. A chip's
+                      mouseenter bubbles up to the day cell, so without this
+                      both the day summary and the entry card opened together. */}
+                  {isHovered && hasLeaves && !hoveredBlockKey && (
+                    <CalendarPopover
+                      anchor={dayAnchor}
+                      // Interactive: the rows inside are the way into a request
+                      // when the day has more entries than the cell can show.
+                      interactive
+                      onMouseEnter={cancelDayClose}
+                      onMouseLeave={closeDayCard}
+                    >
                       {(() => {
                         const vacations = dayReqs.filter(r => r.leaveType === 'vacation');
                         const sickLeaves = dayReqs.filter(r => r.leaveType === 'sick');
@@ -809,7 +960,7 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
                           </>
                         );
                       })()}
-                    </div>
+                    </CalendarPopover>
                   )}
                 </div>
               );

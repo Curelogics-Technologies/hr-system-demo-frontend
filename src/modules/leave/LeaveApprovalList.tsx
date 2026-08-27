@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Palmtree, Thermometer, Trash2 } from 'lucide-react';
+import { Palmtree, Thermometer, Trash2, Lock, CheckCheck } from 'lucide-react';
 import { LeaveRequest, LeaveStatus, approveLeaveRequest, rejectLeaveRequest, downloadCertificate, cancelLeaveRequest, deleteLeaveRequest } from '../../api/leave';
 import { getAvatarUrl } from '../../api/client';
 import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
 import { translateApiError } from '../../utils/apiErrors';
+import { leaveVisual } from './leaveStatus';
 
 // ---------------------------------------------------------------------------
 // Status badge
@@ -34,51 +35,25 @@ const STATUS_COLORS: Record<string, { bg: string; color: string }> = {
 
 export function StatusBadge({ req }: { req: LeaveRequest }) {
   const { t } = useTranslation();
-  const status = req.status;
-  const normalized = (status ?? '').toLowerCase().replace(/ /g, '_');
-  const latestActionRole = req.latestActionByRole;
-  const isAuto = req.escalated === true || latestActionRole === 'system';
-
-  let label = 'PENDING';
-  let bg = 'rgba(107,114,128,0.06)'; // default gray
-  let color = '#6b7280';
-
-  if (normalized === 'cancelled') {
-    label = 'CANCELLED';
-    bg = 'rgba(107,114,128,0.06)';
-    color = '#6b7280';
-  } else if (normalized.includes('rejected') || normalized === 'rejected') {
-    label = 'REJECTED';
-    bg = 'rgba(220,38,38,0.06)';
-    color = '#dc2626'; // red
-  } else if (normalized === 'hr_approved' || normalized === 'approved' || normalized === 'admin_approved') {
-    label = 'APPROVED';
-    bg = 'rgba(22,163,74,0.06)';
-    color = '#16a34a'; // green
-  } else {
-    // It is pending!
-    label = 'PENDING';
-    if (normalized === 'pending') {
-      bg = 'rgba(107,114,128,0.06)';
-      color = '#6b7280'; // gray
-    } else if (isAuto) {
-      bg = 'rgba(245,158,11,0.06)';
-      color = '#d97706'; // yellow/amber
-    } else {
-      bg = 'rgba(59,130,246,0.06)';
-      color = '#3b82f6'; // blue
-    }
-  }
+  // Was a third independent derivation from the status string — it painted a
+  // request approved by nobody as an ordinary green APPROVED, exactly like the
+  // other two did. All of them now go through leaveStatus.ts.
+  const visual = leaveVisual(req);
 
   return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', padding: '3px 10px', borderRadius: 20,
-      fontSize: 11, fontWeight: 700, letterSpacing: '0.5px',
-      background: bg, color: color,
-      border: `1px solid ${color}30`,
-      textTransform: 'uppercase', whiteSpace: 'nowrap',
-    }}>
-      {label}
+    <span
+      title={visual.hintKey ? t(`leave.${visual.hintKey}`) : undefined}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 10px', borderRadius: 20,
+        fontSize: 11, fontWeight: 700, letterSpacing: '0.5px',
+        background: visual.fill, color: visual.color,
+        border: `1px solid ${visual.border}`,
+        textTransform: 'uppercase', whiteSpace: 'nowrap',
+        cursor: visual.hintKey ? 'help' : undefined,
+      }}
+    >
+      {visual.state === 'unverified' && <span aria-hidden>⚠</span>}
+      {t(`leave.${visual.labelKey}`)}
     </span>
   );
 }
@@ -480,9 +455,15 @@ interface Props {
   onRefresh: () => void;
   /** If true, show approve/reject action buttons */
   showActions?: boolean;
+  /**
+   * Why the list is empty, so the empty state can say which it is. 'forbidden'
+   * means the module permission blocked the fetch; anything else means there
+   * genuinely are no rows.
+   */
+  emptyReason?: 'none' | 'forbidden';
 }
 
-export function LeaveApprovalList({ requests, loading, onRefresh, showActions = false }: Props) {
+export function LeaveApprovalList({ requests, loading, onRefresh, showActions = false, emptyReason = 'none' }: Props) {
   const { t, i18n } = useTranslation();
   const { showToast } = useToast();
   const { user } = useAuth();
@@ -622,9 +603,33 @@ export function LeaveApprovalList({ requests, loading, onRefresh, showActions = 
   }
 
   if (requests.length === 0) {
+    // "Nothing to approve" and "you are not allowed to see this" are entirely
+    // different situations, and rendering the same blank panel for both is what
+    // made a permissions problem look like an empty queue.
+    const blocked = emptyReason === 'forbidden';
     return (
-      <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-secondary)' }}>
-        {t('leave.no_requests')}
+      <div style={{
+        padding: '48px 32px', textAlign: 'center',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
+      }}>
+        <div style={{
+          width: 46, height: 46, borderRadius: '50%',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: blocked ? 'rgba(220,38,38,0.10)' : 'rgba(22,163,74,0.10)',
+          color: blocked ? '#dc2626' : '#16a34a',
+        }}>
+          {blocked ? <Lock size={20} strokeWidth={2.2} /> : <CheckCheck size={22} strokeWidth={2.2} />}
+        </div>
+        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
+          {blocked
+            ? t('leave.empty_forbidden_title', 'Permesso modulo richiesto')
+            : t('leave.empty_none_title', 'Nessuna richiesta')}
+        </div>
+        <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', maxWidth: 380, lineHeight: 1.5 }}>
+          {blocked
+            ? t('leave.empty_forbidden_body', 'Il tuo ruolo non ha accesso al modulo Permessi. Chiedi a un amministratore di abilitarlo per vedere le richieste da approvare.')
+            : t('leave.empty_none_body', 'Non ci sono richieste da mostrare qui al momento.')}
+        </div>
       </div>
     );
   }
@@ -689,7 +694,7 @@ export function LeaveApprovalList({ requests, loading, onRefresh, showActions = 
                     {req.userAvatarFilename ? (
                       <img
                         src={getAvatarUrl(req.userAvatarFilename) ?? ''}
-                        alt={`${req.userSurname} ${req.userName}`}
+                        alt={`${req.userName} ${req.userSurname}`}
                         style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                       />
                     ) : initials}
@@ -699,7 +704,7 @@ export function LeaveApprovalList({ requests, loading, onRefresh, showActions = 
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 2 }}>
                       <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-primary)', fontFamily: 'var(--font-display)' }}>
-                        {req.userSurname} {req.userName}
+                        {req.userName} {req.userSurname}
                       </span>
                       {/* Leave type badge */}
                       <span style={{
