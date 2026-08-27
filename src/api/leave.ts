@@ -230,14 +230,24 @@ export interface SetBalancePayload {
 }
 
 /** Admin/HR sets the total_days allocation for an employee balance (upsert). */
-export async function setLeaveBalance(payload: SetBalancePayload): Promise<LeaveBalance> {
+/**
+ * Upsert an allocation, or clear it.
+ *
+ * `totalDays: 0` removes the allocation entirely (admin only, and refused once
+ * days have been used), taking the employee back to not-configured — which is
+ * what blocks HR/Admin from approving their leave. The response then carries
+ * `{ cleared: true }` instead of a balance row.
+ */
+export async function setLeaveBalance(
+  payload: SetBalancePayload,
+): Promise<LeaveBalance | { cleared: true }> {
   const { data } = await apiClient.put('/leave/balance', {
     user_id:    payload.userId,
     year:       payload.year,
     leave_type: payload.leaveType,
     total_days: payload.totalDays,
   });
-  return data.data as LeaveBalance;
+  return data.data as LeaveBalance | { cleared: true };
 }
 
 /** Download a medical certificate for a sick leave request. */

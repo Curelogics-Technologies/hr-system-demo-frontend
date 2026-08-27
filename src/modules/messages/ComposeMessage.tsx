@@ -12,7 +12,8 @@ import { useAuth } from '../../context/AuthContext';
 import apiClient, { getAvatarUrl, getMessageAttachmentUrl } from '../../api/client';
 import { Badge } from '../../components/ui/Badge';
 import { UserRole } from '../../types';
-import { PlatformReferencePicker, PlatformReference } from './PlatformReferencePicker';
+import { PlatformReferencePicker } from './PlatformReferencePicker';
+import { PlatformReference, ReferenceChip, buildReferenceToken } from './platformReference';
 
 interface Props {
   /** Pre-set recipient (reply mode or employee→HR). If omitted, show picker. */
@@ -165,7 +166,7 @@ export function ComposeMessage({ recipientId, recipientName, companyId, defaultS
     try {
       let finalBody = body.trim();
       if (selectedRef) {
-        finalBody += `\n\n[ref:type=${selectedRef.type}&id=${selectedRef.id}&title=${encodeURIComponent(selectedRef.title)}&url=${selectedRef.url}]`;
+        finalBody += `\n\n${buildReferenceToken(selectedRef)}`;
       }
 
       await sendMessage({
@@ -471,20 +472,13 @@ export function ComposeMessage({ recipientId, recipientName, companyId, defaultS
             )}
 
             {selectedRef && (
-              <div style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-                padding: '4px 10px', borderRadius: 8,
-                background: 'rgba(201,151,58,0.1)', border: '1px solid rgba(201,151,58,0.3)',
-                fontSize: 12, color: 'var(--accent)', fontWeight: 600,
-              }}>
-                <span>🔗 {selectedRef.type.toUpperCase()}: {selectedRef.title}</span>
-                <button
-                  type="button"
-                  onClick={() => setSelectedRef(null)}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', padding: 0 }}
-                >
-                  <X size={14} />
-                </button>
+              <div style={{ maxWidth: 260, minWidth: 0 }}>
+                <ReferenceChip
+                  reference={selectedRef}
+                  variant="draft"
+                  onRemove={() => setSelectedRef(null)}
+                  removeDisabled={saving}
+                />
               </div>
             )}
           </div>

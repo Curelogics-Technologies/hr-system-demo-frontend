@@ -276,10 +276,24 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
     textTransform: 'uppercase' as const, letterSpacing: '0.8px',
   };
 
-  const selectStyle = {
-    padding: '8px 12px', borderRadius: 8,
-    border: '1.5px solid #d1d5db', background: '#ffffff',
-    color: '#111827', fontSize: 13, outline: 'none', cursor: 'pointer',
+  // Chevron drawn in, because the native select arrow varies wildly between
+  // browsers and looked unfinished next to the rest of the toolbar.
+  const selectStyle: React.CSSProperties = {
+    padding: '9px 32px 9px 13px',
+    borderRadius: 10,
+    border: '1.5px solid var(--border)',
+    background: 'var(--surface)',
+    color: 'var(--text-primary)',
+    fontSize: 13,
+    fontWeight: 600,
+    outline: 'none',
+    cursor: 'pointer',
+    appearance: 'none',
+    backgroundImage:
+      "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>\")",
+    backgroundRepeat: 'no-repeat',
+    backgroundPosition: 'right 11px center',
+    boxShadow: 'var(--shadow-xs)',
   };
 
   const [empError, setEmpError] = useState<string | null>(null);
@@ -448,21 +462,29 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
     const origVac = (balances[editTarget.userId] ?? []).find((b) => b.leaveType === 'vacation');
     const origSick = (balances[editTarget.userId] ?? []).find((b) => b.leaveType === 'sick');
 
-    const newBalances: LeaveBalance[] = [...(balances[editTarget.userId] ?? [])];
+    let newBalances: LeaveBalance[] = [...(balances[editTarget.userId] ?? [])];
     let hasError = false;
+
+    /** 0 clears the allocation, so the row is dropped rather than replaced. */
+    const applyResult = (type: LeaveType, result: LeaveBalance | { cleared: true }) => {
+      if ('cleared' in result) {
+        newBalances = newBalances.filter((b) => b.leaveType !== type);
+        return;
+      }
+      const idx = newBalances.findIndex((b) => b.leaveType === type);
+      if (idx >= 0) newBalances[idx] = result;
+      else newBalances.push(result);
+    };
 
     // Save vacation if changed
     if (origVac === undefined || vacTotal !== origVac.totalDays) {
       try {
-        const updated = await setLeaveBalance({
+        applyResult('vacation', await setLeaveBalance({
           userId: editTarget.userId,
           year,
           leaveType: 'vacation',
           totalDays: vacTotal,
-        });
-        const idx = newBalances.findIndex((b) => b.leaveType === 'vacation');
-        if (idx >= 0) newBalances[idx] = updated;
-        else newBalances.push(updated);
+        }));
       } catch (err: unknown) {
         setEditError(translateApiError(err, t, t('leave.balance_set_error')) ?? t('leave.balance_set_error'));
         hasError = true;
@@ -472,15 +494,12 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
     // Save sick if changed (even if vacation failed — attempt both)
     if (origSick === undefined || sickTotal !== origSick.totalDays) {
       try {
-        const updated = await setLeaveBalance({
+        applyResult('sick', await setLeaveBalance({
           userId: editTarget.userId,
           year,
           leaveType: 'sick',
           totalDays: sickTotal,
-        });
-        const idx = newBalances.findIndex((b) => b.leaveType === 'sick');
-        if (idx >= 0) newBalances[idx] = updated;
-        else newBalances.push(updated);
+        }));
       } catch (err: unknown) {
         if (!hasError) {
           setEditError(translateApiError(err, t, t('leave.balance_set_error')) ?? t('leave.balance_set_error'));
@@ -504,19 +523,16 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
     const empBalances = balances[empId] ?? [];
     const b = empBalances.find((x) => x.leaveType === type);
     if (!b) {
-      // "— / — (—)" read as "zero days taken". It actually means no allocation
-      // exists, so approved leave for this person is deducted from nothing —
-      // the state the auto-approved requests left their employees in.
+      // Deliberately understated. The consequence of a missing allocation is
+      // enforced where it matters — HR/Admin cannot approve without one — so
+      // the table stays quiet rather than shouting on every unconfigured row.
+      // The tooltip carries the explanation for anyone who wonders.
       return (
         <span
-          title={t('leave.balance_missing_hint', 'Nessuna assegnazione di giorni per questo dipendente e anno: i permessi approvati non vengono scalati da alcun saldo.')}
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: 4,
-            color: '#b45309', fontSize: 12, fontWeight: 600, cursor: 'help',
-          }}
+          title={t('leave.balance_missing_hint')}
+          style={{ color: 'var(--text-muted)', fontSize: 13, cursor: 'help' }}
         >
-          <span aria-hidden>⚠</span>
-          {t('leave.balance_missing', 'Nessun saldo configurato')}
+          — / — (—)
         </span>
       );
     }
@@ -1739,10 +1755,24 @@ export default function AdminLeavePanel() {
 
   // ─────────────────────────────────────────────────────────────────────────────
 
-  const selectStyle = {
-    padding: '8px 12px', borderRadius: 8,
-    border: '1.5px solid #d1d5db', background: '#ffffff',
-    color: '#111827', fontSize: 13, outline: 'none', cursor: 'pointer',
+  // Chevron drawn in, because the native select arrow varies wildly between
+  // browsers and looked unfinished next to the rest of the toolbar.
+  const selectStyle: React.CSSProperties = {
+    padding: '9px 32px 9px 13px',
+    borderRadius: 10,
+    border: '1.5px solid var(--border)',
+    background: 'var(--surface)',
+    color: 'var(--text-primary)',
+    fontSize: 13,
+    fontWeight: 600,
+    outline: 'none',
+    cursor: 'pointer',
+    appearance: 'none',
+    backgroundImage:
+      "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>\")",
+    backgroundRepeat: 'no-repeat',
+    backgroundPosition: 'right 11px center',
+    boxShadow: 'var(--shadow-xs)',
   };
 
   const filterControlStyle = {
@@ -2241,7 +2271,7 @@ export default function AdminLeavePanel() {
                                 </span>
                                 <span style={{ minWidth: 0 }}>
                                   <span style={{ display: 'block', fontSize: 14, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {req.userSurname} {req.userName}
+                                    {req.userName} {req.userSurname}
                                   </span>
                                   <span style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>
                                     #{req.id} · {new Date(req.createdAt).toLocaleDateString(locale === 'en' ? 'en-GB' : 'it-IT')}
@@ -2892,7 +2922,7 @@ export default function AdminLeavePanel() {
                     {t('leave.action_approve_title', 'Approva Permesso')}
                   </h3>
                   <p style={{ margin: '2px 0 0', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>
-                    {approveTarget.userSurname} {approveTarget.userName}
+                    {approveTarget.userName} {approveTarget.userSurname}
                   </p>
                 </div>
               </div>
@@ -3033,7 +3063,7 @@ export default function AdminLeavePanel() {
               {t('leave.reject_title')}
             </h3>
             <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--text-secondary)' }}>
-              {rejectTarget.userSurname} {rejectTarget.userName} · {fmtDate(rejectTarget.startDate, locale)} → {fmtDate(rejectTarget.endDate, locale)}
+              {rejectTarget.userName} {rejectTarget.userSurname} · {fmtDate(rejectTarget.startDate, locale)} → {fmtDate(rejectTarget.endDate, locale)}
             </p>
             {rejectError && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{rejectError}</div>}
             <textarea
@@ -3074,7 +3104,7 @@ export default function AdminLeavePanel() {
               {t('leave.admin_delete_confirm')}
             </h3>
             <p style={{ margin: '0 0 24px', fontSize: 13, color: 'var(--text-secondary)' }}>
-              {deleteTarget.userSurname} {deleteTarget.userName} · {t(`leave.type_${deleteTarget.leaveType}`)} · {fmtDate(deleteTarget.startDate, locale)} → {fmtDate(deleteTarget.endDate, locale)}
+              {deleteTarget.userName} {deleteTarget.userSurname} · {t(`leave.type_${deleteTarget.leaveType}`)} · {fmtDate(deleteTarget.startDate, locale)} → {fmtDate(deleteTarget.endDate, locale)}
             </p>
             <div style={{ display: 'flex', gap: 10 }}>
               <button onClick={() => setDeleteTarget(null)} disabled={deleting} style={{ flex: 1, padding: '10px 0', borderRadius: 8, border: '1.5px solid var(--border)', background: 'var(--background)', color: 'var(--text-secondary)', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>

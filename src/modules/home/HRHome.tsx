@@ -1401,7 +1401,7 @@ export const HRHome: React.FC<HRHomeProps> = ({ data }) => {
             <div style={{ fontSize: 28, fontWeight: 800, fontFamily: 'var(--font-display)', color: 'var(--primary)', lineHeight: 1 }}>{pendingShiftCount}</div>
             {pendingShiftPreview.slice(0, 3).map((row) => (
               <div key={row.id} style={{ fontSize: 12, marginTop: 8, color: 'var(--text-secondary)' }}>
-                {row.userSurname} {row.userName} · {formatDate(row.date, i18n.language)} · {String(row.startTime).slice(0, 5)}
+                {row.userName} {row.userSurname} · {formatDate(row.date, i18n.language)} · {String(row.startTime).slice(0, 5)}
               </div>
             ))}
             <div style={{ marginTop: 12, fontSize: 12, fontWeight: 600, color: 'var(--accent)' }}>{t('home.hr.viewShifts')} →</div>

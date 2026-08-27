@@ -631,7 +631,7 @@ export default function HrDeviceResetPage() {
         message={t('deviceReset.confirmMessage', {
           employee:
             selectedEmployee
-              ? `${selectedEmployee.surname ?? ''} ${selectedEmployee.name ?? ''}`
+              ? `${selectedEmployee.name ?? ''} ${selectedEmployee.surname ?? ''}`
               : '',
         })}
         confirmLabel={submitting ? t('common.loading') : t('deviceReset.resetButton')}

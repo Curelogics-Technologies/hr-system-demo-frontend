@@ -94,6 +94,8 @@ function PersonalLeavePage() {
   const [loadingPending, setLoadingPending] = useState(false);
   /** Surfaced instead of swallowed: an empty queue and a failed fetch look identical otherwise. */
   const [pendingError, setPendingError] = useState<string | null>(null);
+  /** Distinguishes "blocked by permissions" from "genuinely nothing here". */
+  const [pendingForbidden, setPendingForbidden] = useState(false);
   const [decidedRequests, setDecidedRequests] = useState<LeaveRequest[]>([]);
   const [loadingBalance, setLoadingBalance] = useState(true);
 
@@ -144,6 +146,7 @@ function PersonalLeavePage() {
     if (!userIsApprover) return;
     setLoadingPending(true);
     setPendingError(null);
+    setPendingForbidden(false);
     try {
       const res = await getPendingLeaveApprovals();
       setPendingRequests(res.requests);
@@ -154,6 +157,7 @@ function PersonalLeavePage() {
       // queue was impossible to tell apart from a broken one.
       const code = err?.response?.data?.code;
       const status = err?.response?.status;
+      setPendingForbidden(status === 403);
       setPendingError(
         status === 403
           ? t('leave.pending_forbidden', 'Non hai i permessi per vedere le approvazioni. Contatta un amministratore.')
@@ -350,6 +354,7 @@ function PersonalLeavePage() {
                 loading={loadingPending}
                 onRefresh={() => { fetchPendingRequests(); fetchDecidedRequests(); }}
                 showActions
+                emptyReason={pendingForbidden ? 'forbidden' : 'none'}
               />
 
               {/* Already settled, so no action buttons — this is history, not a queue. */}

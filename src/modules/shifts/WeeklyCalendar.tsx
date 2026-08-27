@@ -312,7 +312,7 @@ export default function WeeklyCalendar({
   // Employee column keeps a bounded width so long names ellipsize instead of
   // stealing space from the day columns. It still breathes when the sidebar
   // collapses (containerWidth grows), revealing a few more characters.
-  const employeeColWidth = Math.max(160, Math.min(280, Math.round(containerWidth * 0.16)));
+  const employeeColWidth = Math.max(150, Math.min(300, Math.round(containerWidth * 0.16)));
   const employeeColInnerWidth = employeeColWidth - 24; // td horizontal padding
 
   function weeklyTotalsForUser(userId: number, userShifts: Map<string, Shift[]>): { hours: number; hasScheduled: boolean } {

@@ -275,7 +275,7 @@ export const PlatformReferencePicker: React.FC<Props> = ({ onSelect, onClose }) 
                       {avatarUrl ? (
                         <img src={avatarUrl} alt={item.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                       ) : item.type === 'employee' ? (
-                        item.title.trim().split(/s+/).map((w) => w[0] ?? '').slice(0, 2).join('').toUpperCase()
+                        item.title.trim().split(' ').filter(Boolean).map((w) => w[0]).slice(0, 2).join('').toUpperCase()
                       ) : (
                         referenceIcon(item.type, 16)
                       )}

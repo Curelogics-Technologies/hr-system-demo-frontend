@@ -487,15 +487,29 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
 
       {!loading && (
         <div style={{ padding: 0, overflowX: (isMobile || isTablet) ? 'visible' : 'auto' }}>
-          <div style={{ minWidth: '100%', width: '100%' }}>
+          {/* minWidth matches the shifts calendar: without it the seven columns
+              squeeze until the entry chips wrap and the grid looks broken. */}
+          <div style={{ minWidth: (isMobile || isTablet) ? 'auto' : 1120, width: '100%' }}>
             {/* Day headers */}
             {!isMobile && !isTablet && (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 4, marginBottom: 8 }}>
-                {DAY_LABELS.map((label) => (
+              <div style={{
+                display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
+                gap: 6, marginBottom: 8,
+              }}>
+                {DAY_LABELS.map((label, i) => (
                   <div key={label} style={{
-                    textAlign: 'center', fontWeight: 600,
-                    fontFamily: 'var(--font-display)', color: 'var(--primary)',
-                    padding: '4px 0', fontSize: '0.85rem',
+                    textAlign: 'center',
+                    fontWeight: 700,
+                    fontFamily: 'var(--font-display)',
+                    // Weekend headers muted, so the week reads at a glance.
+                    color: i >= 5 ? 'var(--text-muted)' : 'var(--primary)',
+                    padding: '7px 0',
+                    fontSize: '0.72rem',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.08em',
+                    background: 'var(--surface-warm)',
+                    borderRadius: 8,
+                    border: '1px solid var(--border)',
                   }}>
                     {label}
                   </div>
@@ -507,7 +521,7 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
             <div style={{
               display: 'grid',
               gridTemplateColumns: isMobile ? '1fr' : isTablet ? 'repeat(2, minmax(0, 1fr))' : 'repeat(7, minmax(0, 1fr))',
-              gap: (isMobile || isTablet) ? 12 : 4
+              gap: (isMobile || isTablet) ? 12 : 6
             }}>
               {cells.map((date, idx) => {
                 if (!date) {
@@ -518,21 +532,32 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
               const isToday = dateStr === todayStr;
               const isHovered = hoveredDay === dateStr;
               const hasLeaves = dayReqs.length > 0;
+              const dow = date.getDay();
+              const isWeekend = dow === 0 || dow === 6;
 
               return (
                 <div
                   key={dateStr}
                   style={{
                     minWidth: 0,
-                    minHeight: 92,
-                    borderRadius: 6,
+                    minHeight: 118,
+                    borderRadius: 10,
                     border: isToday ? '2px solid var(--accent)' : '1px solid var(--border)',
-                    padding: 7,
+                    padding: 8,
                     cursor: 'pointer',
-                    background: isToday ? 'rgba(201, 151, 58, 0.06)' : 'var(--surface)',
-                    transition: 'background 0.15s',
+                    // Weekends sit back a shade so the working week stands out,
+                    // the same cue the shifts calendar uses.
+                    background: isToday
+                      ? 'linear-gradient(160deg, rgba(201,151,58,0.10), rgba(201,151,58,0.03))'
+                      : isWeekend
+                        ? 'var(--surface-warm)'
+                        : 'var(--surface)',
+                    transition: 'box-shadow 0.15s, transform 0.15s',
                     position: 'relative',
-                    boxShadow: hasLeaves ? 'var(--shadow-xs)' : undefined,
+                    transform: isHovered ? 'translateY(-1px)' : undefined,
+                    boxShadow: isHovered
+                      ? '0 6px 18px rgba(15,23,42,0.10)'
+                      : hasLeaves ? 'var(--shadow-xs)' : undefined,
                   }}
                   onMouseEnter={(e) => {
                     setHoveredDay(dateStr);
@@ -731,7 +756,10 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
                       the scroll container and shift the grid under the pointer.
                       CalendarPopover also handles the flip-up / edge cases that
                       the manual top/bottom/left/right juggling approximated. */}
-                  {isHovered && hasLeaves && (
+                  {/* Only when no individual entry is hovered. A chip's
+                      mouseenter bubbles up to the day cell, so without this
+                      both the day summary and the entry card opened together. */}
+                  {isHovered && hasLeaves && !hoveredBlockKey && (
                     <CalendarPopover anchor={dayAnchor}>
                       {(() => {
                         const vacations = dayReqs.filter(r => r.leaveType === 'vacation');
