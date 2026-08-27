@@ -167,6 +167,11 @@ export interface CreateShiftPayload {
   is_off_day?: boolean;
   notes?: string | null;
   status?: 'scheduled' | 'confirmed' | 'cancelled';
+  /**
+   * Acknowledges a LEAVE_CONFLICT warning: the employee has approved leave on
+   * this date and the operator has chosen to schedule them anyway.
+   */
+  confirm_leave_conflict?: boolean;
 }
 
 export type UpdateShiftPayload = Partial<CreateShiftPayload>;

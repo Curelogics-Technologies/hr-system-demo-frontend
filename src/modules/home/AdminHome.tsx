@@ -26,6 +26,7 @@ export interface AdminHomeData {
   dashboardStats: {
     attendanceRate: number;
     totalAbsences: number;
+    justifiedAbsences?: number;
     delays: number;
     shiftCoverage: number;
   };
@@ -459,12 +460,22 @@ export const AdminHome: React.FC<AdminHomeProps> = ({ data, timeRange, onTimeRan
           accent="#15803D" 
           description={timeRange === 'this_week' ? t('home.admin.thisWeek') : timeRange === 'three_months' ? t('home.admin.lastThreeMonths') : t('home.admin.thisMonth')} 
         />
-        <StatCard 
-          label={t('home.admin.totalAbsences')} 
-          value={dashboardStats?.totalAbsences || 0} 
-          icon={<IconUserMinus />} 
-          accent="#EF4444" 
-          description={timeRange === 'this_week' ? t('home.admin.thisWeek') : timeRange === 'three_months' ? t('home.admin.lastThreeMonths') : t('home.admin.thisMonth')} 
+        <StatCard
+          label={t('home.admin.totalAbsences')}
+          value={dashboardStats?.totalAbsences || 0}
+          icon={<IconUserMinus />}
+          accent="#EF4444"
+          // This counter now excludes days covered by approved leave, so it
+          // reads lower than before. Naming the excluded days makes that a
+          // visible correction rather than an unexplained drop.
+          description={
+            dashboardStats?.justifiedAbsences
+              ? t('home.admin.justifiedExcluded', {
+                  defaultValue: '{{count}} giustificate escluse',
+                  count: dashboardStats.justifiedAbsences,
+                })
+              : (timeRange === 'this_week' ? t('home.admin.thisWeek') : timeRange === 'three_months' ? t('home.admin.lastThreeMonths') : t('home.admin.thisMonth'))
+          }
         />
         <StatCard 
           label={t('home.admin.delays')} 

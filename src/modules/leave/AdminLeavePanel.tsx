@@ -14,6 +14,7 @@ import {
   archiveLeaveRequest,
   downloadCertificate,
   getLeaveBalance,
+  getAllLeaveBalances,
   setLeaveBalance,
   exportLeaveBalances,
   importLeaveBalances,
@@ -63,53 +64,80 @@ const STATUS_COLORS: Record<string, { bg: string; color: string }> = {
   'admin approved':                { bg: 'rgba(22,163,74,0.06)',   color: '#16a34a' },
 };
 
-function StatusBadge({ req }: { req: LeaveRequest }) {
-  const { t } = useTranslation();
-  const status = req.status;
-  const normalized = (status ?? '').toLowerCase().replace(/ /g, '_');
-  const latestActionRole = req.latestActionByRole;
-  const isAuto = req.escalated === true || latestActionRole === 'system';
+/**
+ * Decides what a leave request's badge should say.
+ *
+ * Keyed off `approvedBy` (who granted it) rather than off the status string.
+ * A request that shows an approved-looking status with no approving user is
+ * the exact state the inactivity job used to create, and the old badge painted
+ * it solid green "APPROVED" — indistinguishable from a real approval. It now
+ * reads DA VERIFICARE so those rows are visible on sight.
+ */
+export function leaveBadgeState(req: LeaveRequest): {
+  key: 'cancelled' | 'rejected' | 'approved' | 'unverified' | 'escalated' | 'in_progress' | 'pending';
+  color: string;
+} {
+  const normalized = (req.status ?? '').toLowerCase().replace(/ /g, '_');
+  const hasApprover = req.approvedBy != null;
 
-  let label = 'PENDING';
-  let bg = 'rgba(107,114,128,0.06)'; // default gray
-  let color = '#6b7280';
+  if (normalized === 'cancelled') return { key: 'cancelled', color: '#6b7280' };
+  if (normalized.includes('rejected')) return { key: 'rejected', color: '#dc2626' };
 
-  if (normalized === 'cancelled') {
-    label = 'CANCELLED';
-    bg = 'rgba(107,114,128,0.06)';
-    color = '#6b7280';
-  } else if (normalized.includes('rejected') || normalized === 'rejected') {
-    label = 'REJECTED';
-    bg = 'rgba(220,38,38,0.06)';
-    color = '#dc2626'; // red
-  } else if (normalized === 'hr_approved' || normalized === 'approved' || normalized === 'admin_approved') {
-    label = 'APPROVED';
-    bg = 'rgba(22,163,74,0.06)';
-    color = '#16a34a'; // green
-  } else {
-    // It is pending!
-    label = 'PENDING';
-    if (normalized === 'pending') {
-      bg = 'rgba(107,114,128,0.06)';
-      color = '#6b7280'; // gray
-    } else if (isAuto) {
-      bg = 'rgba(245,158,11,0.06)';
-      color = '#d97706'; // yellow/amber
-    } else {
-      bg = 'rgba(59,130,246,0.06)';
-      color = '#3b82f6'; // blue
-    }
+  const looksApproved = normalized === 'approved' || normalized === 'admin_approved'
+    || (normalized === 'hr_approved' && !req.currentApproverRole);
+
+  if (looksApproved) {
+    // Granted with nobody behind it — legacy rows from the escalation defect.
+    return hasApprover
+      ? { key: 'approved', color: '#16a34a' }
+      : { key: 'unverified', color: '#dc2626' };
   }
 
+  if (normalized === 'pending' && !req.escalated) return { key: 'pending', color: '#6b7280' };
+  // Chased or reassigned by the inactivity job — still awaiting a person.
+  if (req.escalated) return { key: 'escalated', color: '#d97706' };
+  return { key: 'in_progress', color: '#3b82f6' };
+}
+
+function StatusBadge({ req }: { req: LeaveRequest }) {
+  const { t } = useTranslation();
+  const { key, color } = leaveBadgeState(req);
+
+  const LABELS: Record<string, string> = {
+    cancelled:   t('leave.badge_cancelled', 'ANNULLATA'),
+    rejected:    t('leave.badge_rejected', 'RIFIUTATA'),
+    approved:    t('leave.badge_approved', 'APPROVATA'),
+    unverified:  t('leave.badge_unverified', 'DA VERIFICARE'),
+    escalated:   t('leave.badge_escalated', 'SOLLECITATA'),
+    in_progress: t('leave.badge_in_progress', 'IN CORSO'),
+    pending:     t('leave.badge_pending', 'IN ATTESA'),
+  };
+
+  const TITLES: Record<string, string> = {
+    unverified: t(
+      'leave.badge_unverified_hint',
+      'Approvata senza alcuna decisione umana (approvazione automatica per inattività). Da rivedere.',
+    ),
+    escalated: t(
+      'leave.badge_escalated_hint',
+      'Ferma da oltre 2 giorni: sollecitata o riassegnata al livello successivo. Nessuna approvazione automatica.',
+    ),
+  };
+
   return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', padding: '3px 10px', borderRadius: 20,
-      fontSize: 11, fontWeight: 700, letterSpacing: '0.5px',
-      background: bg, color: color,
-      border: `1px solid ${color}30`,
-      textTransform: 'uppercase', whiteSpace: 'nowrap',
-    }}>
-      {label}
+    <span
+      title={TITLES[key] ?? undefined}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 10px', borderRadius: 20,
+        fontSize: 11, fontWeight: 700, letterSpacing: '0.5px',
+        background: `${color}10`, color,
+        border: `1px solid ${color}30`,
+        textTransform: 'uppercase', whiteSpace: 'nowrap',
+        cursor: TITLES[key] ? 'help' : undefined,
+      }}
+    >
+      {key === 'unverified' && <span aria-hidden>⚠</span>}
+      {LABELS[key]}
     </span>
   );
 }
@@ -243,6 +271,15 @@ interface BalancesTabProps {
   showFlash: (msg: string) => void;
 }
 
+/** Rows rendered per page. "Load more" adds another page. */
+const BALANCE_PAGE_SIZE = 25;
+/**
+ * The server caps /employees at 100 for a single-company user and 500 for a
+ * cross-company one, so asking for 200 silently returned at most 100. Ask for
+ * the cross-company ceiling and show the server's own total alongside.
+ */
+const EMPLOYEE_FETCH_LIMIT = 500;
+
 export function BalancesTab({ showFlash }: BalancesTabProps) {
   const { t } = useTranslation();
   const { isMobile } = useBreakpoint();
@@ -291,17 +328,48 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
 
   const [empError, setEmpError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  /**
+   * Company scope for this tab. Without it a Super Admin's employee list mixes
+   * every company they can reach, so the (previously hard-capped) rows shown
+   * were an arbitrary slice across companies.
+   */
+  const [companyFilter, setCompanyFilter] = useState('');
+  const [companyOptions, setCompanyOptions] = useState<Array<{ id: number; name: string }>>([]);
 
-  // Load employees once
+  useEffect(() => {
+    getCompanies()
+      .then((list) => setCompanyOptions(list.map((c: any) => ({ id: c.id, name: c.name }))))
+      .catch(() => setCompanyOptions([]));
+  }, []);
+
+  /** Server-reported total, so the UI can say how many people actually exist. */
+  const [employeeTotal, setEmployeeTotal] = useState(0);
+  /** How many rows are rendered. Grows via "load more" instead of a hard cut at 50. */
+  const [visibleCount, setVisibleCount] = useState(BALANCE_PAGE_SIZE);
+
+  // Load employees. The old call asked for 200 with no company filter and then
+  // truncated to 50 twice — so a Super Admin with 103 people saw 50 and never
+  // even requested the rest. It also silently hit the server's own cap (100 for
+  // a single-company user), which is why simply deleting the slices was not
+  // enough.
   useEffect(() => {
     setEmpError(null);
-    getEmployees({ limit: 200, status: 'active' })
-      .then((r) => setEmployees(r.employees.map((e) => ({ id: e.id, name: e.name, surname: e.surname, role: e.role, avatarFilename: e.avatarFilename ?? null }))))
+    const targetCompanyId = companyFilter ? parseInt(companyFilter, 10) : undefined;
+    getEmployees({
+      limit: EMPLOYEE_FETCH_LIMIT,
+      status: 'active',
+      targetCompanyId: Number.isFinite(targetCompanyId as number) ? targetCompanyId : undefined,
+    })
+      .then((r) => {
+        setEmployees(r.employees.map((e) => ({ id: e.id, name: e.name, surname: e.surname, role: e.role, avatarFilename: e.avatarFilename ?? null })));
+        setEmployeeTotal(r.total ?? r.employees.length);
+      })
       .catch(() => {
         setEmpError(t('common.error'));
         setEmployees([]);
+        setEmployeeTotal(0);
       });
-  }, [t]);
+  }, [t, companyFilter]);
 
   const filteredEmployees = useMemo(() => {
     if (!searchQuery.trim()) return employees;
@@ -312,32 +380,32 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
     });
   }, [employees, searchQuery]);
 
-  // Load balances when filtered employees or year changes
-  const loadBalances = useCallback(async (emps: Array<{ id: number; name: string; surname: string; avatarFilename?: string | null }>, selectedYear: number) => {
-    if (emps.length === 0) return;
+  // Reset paging whenever the underlying list changes.
+  useEffect(() => { setVisibleCount(BALANCE_PAGE_SIZE); }, [searchQuery, companyFilter, year]);
+
+  const visibleEmployees = useMemo(
+    () => filteredEmployees.slice(0, visibleCount),
+    [filteredEmployees, visibleCount],
+  );
+
+  // Balances for EVERY employee in scope, in one request rather than one call
+  // per person — which is what made the 50-row cap necessary in the first place.
+  const loadBalances = useCallback(async (selectedYear: number, companyId?: number) => {
     setLoading(true);
-    const balanceMap: Record<number, LeaveBalance[]> = {};
-    await Promise.all(
-      emps.slice(0, 50).map(async (emp) => {
-        try {
-          const res = await getLeaveBalance({ userId: emp.id, year: selectedYear });
-          balanceMap[emp.id] = res.balances;
-        } catch {
-          balanceMap[emp.id] = [];
-        }
-      })
-    );
-    setBalances(balanceMap);
-    setLoading(false);
+    try {
+      const res = await getAllLeaveBalances({ year: selectedYear, companyId });
+      setBalances(res.balances ?? {});
+    } catch {
+      setBalances({});
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    if (filteredEmployees.length > 0) {
-      loadBalances(filteredEmployees, year);
-    } else {
-      setBalances({});
-    }
-  }, [filteredEmployees, year, loadBalances]);
+    const targetCompanyId = companyFilter ? parseInt(companyFilter, 10) : undefined;
+    loadBalances(year, Number.isFinite(targetCompanyId as number) ? targetCompanyId : undefined);
+  }, [year, companyFilter, loadBalances]);
 
   function openEdit(emp: { id: number; name: string; surname: string }) {
     const empBalances = balances[emp.id] ?? [];
@@ -390,8 +458,8 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
     try {
       const result = await importLeaveBalances(importFile);
       setImportResult(result);
-      if (result.imported > 0 && filteredEmployees.length > 0) {
-        loadBalances(filteredEmployees, year);
+      if (result.imported > 0) {
+        loadBalances(year, companyFilter ? parseInt(companyFilter, 10) : undefined);
       }
     } catch (err: any) {
       const errMsg = err?.response?.data?.error ?? err?.message ?? t('common.error');
@@ -480,13 +548,34 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
     const empBalances = balances[empId] ?? [];
     const b = empBalances.find((x) => x.leaveType === type);
     if (!b) {
-      return <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>— / — (—)</span>;
+      // "— / — (—)" read as "zero days taken". It actually means no allocation
+      // exists, so approved leave for this person is deducted from nothing —
+      // the state the auto-approved requests left their employees in.
+      return (
+        <span
+          title={t('leave.balance_missing_hint', 'Nessuna assegnazione di giorni per questo dipendente e anno: i permessi approvati non vengono scalati da alcun saldo.')}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+            color: '#b45309', fontSize: 12, fontWeight: 600, cursor: 'help',
+          }}
+        >
+          <span aria-hidden>⚠</span>
+          {t('leave.balance_missing', 'Nessun saldo configurato')}
+        </span>
+      );
     }
+    // A negative remainder means more approved days than allocated. It should
+    // never happen now, but it is exactly what the un-deducted auto-approvals
+    // produce once a balance is finally set, so it must be visible not hidden.
+    const over = b.remainingDays < 0;
     return (
       <span style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>
         <span style={{ fontWeight: 700, color: 'var(--text)' }}>{b.usedDays}</span>
         <span style={{ color: 'var(--text-muted)' }}> / {b.totalDays}</span>
-        <span style={{ color: '#16a34a', fontSize: 11, marginLeft: 4 }}>
+        <span
+          title={over ? t('leave.balance_over_hint', 'Giorni approvati superiori al saldo assegnato.') : undefined}
+          style={{ color: over ? '#dc2626' : '#16a34a', fontSize: 11, marginLeft: 4, fontWeight: over ? 700 : 400 }}
+        >
           ({b.remainingDays} {t('leave.balance_remaining_short').toLowerCase()})
         </span>
       </span>
@@ -559,6 +648,21 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
             </button>
           )}
         </div>
+
+        {/* Only worth showing when the account actually spans companies. */}
+        {companyOptions.length > 1 && (
+          <select
+            value={companyFilter}
+            onChange={(e) => setCompanyFilter(e.target.value)}
+            style={selectStyle}
+            aria-label={t('leave.filter_company', 'Azienda')}
+          >
+            <option value="">{t('leave.all_companies', 'Tutte le aziende')}</option>
+            {companyOptions.map((c) => (
+              <option key={c.id} value={String(c.id)}>{c.name}</option>
+            ))}
+          </select>
+        )}
 
         {loading && (
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('common.loading')}</span>
@@ -644,7 +748,7 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
                 </tr>
               </thead>
               <tbody>
-                {filteredEmployees.slice(0, 50).map((emp) => {
+                {visibleEmployees.map((emp) => {
                   const avatarUrl = getAvatarUrl(emp.avatarFilename ?? null);
                   const initials = initialsForPerson(emp.name, emp.surname);
                   const fallbackColor = avatarColorFromName(`${emp.name ?? ''} ${emp.surname ?? ''}`.trim() || String(emp.id));
@@ -709,6 +813,36 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
               </tbody>
             </table>
           </div>
+          {/* Row count + load more. The list used to stop dead at 50 with no
+              indication that anyone was missing. */}
+          {!loading && filteredEmployees.length > 0 && (
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              gap: 12, flexWrap: 'wrap', padding: '14px 20px',
+              borderTop: '1px solid var(--border)',
+            }}>
+              <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                {t('leave.balance_shown_count', {
+                  defaultValue: 'Mostrati {{shown}} di {{total}} dipendenti',
+                  shown: visibleEmployees.length,
+                  total: searchQuery.trim() ? filteredEmployees.length : (employeeTotal || filteredEmployees.length),
+                })}
+              </span>
+              {visibleCount < filteredEmployees.length && (
+                <button
+                  type="button"
+                  onClick={() => setVisibleCount((n) => n + BALANCE_PAGE_SIZE)}
+                  style={{
+                    padding: '8px 16px', borderRadius: 8, cursor: 'pointer',
+                    border: '1.5px solid var(--border)', background: 'var(--surface)',
+                    color: 'var(--text-primary)', fontSize: 13, fontWeight: 600,
+                  }}
+                >
+                  {t('leave.balance_load_more', 'Carica altri')}
+                </button>
+              )}
+            </div>
+          )}
           {!loading && employees.length === 0 && (
             <div style={{ padding: '56px 32px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: 14 }}>
               {t('leave.balance_no_data')}

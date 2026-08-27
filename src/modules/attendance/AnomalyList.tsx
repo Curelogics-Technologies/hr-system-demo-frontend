@@ -12,8 +12,8 @@ interface Anomaly {
   userAvatarFilename?: string | null;
   storeName: string;
   date: string;
-  anomalyType: 'late_arrival' | 'no_show' | 'long_break' | 'early_exit' | 'overtime' | 'missing_checkout' | 'missing_break';
-  severity: 'low' | 'medium' | 'high';
+  anomalyType: 'late_arrival' | 'no_show' | 'long_break' | 'early_exit' | 'overtime' | 'missing_checkout' | 'missing_break' | 'on_leave';
+  severity: 'low' | 'medium' | 'high' | 'info';
   details: string;
   detailsKey?: string;
   detailsParams?: Record<string, string | number>;
@@ -109,6 +109,9 @@ const ANOMALY_META: Record<string, { Icon: () => JSX.Element; color: string; bg:
   overtime:     { Icon: IconOvertime, color: '#c2410c', bg: 'rgba(194,65,12,0.08)',  border: 'rgba(194,65,12,0.20)' },
   missing_checkout: { Icon: IconLogOut, color: '#be123c', bg: 'rgba(190,18,60,0.08)', border: 'rgba(190,18,60,0.20)' },
   missing_break: { Icon: IconPause, color: '#b45309', bg: 'rgba(180,83,9,0.08)', border: 'rgba(180,83,9,0.20)' },
+  // Not an incident: the slot is empty because the leave was approved. Shown so
+  // the manager can see why, in a neutral colour that reads as context.
+  on_leave:     { Icon: IconUserX,   color: '#0369a1', bg: 'rgba(3,105,161,0.08)',   border: 'rgba(3,105,161,0.20)' },
 };
 
 const SOURCE_META: Record<string, { label: string; color: string; bg: string; border: string }> = {
@@ -121,6 +124,7 @@ const SEVERITY_META: Record<string, { color: string; bg: string; border: string;
   low:    { color: '#15803d', bg: 'rgba(21,128,61,0.08)',   border: 'rgba(21,128,61,0.20)',   dot: '#22c55e' },
   medium: { color: '#b45309', bg: 'rgba(180,83,9,0.08)',    border: 'rgba(180,83,9,0.20)',    dot: '#f59e0b' },
   high:   { color: '#dc2626', bg: 'rgba(220,38,38,0.08)',   border: 'rgba(220,38,38,0.20)',   dot: '#ef4444' },
+  info:   { color: '#0369a1', bg: 'rgba(3,105,161,0.08)',   border: 'rgba(3,105,161,0.20)',   dot: '#38bdf8' },
 };
 
 function getAvatarColor(name: string): string {
@@ -280,9 +284,11 @@ export default function AnomalyList({ dateFrom, dateTo, companyId, storeId, user
       {/* ── Summary tiles ──────────────────────────────────────────────────── */}
       <div style={{
         display: 'grid',
+        // Derived from ANOMALY_META rather than hardcoded: adding the
+        // `on_leave` tile made a fixed 7-column grid wrap awkwardly.
         gridTemplateColumns: isMobile
           ? 'repeat(2, minmax(0, 1fr))'
-          : 'repeat(7, minmax(0, 1fr))',
+          : `repeat(${Object.keys(ANOMALY_META).length}, minmax(0, 1fr))`,
         gap: isMobile ? 8 : 12,
         marginBottom: isMobile ? 16 : 24,
         padding: isMobile ? '0' : `0 ${pad}`,
@@ -925,6 +931,17 @@ export default function AnomalyList({ dateFrom, dateTo, companyId, storeId, user
                       <div>• <strong>{t('attendance.scheduled_shift', 'Turno Pianificato')}:</strong> {selectedAnomaly.detailsParams?.start} – {selectedAnomaly.detailsParams?.end}</div>
                       <div style={{ background: '#fef2f2', padding: '8px 12px', borderRadius: 8, border: '1px solid #fecaca', color: '#dc2626', fontWeight: 700 }}>
                         Nessun Check-in registrato dopo 10 minuti dall'inizio del turno.
+                      </div>
+                    </>
+                  )}
+                  {selectedAnomaly.anomalyType === 'on_leave' && (
+                    <>
+                      <div>• <strong>{t('attendance.scheduled_shift', 'Turno Pianificato')}:</strong> {selectedAnomaly.detailsParams?.start} – {selectedAnomaly.detailsParams?.end}</div>
+                      <div style={{ background: '#eff6ff', padding: '8px 12px', borderRadius: 8, border: '1px solid #bfdbfe', color: '#0369a1', fontWeight: 700 }}>
+                        {t('attendance.on_leave_explainer', 'Assenza giustificata da un permesso approvato. Non conteggiata come assenza ingiustificata né nel tasso di assenza.')}
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                        {t('attendance.on_leave_shift_hint', 'Il turno risulta ancora attivo: valuta di annullarlo per liberare la copertura del negozio.')}
                       </div>
                     </>
                   )}

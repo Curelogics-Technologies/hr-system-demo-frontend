@@ -85,6 +85,15 @@ interface ReportRow {
   sections: string[];
   runCount: number;
   lastGenerated: string | null;
+  /**
+   * Sections THIS report can actually render, from the server registry. The
+   * checkbox list used to come from the user's role, so it offered sections the
+   * generator had no branch for — they saved without complaint and produced an
+   * empty PDF. Optional so an older cached response still renders.
+   */
+  supportedSections?: string[];
+  /** False for the daily alert: it renders no period comparison. */
+  comparesPeriods?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -923,7 +932,13 @@ function ConfigModal({ report, ownerName, companyId, onClose, onSave }: {
   const [activeInfoSection, setActiveInfoSection] = useState<string | null>(null);
 
   const role: 'admin' | 'hr' = report.reportId.startsWith('admin') ? 'admin' : 'hr';
-  const available = SECTIONS_BY_ROLE[role];
+  // Offer only what this report can draw AND this role may see. Falling back to
+  // the role list keeps the dialog working against a server that predates
+  // supportedSections.
+  const roleSections = SECTIONS_BY_ROLE[role];
+  const available = report.supportedSections?.length
+    ? roleSections.filter(s => report.supportedSections!.includes(s))
+    : roleSections;
   const sortedAvailable = [...available].sort((a, b) => {
     const aSel = sections.has(a) ? 1 : 0;
     const bSel = sections.has(b) ? 1 : 0;
@@ -1136,10 +1151,17 @@ function ConfigModal({ report, ownerName, companyId, onClose, onSave }: {
             <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: 2 }}>
               {isIt ? 'Cosa includere' : 'What to include'}
             </label>
+            {/* The daily alert renders the chosen sections directly: it has no
+                executive summary, no exceptions page, no trends and no period
+                comparison. Saying otherwise promised output it never produced. */}
             <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '0 0 8px' }}>
-              {isIt
-                ? 'Sintesi, criticita e andamento sono sempre presenti. Scegli i dettagli da aggiungere.'
-                : 'Summary, exceptions and trends are always included. Choose the details to add.'}
+              {report.comparesPeriods === false
+                ? (isIt
+                    ? 'Avviso giornaliero: contiene solo le sezioni selezionate, senza sintesi direzionale né confronto con il periodo precedente.'
+                    : 'Daily alert: contains only the selected sections — no executive summary and no comparison with the previous period.')
+                : (isIt
+                    ? 'Sintesi, criticita e andamento sono sempre presenti. Scegli i dettagli da aggiungere.'
+                    : 'Summary, exceptions and trends are always included. Choose the details to add.')}
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {sortedAvailable.map(sec => {

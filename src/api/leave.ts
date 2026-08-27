@@ -48,7 +48,22 @@ export interface LeaveRequest {
   skippedApprovers?: string[];
   onLeaveSkippedApprovers?: string[];
   approvedByRoles?: string[] | null;
+  /**
+   * True once the request has been reassigned or chased by the inactivity job.
+   * It does NOT mean approved — the job never approves.
+   */
   escalated?: boolean;
+  /**
+   * The person who granted the leave. NULL on a request that reached an
+   * approved-looking status without a human decision, which is exactly the
+   * state the escalation defect produced. The badge keys off this rather than
+   * off the status string, so a request can never *look* approved unless
+   * somebody actually approved it.
+   */
+  approvedBy?: number | null;
+  approvedAt?: string | null;
+  /** Last time the inactivity job solicited the current approver. */
+  lastReminderAt?: string | null;
   isEmergencyOverride?: boolean;
   isArchived?: boolean;
   lastActionAt?: string | null;
@@ -180,6 +195,31 @@ export async function rejectLeaveRequest(id: number, notes: string): Promise<Lea
 export async function getLeaveBalance(params?: { userId?: number; year?: number }): Promise<BalanceResponse> {
   const { data } = await apiClient.get('/leave/balance', { params });
   return data.data as BalanceResponse;
+}
+
+export interface AllBalancesResponse {
+  year: number;
+  /** Keyed by user id. Employees with no allocation are simply absent. */
+  balances: Record<number, LeaveBalance[]>;
+}
+
+/**
+ * Every balance in scope in a single request.
+ *
+ * The admin panel previously issued one `/leave/balance` call per employee,
+ * which is why it capped itself at 50 people. This replaces the whole fan-out.
+ */
+export async function getAllLeaveBalances(params?: {
+  year?: number;
+  companyId?: number;
+  storeId?: number;
+}): Promise<AllBalancesResponse> {
+  const query: Record<string, number> = {};
+  if (params?.year != null) query.year = params.year;
+  if (params?.companyId != null) query.company_id = params.companyId;
+  if (params?.storeId != null) query.store_id = params.storeId;
+  const { data } = await apiClient.get('/leave/balances', { params: query });
+  return data.data as AllBalancesResponse;
 }
 
 export interface SetBalancePayload {
