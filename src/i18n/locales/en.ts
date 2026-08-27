@@ -2374,6 +2374,8 @@ const en = {
     balance_edit_btn: 'Edit',
     balance_no_data: 'No balances configured for this year.',
     balance_missing: 'No balance configured',
+    balance_exhausted_hint: 'No days remaining: no further leave can be approved until the balance is updated.',
+    balance_exhausted_employee: 'You have used all your available days. You cannot submit new requests until HR updates your balance.',
     balance_over_hint: 'Approved days exceed the allocated balance.',
     balance_missing_hint: 'No day allocation for this employee and year: approved leave is not deducted from any balance.',
     badge_cancelled: 'CANCELLED',

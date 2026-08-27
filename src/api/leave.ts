@@ -226,7 +226,12 @@ export interface SetBalancePayload {
   userId: number;
   year: number;
   leaveType: LeaveType;
-  totalDays: number;
+  /**
+   * `null` removes the allocation (admin only, refused once days are used);
+   * `0` is a real allocation of zero days, which displays as 0 and leaves the
+   * employee with nothing to spend.
+   */
+  totalDays: number | null;
 }
 
 /** Admin/HR sets the total_days allocation for an employee balance (upsert). */

@@ -38,6 +38,19 @@ function BalancePill({ balance }: { balance: LeaveBalance }) {
       <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
         {t('leave.balance_used_of', { used: balance.usedDays, total: balance.totalDays })}
       </div>
+      {/* Nothing left to spend. Said plainly here, because the employee would
+          otherwise only discover it when a new request is refused. */}
+      {balance.remainingDays <= 0 && (
+        <div style={{
+          display: 'flex', alignItems: 'flex-start', gap: 5, marginTop: 8,
+          padding: '6px 8px', borderRadius: 6,
+          background: 'rgba(180,83,9,0.10)', border: '1px solid rgba(180,83,9,0.22)',
+          fontSize: 11, fontWeight: 600, color: '#92400e', lineHeight: 1.4,
+        }}>
+          <span aria-hidden>⚠</span>
+          <span>{t('leave.balance_exhausted_employee')}</span>
+        </div>
+      )}
       {/* Progress bar */}
       <div style={{ marginTop: 8, height: 6, borderRadius: 3, background: 'rgba(0,0,0,0.06)' }}>
         <div

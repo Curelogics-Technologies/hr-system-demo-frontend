@@ -41,6 +41,7 @@ import { useBreakpoint } from '../../hooks/useBreakpoint';
 import { useToast } from '../../context/ToastContext';
 import { formatEmployeeName, matchesEmployeeName } from '../../utils/employeeName';
 import { leaveVisual } from './leaveStatus';
+import { SelectMenu } from '../../components/ui/SelectMenu';
 
 // ── Status badge ───────────────────────────────────────────────────────────
 
@@ -448,10 +449,25 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
 
   async function handleSave() {
     if (!editTarget) return;
-    const vacTotal = parseFloat(editTarget.vacationTotal);
-    const sickTotal = parseFloat(editTarget.sickTotal);
 
-    if (isNaN(vacTotal) || vacTotal < 0 || isNaN(sickTotal) || sickTotal < 0) {
+    /**
+     * An empty box means "remove this allocation"; a typed 0 means "allocated
+     * zero days". They are different intentions and the old code collapsed both
+     * into NaN, so emptying one field failed the whole save — including the
+     * other field, which had a perfectly good value in it.
+     */
+    const parseField = (raw: string): number | null | 'invalid' => {
+      const trimmed = (raw ?? '').trim();
+      if (trimmed === '') return null;          // clear
+      const n = parseFloat(trimmed);
+      if (Number.isNaN(n) || n < 0) return 'invalid';
+      return n;                                  // includes 0
+    };
+
+    const vacTotal = parseField(editTarget.vacationTotal);
+    const sickTotal = parseField(editTarget.sickTotal);
+
+    if (vacTotal === 'invalid' || sickTotal === 'invalid') {
       setEditError(t('leave.balance_set_error'));
       return;
     }
@@ -465,7 +481,7 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
     let newBalances: LeaveBalance[] = [...(balances[editTarget.userId] ?? [])];
     let hasError = false;
 
-    /** 0 clears the allocation, so the row is dropped rather than replaced. */
+    /** A clear drops the row; anything else replaces it. */
     const applyResult = (type: LeaveType, result: LeaveBalance | { cleared: true }) => {
       if ('cleared' in result) {
         newBalances = newBalances.filter((b) => b.leaveType !== type);
@@ -476,8 +492,17 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
       else newBalances.push(result);
     };
 
-    // Save vacation if changed
-    if (origVac === undefined || vacTotal !== origVac.totalDays) {
+    /**
+     * True when the box now says something different from what is stored.
+     * `null` (cleared) only counts as a change if an allocation existed — so
+     * leaving an already-empty box empty sends nothing.
+     */
+    const changed = (next: number | null, current: LeaveBalance | undefined) =>
+      next === null ? current !== undefined : current === undefined || next !== current.totalDays;
+
+    // Each field is saved independently, so a failure on one never discards a
+    // good value in the other.
+    if (changed(vacTotal, origVac)) {
       try {
         applyResult('vacation', await setLeaveBalance({
           userId: editTarget.userId,
@@ -491,8 +516,8 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
       }
     }
 
-    // Save sick if changed (even if vacation failed — attempt both)
-    if (origSick === undefined || sickTotal !== origSick.totalDays) {
+    // Attempted even if vacation failed, for the same reason.
+    if (changed(sickTotal, origSick)) {
       try {
         applyResult('sick', await setLeaveBalance({
           userId: editTarget.userId,
@@ -536,18 +561,32 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
         </span>
       );
     }
-    // A negative remainder means more approved days than allocated. It should
-    // never happen now, but it is exactly what the un-deducted auto-approvals
-    // produce once a balance is finally set, so it must be visible not hidden.
+    // Three states worth distinguishing:
+    //   over      more approved than allocated — should not happen now, but it
+    //             is what the old un-deducted approvals produce once a balance
+    //             is finally set, so it must be visible
+    //   exhausted nothing left; no further leave can be approved
+    //   normal    days remaining
     const over = b.remainingDays < 0;
+    const exhausted = !over && b.remainingDays === 0;
+    const remainingColor = over ? '#dc2626' : exhausted ? '#b45309' : '#16a34a';
     return (
       <span style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>
         <span style={{ fontWeight: 700, color: 'var(--text)' }}>{b.usedDays}</span>
         <span style={{ color: 'var(--text-muted)' }}> / {b.totalDays}</span>
         <span
-          title={over ? t('leave.balance_over_hint', 'Giorni approvati superiori al saldo assegnato.') : undefined}
-          style={{ color: over ? '#dc2626' : '#16a34a', fontSize: 11, marginLeft: 4, fontWeight: over ? 700 : 400 }}
+          title={
+            over ? t('leave.balance_over_hint')
+              : exhausted ? t('leave.balance_exhausted_hint')
+                : undefined
+          }
+          style={{
+            color: remainingColor, fontSize: 11, marginLeft: 4,
+            fontWeight: (over || exhausted) ? 700 : 400,
+            cursor: (over || exhausted) ? 'help' : undefined,
+          }}
         >
+          {(over || exhausted) && <span aria-hidden>⚠ </span>}
           ({b.remainingDays} {t('leave.balance_remaining_short').toLowerCase()})
         </span>
       </span>
@@ -560,15 +599,13 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <label style={{ ...labelStyle, marginBottom: 0 }}>{t('leave.balance_year')}</label>
-          <select
-            value={year}
-            onChange={(e) => setYear(Number(e.target.value))}
-            style={selectStyle}
-          >
-            {yearOptions.map((y) => (
-              <option key={y} value={y}>{y}</option>
-            ))}
-          </select>
+          <SelectMenu
+            minWidth={110}
+            ariaLabel={t('leave.balance_year')}
+            value={String(year)}
+            onChange={(v) => setYear(Number(v))}
+            options={yearOptions.map((y) => ({ value: String(y), label: String(y) }))}
+          />
         </div>
 
         {/* Search bar inside section at top */}
@@ -623,17 +660,16 @@ export function BalancesTab({ showFlash }: BalancesTabProps) {
 
         {/* Only worth showing when the account actually spans companies. */}
         {companyOptions.length > 1 && (
-          <select
+          <SelectMenu
+            minWidth={200}
+            ariaLabel={t('leave.filter_company', 'Azienda')}
             value={companyFilter}
-            onChange={(e) => setCompanyFilter(e.target.value)}
-            style={selectStyle}
-            aria-label={t('leave.filter_company', 'Azienda')}
-          >
-            <option value="">{t('leave.all_companies', 'Tutte le aziende')}</option>
-            {companyOptions.map((c) => (
-              <option key={c.id} value={String(c.id)}>{c.name}</option>
-            ))}
-          </select>
+            onChange={setCompanyFilter}
+            options={[
+              { value: '', label: t('leave.all_companies', 'Tutte le aziende') },
+              ...companyOptions.map((c) => ({ value: String(c.id), label: c.name })),
+            ]}
+          />
         )}
 
         {loading && (

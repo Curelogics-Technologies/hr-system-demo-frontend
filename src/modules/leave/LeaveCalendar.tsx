@@ -12,6 +12,7 @@ import { translateApiError } from '../../utils/apiErrors';
 import { useBreakpoint } from '../../hooks/useBreakpoint';
 import { listShifts, Shift } from '../../api/shifts';
 import { CalendarPopover, rectOf } from './CalendarPopover';
+import { SelectMenu } from '../../components/ui/SelectMenu';
 import { leaveVisual, LEAVE_TYPE_TINT } from './leaveStatus';
 
 // ---------------------------------------------------------------------------
@@ -339,15 +340,16 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
       border: '1px solid var(--border)',
       boxShadow: 'var(--shadow-sm)',
     }}>
-      {/* Navigation — dark banner matching the shifts and ATS calendars, so the
-          three month views read as one product rather than three screens. */}
+      {/* Navigation — flat navy, no gradient. A gradient behind a row of small
+          controls muddies their edges; a single solid tone keeps them crisp. */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18,
         flexWrap: 'wrap',
         padding: (isMobile || isTablet) ? '10px 12px' : '14px 18px',
         borderRadius: 14,
-        background: 'linear-gradient(135deg, #1E4A7A, #0D2137)',
-        boxShadow: '0 8px 24px rgba(13,33,55,0.22)',
+        background: '#12395F',
+        border: '1px solid rgba(255,255,255,0.07)',
+        boxShadow: '0 4px 14px rgba(13,33,55,0.16)',
       }}>
         <div style={{
           display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0,
@@ -419,44 +421,26 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
             }}>
               {t('employees.store_label', 'Store')}
             </span>
-            <select
-              value={selectedStoreId}
+            {/* Custom menu rather than a native select: the OS popup ignores
+                our styling entirely and rendered an unreadable plain list. The
+                company name becomes a secondary hint instead of being crammed
+                into the label in brackets. */}
+            <SelectMenu
+              tone="dark"
+              minWidth={190}
               disabled={fetchingStores}
-              onChange={(e) => {
-                const val = e.target.value;
-                setSelectedStoreId(val === 'all' ? 'all' : parseInt(val, 10));
-              }}
-              style={{
-                padding: '7px 30px 7px 12px',
-                borderRadius: 10,
-                border: '1px solid rgba(255,255,255,0.20)',
-                background: 'rgba(255,255,255,0.12)',
-                fontSize: 12.5,
-                fontWeight: 600,
-                color: '#fff',
-                cursor: fetchingStores ? 'wait' : 'pointer',
-                outline: 'none',
-                minWidth: 170,
-                // Native arrow is invisible on a dark field; draw our own.
-                appearance: 'none',
-                backgroundImage:
-                  "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>\")",
-                backgroundRepeat: 'no-repeat',
-                backgroundPosition: 'right 10px center',
-              }}
-            >
-              {/* Explicit colours: options inherit the dark field in some
-                  browsers and the OS default in others, which renders white
-                  text on white. */}
-              <option value="all" style={{ background: '#0D2137', color: '#fff' }}>
-                {t('common.all_stores', 'All Stores')}
-              </option>
-              {stores.map(s => (
-                <option key={s.id} value={s.id} style={{ background: '#0D2137', color: '#fff' }}>
-                  {s.name} {s.groupName ? `(${s.groupName})` : (s.companyName ? `(${s.companyName})` : '')}
-                </option>
-              ))}
-            </select>
+              ariaLabel={t('employees.store_label', 'Store')}
+              value={String(selectedStoreId)}
+              onChange={(val) => setSelectedStoreId(val === 'all' ? 'all' : parseInt(val, 10))}
+              options={[
+                { value: 'all', label: t('common.all_stores', 'All Stores') },
+                ...stores.map(s => ({
+                  value: String(s.id),
+                  label: s.name,
+                  hint: s.groupName ?? s.companyName ?? undefined,
+                })),
+              ]}
+            />
           </div>
         )}
       </div>
@@ -486,10 +470,11 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
       )}
 
       {!loading && (
-        <div style={{ padding: 0, overflowX: (isMobile || isTablet) ? 'visible' : 'auto' }}>
-          {/* minWidth matches the shifts calendar: without it the seven columns
-              squeeze until the entry chips wrap and the grid looks broken. */}
-          <div style={{ minWidth: (isMobile || isTablet) ? 'auto' : 1120, width: '100%' }}>
+        <div style={{ padding: 0, overflowX: 'visible' }}>
+          {/* No min-width and no horizontal scroll: the grid fits whatever
+              width it is given. Entry chips shrink and ellipsise instead, so
+              the month is always readable in one view. */}
+          <div style={{ width: '100%' }}>
             {/* Day headers */}
             {!isMobile && !isTablet && (
               <div style={{

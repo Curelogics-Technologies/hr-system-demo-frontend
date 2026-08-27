@@ -2370,6 +2370,8 @@ const it = {
     balance_edit_btn: 'Modifica',
     balance_no_data: 'Nessun saldo configurato per questo anno.',
     balance_missing: 'Nessun saldo configurato',
+    balance_exhausted_hint: 'Nessun giorno residuo: non è possibile approvare altri permessi finché il saldo non viene aggiornato.',
+    balance_exhausted_employee: 'Hai esaurito i giorni disponibili. Non puoi inviare nuove richieste finché le Risorse Umane non aggiornano il tuo saldo.',
     balance_over_hint: 'Giorni approvati superiori al saldo assegnato.',
     balance_missing_hint: 'Nessuna assegnazione di giorni per questo dipendente e anno: i permessi approvati non vengono scalati da alcun saldo.',
     badge_cancelled: 'ANNULLATA',
