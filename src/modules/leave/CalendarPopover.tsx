@@ -23,9 +23,23 @@ interface Props {
   children: React.ReactNode;
   /** Pointer-transparent by default; set when the card has its own controls. */
   interactive?: boolean;
+  /**
+   * Because the card is portalled, moving the pointer from the cell into the
+   * card fires the cell's mouseleave. An interactive card therefore has to tell
+   * its owner "the pointer is still with me" so the card is not closed as the
+   * user reaches for it.
+   */
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
 }
 
-export function CalendarPopover({ anchor, children, interactive = false }: Props) {
+export function CalendarPopover({
+  anchor,
+  children,
+  interactive = false,
+  onMouseEnter,
+  onMouseLeave,
+}: Props) {
   const cardRef = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
 
@@ -57,6 +71,8 @@ export function CalendarPopover({ anchor, children, interactive = false }: Props
     <div
       ref={cardRef}
       role="tooltip"
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
       style={{
         position: 'fixed',
         top: pos?.top ?? -9999,

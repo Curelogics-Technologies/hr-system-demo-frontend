@@ -96,6 +96,41 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
   const [blockAnchor, setBlockAnchor] = useState<DOMRect | null>(null);
   const [dayAnchor, setDayAnchor] = useState<DOMRect | null>(null);
 
+  /**
+   * Closing the day card is deferred by a beat, because the card is portalled:
+   * the moment the pointer leaves the cell on its way to the card, the cell's
+   * mouseleave fires. The delay gives the card a chance to say "I have it".
+   */
+  const dayCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelDayClose = useCallback(() => {
+    if (dayCloseTimer.current) {
+      clearTimeout(dayCloseTimer.current);
+      dayCloseTimer.current = null;
+    }
+  }, []);
+
+  const closeDayCard = useCallback(() => {
+    cancelDayClose();
+    dayCloseTimer.current = setTimeout(() => {
+      setHoveredDay(null);
+      setDayAnchor(null);
+    }, 140);
+  }, [cancelDayClose]);
+
+  // A pending close must not fire after the component is gone.
+  useEffect(() => cancelDayClose, [cancelDayClose]);
+
+  // Opening a request from inside the day card should dismiss the card, or it
+  // floats above the modal that replaced it.
+  useEffect(() => {
+    if (!selectedRequest) return;
+    cancelDayClose();
+    setHoveredDay(null);
+    setDayAnchor(null);
+    setHoveredBlockKey(null);
+  }, [selectedRequest, cancelDayClose]);
+
   const [shiftsForTarget, setShiftsForTarget] = useState<Shift[]>([]);
   const [shiftsLoading, setShiftsLoading] = useState(false);
   const [cancelShiftsChecked, setCancelShiftsChecked] = useState(true);
@@ -404,9 +439,8 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
           onClick={goToday}
           style={{
             fontSize: 12, fontWeight: 700, padding: '8px 16px', borderRadius: 10,
-            background: 'linear-gradient(135deg, var(--accent), #b8862f)',
+            background: 'var(--accent)',
             color: '#fff', border: 'none', cursor: 'pointer',
-            boxShadow: '0 2px 10px rgba(201,151,58,0.34)',
             whiteSpace: 'nowrap',
           }}
         >
@@ -427,7 +461,9 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
                 into the label in brackets. */}
             <SelectMenu
               tone="dark"
-              minWidth={190}
+              // Store names carry a company suffix, so a narrow control forced
+              // the list to truncate exactly the part that distinguishes them.
+              minWidth={300}
               disabled={fetchingStores}
               ariaLabel={t('employees.store_label', 'Store')}
               value={String(selectedStoreId)}
@@ -530,10 +566,10 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
                     border: isToday ? '2px solid var(--accent)' : '1px solid var(--border)',
                     padding: 8,
                     cursor: 'pointer',
-                    // Weekends sit back a shade so the working week stands out,
-                    // the same cue the shifts calendar uses.
+                    // Flat fills. Weekends sit back a shade so the working week
+                    // stands out, the same cue the shifts calendar uses.
                     background: isToday
-                      ? 'linear-gradient(160deg, rgba(201,151,58,0.10), rgba(201,151,58,0.03))'
+                      ? 'rgba(201,151,58,0.07)'
                       : isWeekend
                         ? 'var(--surface-warm)'
                         : 'var(--surface)',
@@ -545,13 +581,11 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
                       : hasLeaves ? 'var(--shadow-xs)' : undefined,
                   }}
                   onMouseEnter={(e) => {
+                    cancelDayClose();
                     setHoveredDay(dateStr);
                     setDayAnchor(rectOf(e));
                   }}
-                  onMouseLeave={() => {
-                    setHoveredDay(null);
-                    setDayAnchor(null);
-                  }}
+                  onMouseLeave={closeDayCard}
                   onClick={(e) => {
                     // Only open day click if we didn't click a specific leave item
                     if (e.target === e.currentTarget && onDayClick) {
@@ -614,10 +648,12 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
                           && visual.state !== 'cancelled' && visual.state !== 'rejected';
 
                         const color = needsAttention ? visual.color : tint.color;
-                        // Settled entries read solid; open ones stay washed out.
+                        // Flat fills, no gradients: at chip size a gradient just
+                        // reads as a smudge. Open entries sit lighter than
+                        // settled ones, which carries the same information.
                         const bg = needsAttention
-                          ? `linear-gradient(135deg, ${visual.fill}, rgba(255,255,255,0.65))`
-                          : `linear-gradient(135deg, ${tint.fill}, rgba(255,255,255,${isPending ? 0.72 : 0.4}))`;
+                          ? visual.fill
+                          : (isPending ? `${tint.rail}14` : `${tint.rail}24`);
                         const borderLeft = needsAttention ? visual.rail : tint.rail;
                         const border = needsAttention ? visual.border : `${tint.rail}2e`;
                         const Icon = isVacation ? Palmtree : Thermometer;
@@ -728,8 +764,45 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
                           </div>
                         );
                       })}
+                      {/* A chip like the others, not loose text: it is the
+                          control that reveals the rest of the day, so it has to
+                          look like something you can act on. Hovering it opens
+                          the full day list, where each row can be hovered for
+                          detail or clicked to open the request. */}
                       {dayReqs.length > MAX_VISIBLE && (
-                        <div style={{ fontSize: '0.55rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                        <div
+                          onMouseEnter={(e) => {
+                            e.stopPropagation();
+                            setHoveredBlockKey(null);   // let the day card win
+                            setHoveredDay(dateStr);
+                            setDayAnchor(rectOf(e));
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setHoveredDay(dateStr);
+                            setDayAnchor(rectOf(e));
+                          }}
+                          style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                            borderRadius: 4,
+                            border: '1px dashed var(--border)',
+                            background: 'var(--surface-warm)',
+                            color: 'var(--text-secondary)',
+                            padding: '3px 7px',
+                            fontSize: '0.62rem',
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                            transition: 'background 0.12s, color 0.12s',
+                          }}
+                          onMouseOver={(e) => {
+                            e.currentTarget.style.background = 'var(--surface)';
+                            e.currentTarget.style.color = 'var(--primary)';
+                          }}
+                          onMouseOut={(e) => {
+                            e.currentTarget.style.background = 'var(--surface-warm)';
+                            e.currentTarget.style.color = 'var(--text-secondary)';
+                          }}
+                        >
                           +{dayReqs.length - MAX_VISIBLE} {t('common.more', 'more')}
                         </div>
                       )}
@@ -745,7 +818,14 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
                       mouseenter bubbles up to the day cell, so without this
                       both the day summary and the entry card opened together. */}
                   {isHovered && hasLeaves && !hoveredBlockKey && (
-                    <CalendarPopover anchor={dayAnchor}>
+                    <CalendarPopover
+                      anchor={dayAnchor}
+                      // Interactive: the rows inside are the way into a request
+                      // when the day has more entries than the cell can show.
+                      interactive
+                      onMouseEnter={cancelDayClose}
+                      onMouseLeave={closeDayCard}
+                    >
                       {(() => {
                         const vacations = dayReqs.filter(r => r.leaveType === 'vacation');
                         const sickLeaves = dayReqs.filter(r => r.leaveType === 'sick');
