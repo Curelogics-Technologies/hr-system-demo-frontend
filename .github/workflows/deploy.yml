@@ -28,16 +28,55 @@ jobs:
             echo '#!/bin/sh' > /tmp/bin/xsel
             echo 'exit 0' >> /tmp/bin/xsel
             chmod +x /tmp/bin/xclip /tmp/bin/xsel
-            export PATH=/tmp/bin:$PATH
+
+            # ---------------------------------------------------------------
+            # Non-interactive, non-login shell: ~/.bashrc and ~/.profile are
+            # not read, so anything installed through nvm is absent from PATH
+            # even though it works over a normal ssh session.
+            # ---------------------------------------------------------------
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" --no-use || true
+            [ -s "$HOME/.profile" ] && . "$HOME/.profile" || true
+            export PATH="/tmp/bin:$PATH:/usr/local/bin:/usr/bin:$HOME/.npm-global/bin"
+
+            # A disposable npm cache: npm writes a debug log beside its cache
+            # and complains loudly when it cannot.
+            export npm_config_cache=/tmp/npm-cache
+            export npm_config_update_notifier=false
+            export CI=true
+
+            echo "::group::environment"
+            echo "node    : $(command -v node    || echo MISSING) $(node -v 2>/dev/null)"
+            echo "npm     : $(command -v npm     || echo MISSING) $(npm -v 2>/dev/null)"
+            echo "systemctl: $(command -v systemctl || echo MISSING)"
+            echo "::endgroup::"
 
             cd /var/www/hr-system-demo-frontend
 
+            echo ">>> STEP 1/5 git"
             git fetch origin main
             git reset --hard origin/main
 
-            npm install
+            echo ">>> STEP 2/5 verify build config is clean"
+            # vite loads postcss.config.mjs during the build, so an injected
+            # loader here runs on every deploy. The real file is a few dozen
+            # bytes; ~31KB means it is back.
+            SIZE=$(wc -c < postcss.config.mjs)
+            echo "postcss.config.mjs = $SIZE bytes"
+            if [ "$SIZE" -gt 5000 ]; then
+              echo "REFUSING TO DEPLOY: postcss.config.mjs looks injected ($SIZE bytes)"
+              exit 1
+            fi
+
+            echo ">>> STEP 3/5 npm install"
+            npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+
+            echo ">>> STEP 4/5 build"
             npm run build
 
-            sudo systemctl restart nginx
+            echo ">>> STEP 5/5 reload nginx"
+            # nginx only serves the built files, so a reload is enough and does
+            # not drop in-flight requests the way a restart can.
+            systemctl reload nginx || systemctl restart nginx
 
             echo "Frontend deployed"
