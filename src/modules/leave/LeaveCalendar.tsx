@@ -11,6 +11,8 @@ import { StatusBadge, ApprovalStepper } from './LeaveApprovalList';
 import { translateApiError } from '../../utils/apiErrors';
 import { useBreakpoint } from '../../hooks/useBreakpoint';
 import { listShifts, Shift } from '../../api/shifts';
+import { CalendarPopover, rectOf } from './CalendarPopover';
+import { leaveVisual, LEAVE_TYPE_TINT } from './leaveStatus';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -85,6 +87,13 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
   const [rejectNotes, setRejectNotes] = useState('');
   const [rejectError, setRejectError] = useState<string | null>(null);
   const [hoveredBlockKey, setHoveredBlockKey] = useState<string | null>(null);
+  /**
+   * Anchor rects for the floating cards. Held here rather than derived at
+   * render time because the cards are portalled out of the scroll container —
+   * see CalendarPopover for why that matters.
+   */
+  const [blockAnchor, setBlockAnchor] = useState<DOMRect | null>(null);
+  const [dayAnchor, setDayAnchor] = useState<DOMRect | null>(null);
 
   const [shiftsForTarget, setShiftsForTarget] = useState<Shift[]>([]);
   const [shiftsLoading, setShiftsLoading] = useState(false);
@@ -330,62 +339,85 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
       border: '1px solid var(--border)',
       boxShadow: 'var(--shadow-sm)',
     }}>
-      {/* Navigation */}
+      {/* Navigation — dark banner matching the shifts and ATS calendars, so the
+          three month views read as one product rather than three screens. */}
       <div style={{
-        display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20,
+        display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18,
         flexWrap: 'wrap',
+        padding: (isMobile || isTablet) ? '10px 12px' : '14px 18px',
+        borderRadius: 14,
+        background: 'linear-gradient(135deg, #1E4A7A, #0D2137)',
+        boxShadow: '0 8px 24px rgba(13,33,55,0.22)',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0,
+          background: 'rgba(255,255,255,0.10)', borderRadius: 10, padding: 3,
+          border: '1px solid rgba(255,255,255,0.14)',
+        }}>
           <button
             onClick={prevMonth}
+            aria-label={t('common.previous', 'Previous')}
             style={{
-              padding: '6px 8px', color: 'var(--text-primary)', borderRadius: 6,
-              background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center'
+              padding: '6px 8px', color: '#fff', borderRadius: 8,
+              background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center',
             }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.16)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
           >
             <ChevronLeft size={18} />
           </button>
           <div style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center',
-            minWidth: 130, textAlign: 'center', userSelect: 'none', padding: '0 4px',
+            minWidth: 118, textAlign: 'center', userSelect: 'none', padding: '0 4px',
           }}>
             <span style={{
-              fontFamily: 'var(--font-display)', fontWeight: 700,
-              fontSize: 14, color: 'var(--primary)', lineHeight: 1.1,
-              textTransform: 'capitalize', whiteSpace: 'nowrap',
+              fontFamily: 'var(--font-display)', fontWeight: 800,
+              fontSize: 15, color: '#fff', lineHeight: 1.1,
+              textTransform: 'capitalize', whiteSpace: 'nowrap', letterSpacing: '-0.01em',
             }}>
               {monthLabel.split(' ')[0]}
             </span>
             <span style={{
-              fontSize: 10, color: 'var(--text-muted)', marginTop: 2,
-              fontWeight: 500, whiteSpace: 'nowrap',
+              fontSize: 10, color: 'rgba(255,255,255,0.62)', marginTop: 2,
+              fontWeight: 600, whiteSpace: 'nowrap', letterSpacing: '0.06em',
             }}>
               {monthLabel.split(' ')[1] || new Date().getFullYear()}
             </span>
           </div>
           <button
             onClick={nextMonth}
+            aria-label={t('common.next', 'Next')}
             style={{
-              padding: '6px 8px', color: 'var(--text-primary)', borderRadius: 6,
-              background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center'
+              padding: '6px 8px', color: '#fff', borderRadius: 8,
+              background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center',
             }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.16)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
           >
             <ChevronRight size={18} />
           </button>
         </div>
 
-        {!isMobile && <div style={{ width: 1, height: 20, background: 'var(--border)', flexShrink: 0, margin: '0 12px' }} />}
-
-        <button onClick={goToday} style={{
-          ...navBtnStyle, fontSize: 12, padding: '6px 14px', borderRadius: 8,
-        }}>
+        <button
+          onClick={goToday}
+          style={{
+            fontSize: 12, fontWeight: 700, padding: '8px 16px', borderRadius: 10,
+            background: 'linear-gradient(135deg, var(--accent), #b8862f)',
+            color: '#fff', border: 'none', cursor: 'pointer',
+            boxShadow: '0 2px 10px rgba(201,151,58,0.34)',
+            whiteSpace: 'nowrap',
+          }}
+        >
           {t('common.today', 'Today')}
         </button>
 
         {canFilterByStore && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 12 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-              {t('employees.store_label', 'Store')}:
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
+            <span style={{
+              fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.62)',
+              whiteSpace: 'nowrap', textTransform: 'uppercase', letterSpacing: '0.07em',
+            }}>
+              {t('employees.store_label', 'Store')}
             </span>
             <select
               value={selectedStoreId}
@@ -395,34 +427,51 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
                 setSelectedStoreId(val === 'all' ? 'all' : parseInt(val, 10));
               }}
               style={{
-                padding: '6px 12px',
-                borderRadius: 8,
-                border: '1px solid var(--border)',
-                background: 'var(--surface)',
-                fontSize: 13,
+                padding: '7px 30px 7px 12px',
+                borderRadius: 10,
+                border: '1px solid rgba(255,255,255,0.20)',
+                background: 'rgba(255,255,255,0.12)',
+                fontSize: 12.5,
                 fontWeight: 600,
-                color: 'var(--text)',
-                cursor: 'pointer',
+                color: '#fff',
+                cursor: fetchingStores ? 'wait' : 'pointer',
                 outline: 'none',
-                minWidth: 180,
-                boxShadow: 'var(--shadow-xs)'
+                minWidth: 170,
+                // Native arrow is invisible on a dark field; draw our own.
+                appearance: 'none',
+                backgroundImage:
+                  "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>\")",
+                backgroundRepeat: 'no-repeat',
+                backgroundPosition: 'right 10px center',
               }}
             >
-              <option value="all">{t('common.all_stores', 'All Stores')}</option>
+              {/* Explicit colours: options inherit the dark field in some
+                  browsers and the OS default in others, which renders white
+                  text on white. */}
+              <option value="all" style={{ background: '#0D2137', color: '#fff' }}>
+                {t('common.all_stores', 'All Stores')}
+              </option>
               {stores.map(s => (
-                <option key={s.id} value={s.id}>
+                <option key={s.id} value={s.id} style={{ background: '#0D2137', color: '#fff' }}>
                   {s.name} {s.groupName ? `(${s.groupName})` : (s.companyName ? `(${s.companyName})` : '')}
                 </option>
               ))}
             </select>
           </div>
         )}
+      </div>
 
-        {/* Legend */}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-          <LegendDot color="#3b82f6" label={t('leave.type_vacation')} icon={<Palmtree size={12} />} />
-          <LegendDot color="#ef4444" label={t('leave.type_sick')} icon={<Thermometer size={12} />} />
-        </div>
+      {/* Legend — outside the dark banner so it stays readable, and now covers
+          the states as well as the types, since the chips encode both. */}
+      <div style={{
+        display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap',
+        marginBottom: 14, paddingLeft: 2,
+      }}>
+        <LegendDot color={LEAVE_TYPE_TINT.vacation.rail} label={t('leave.type_vacation')} icon={<Palmtree size={12} color={LEAVE_TYPE_TINT.vacation.rail} />} />
+        <LegendDot color={LEAVE_TYPE_TINT.sick.rail} label={t('leave.type_sick')} icon={<Thermometer size={12} color={LEAVE_TYPE_TINT.sick.rail} />} />
+        <span style={{ width: 1, height: 14, background: 'var(--border)' }} />
+        <LegendDot color="#d97706" label={t('leave.badge_escalated', 'Sollecitata')} />
+        <LegendDot color="#dc2626" label={t('leave.badge_unverified', 'Da verificare')} />
       </div>
 
       {loading && (
@@ -485,11 +534,13 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
                     position: 'relative',
                     boxShadow: hasLeaves ? 'var(--shadow-xs)' : undefined,
                   }}
-                  onMouseEnter={() => {
+                  onMouseEnter={(e) => {
                     setHoveredDay(dateStr);
+                    setDayAnchor(rectOf(e));
                   }}
                   onMouseLeave={() => {
                     setHoveredDay(null);
+                    setDayAnchor(null);
                   }}
                   onClick={(e) => {
                     // Only open day click if we didn't click a specific leave item
@@ -542,18 +593,23 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                       {dayReqs.slice(0, MAX_VISIBLE).map((req) => {
                         const isVacation = req.leaveType === 'vacation';
-                        const normStatus = (req.status ?? '').toLowerCase().replace(/ /g, '_');
-                        const isApproved = normStatus === 'approved' || normStatus === 'admin_approved' || normStatus === 'hr_approved';
-                        const isPending = !isApproved && normStatus !== 'cancelled' && !normStatus.includes('rejected');
+                        // Type sets the hue, state sets the treatment — so a
+                        // reader can tell vacation from sick AND settled from
+                        // still-open at a glance, which one colour cannot do.
+                        const tint = LEAVE_TYPE_TINT[isVacation ? 'vacation' : 'sick'];
+                        const visual = leaveVisual(req);
+                        const isApproved = visual.state === 'approved';
+                        const needsAttention = visual.state === 'unverified' || visual.state === 'escalated';
+                        const isPending = !isApproved && !needsAttention
+                          && visual.state !== 'cancelled' && visual.state !== 'rejected';
 
-                        const color = isVacation ? '#1e40af' : '#9a3412';
-                        const bg = isVacation
-                          ? (isPending ? 'rgba(219,234,254,0.5)' : 'rgba(219,234,254,0.8)')
-                          : (isPending ? 'rgba(255,237,213,0.5)' : 'rgba(255,237,213,0.8)');
-                        const borderLeft = isVacation
-                          ? (isPending ? 'rgba(37,99,235,0.45)' : '#2563eb')
-                          : (isPending ? 'rgba(234,88,12,0.45)' : '#ea580c');
-                        const border = isVacation ? 'rgba(37,99,235,0.18)' : 'rgba(234,88,12,0.18)';
+                        const color = needsAttention ? visual.color : tint.color;
+                        // Settled entries read solid; open ones stay washed out.
+                        const bg = needsAttention
+                          ? `linear-gradient(135deg, ${visual.fill}, rgba(255,255,255,0.65))`
+                          : `linear-gradient(135deg, ${tint.fill}, rgba(255,255,255,${isPending ? 0.72 : 0.4}))`;
+                        const borderLeft = needsAttention ? visual.rail : tint.rail;
+                        const border = needsAttention ? visual.border : `${tint.rail}2e`;
                         const Icon = isVacation ? Palmtree : Thermometer;
 
                         return (
@@ -585,10 +641,12 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
                             onMouseEnter={(e) => {
                               e.currentTarget.style.transform = 'scale(1.02)';
                               setHoveredBlockKey(`${req.id}-${dateStr}`);
+                              setBlockAnchor(rectOf(e));
                             }}
                             onMouseLeave={(e) => {
                               e.currentTarget.style.transform = 'scale(1)';
                               setHoveredBlockKey(null);
+                              setBlockAnchor(null);
                             }}
                           >
                             <Icon size={11} strokeWidth={2.5} style={{ flexShrink: 0 }} />
@@ -610,50 +668,52 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
                             </div>
 
                             {hoveredBlockKey === `${req.id}-${dateStr}` && (
-                              <div style={{
-                                position: 'absolute',
-                                top: 'calc(100% + 4px)',
-                                left: 0,
-                                zIndex: 110,
-                                minWidth: 200,
-                                padding: 10,
-                                background: 'var(--surface)',
-                                border: '1px solid var(--border)',
-                                borderRadius: 8,
-                                boxShadow: '0 10px 25px rgba(0,0,0,0.15)',
-                                color: 'var(--text)',
-                                textAlign: 'left',
-                                textTransform: 'none',
-                                letterSpacing: 'normal',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                gap: 4,
-                                pointerEvents: 'none',
-                              }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 11 }}>
-                                  {req.userName} {req.userSurname}
+                              <CalendarPopover anchor={blockAnchor}>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                                    {renderAvatar(req, 24)}
+                                    <div style={{ minWidth: 0 }}>
+                                      <div style={{ fontWeight: 800, fontSize: 12, lineHeight: 1.25 }}>
+                                        {req.userName} {req.userSurname}
+                                      </div>
+                                      <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
+                                        {req.storeName ?? t('employees.noStore', 'No store')}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div style={{ height: 1, background: 'var(--border)', margin: '2px 0' }} />
+
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
+                                    <Icon size={12} strokeWidth={2.5} style={{ color: tint.rail }} />
+                                    <span style={{ fontWeight: 700, color: tint.color }}>
+                                      {isVacation ? t('leave.type_vacation', 'Vacation') : t('leave.type_sick', 'Sick leave')}
+                                    </span>
+                                  </div>
+
+                                  <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                                    {req.leaveDurationType === 'short_leave'
+                                      ? `${new Date(req.startDate).toLocaleDateString(locale === 'it' ? 'it-IT' : 'en-GB')} · ${req.shortStartTime ?? '--:--'} – ${req.shortEndTime ?? '--:--'}`
+                                      : `${new Date(req.startDate).toLocaleDateString(locale === 'it' ? 'it-IT' : 'en-GB')} → ${new Date(req.endDate).toLocaleDateString(locale === 'it' ? 'it-IT' : 'en-GB')}`}
+                                  </div>
+
+                                  {/* Same state vocabulary as the list badge — an
+                                      auto-approved request reads DA VERIFICARE here too. */}
+                                  <span
+                                    title={visual.hintKey ? t(`leave.${visual.hintKey}`) : undefined}
+                                    style={{
+                                      marginTop: 2, alignSelf: 'flex-start',
+                                      fontSize: 9.5, fontWeight: 800, letterSpacing: '0.04em',
+                                      padding: '3px 8px', borderRadius: 20,
+                                      background: visual.fill,
+                                      color: visual.color,
+                                      border: `1px solid ${visual.border}`,
+                                    }}
+                                  >
+                                    {t(`leave.${visual.labelKey}`)}
+                                  </span>
                                 </div>
-                                <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
-                                  {req.storeName ?? t('employees.noStore', 'No store')}
-                                </div>
-                                <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
-                                  {req.leaveDurationType === 'short_leave'
-                                    ? `${new Date(req.startDate).toLocaleDateString(locale === 'it' ? 'it-IT' : 'en-GB')} · ${req.shortStartTime ?? '--:--'} - ${req.shortEndTime ?? '--:--'}`
-                                    : `${new Date(req.startDate).toLocaleDateString(locale === 'it' ? 'it-IT' : 'en-GB')} → ${new Date(req.endDate).toLocaleDateString(locale === 'it' ? 'it-IT' : 'en-GB')}`}
-                                </div>
-                                <div style={{ 
-                                  marginTop: 4,
-                                  fontSize: 9, 
-                                  fontWeight: 800, 
-                                  alignSelf: 'flex-start',
-                                  padding: '2px 6px',
-                                  borderRadius: 4,
-                                  background: isApproved ? 'rgba(22,163,74,0.1)' : 'rgba(245,158,11,0.1)',
-                                  color: isApproved ? '#16a34a' : '#d97706'
-                                }}>
-                                  {req.status}
-                                </div>
-                              </div>
+                              </CalendarPopover>
                             )}
                           </div>
                         );
@@ -667,14 +727,12 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
                   )}
 
                   {/* Hover tooltip for full list */}
+                  {/* Portalled: an absolutely-positioned card here used to push
+                      the scroll container and shift the grid under the pointer.
+                      CalendarPopover also handles the flip-up / edge cases that
+                      the manual top/bottom/left/right juggling approximated. */}
                   {isHovered && hasLeaves && (
-                    <div style={{ 
-                      ...summaryHoverCardStyle, 
-                      top: idx >= cells.length - 7 ? 'auto' : 'calc(100% + 4px)',
-                      bottom: idx >= cells.length - 7 ? 'calc(100% + 4px)' : 'auto',
-                      right: (idx % 7 > 3) ? 0 : 'auto', 
-                      left: (idx % 7 > 3) ? 'auto' : 0 
-                    }}>
+                    <CalendarPopover anchor={dayAnchor}>
                       {(() => {
                         const vacations = dayReqs.filter(r => r.leaveType === 'vacation');
                         const sickLeaves = dayReqs.filter(r => r.leaveType === 'sick');
@@ -809,7 +867,7 @@ export default function LeaveCalendar({ onDayClick, onRefresh }: { onDayClick?: 
                           </>
                         );
                       })()}
-                    </div>
+                    </CalendarPopover>
                   )}
                 </div>
               );

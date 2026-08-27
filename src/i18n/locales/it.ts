@@ -1227,6 +1227,7 @@ const it = {
     DEFAULT: 'Si è verificato un errore. Riprova.',
     // Shifts
     OVERLAP_CONFLICT: 'Conflitto turni: gli orari si sovrappongono con un turno esistente.',
+    BALANCE_NOT_CONFIGURED: 'Saldo ferie non configurato per questo dipendente. Configura prima i giorni disponibili, poi approva la richiesta.',
     LEAVE_CONFLICT: 'Il dipendente ha un permesso approvato in questa data.',
     OFF_DAY_SHIFT_BLOCKED: 'Questo dipendente e in giorno off nella data selezionata, quindi la creazione del turno e bloccata.',
     OFF_DAY_STATUS_LOCKED: 'Lo stato del turno non puo essere modificato perche il turno ricade in un giorno off.',
@@ -2283,6 +2284,9 @@ const it = {
     filterTitle: 'Filtra Richieste',
     filterSubtitle: 'Affina la ricerca delle richieste di ferie e permessi',
     new_request: 'Nuova Richiesta',
+    section_awaiting: 'In attesa della tua decisione',
+    section_decided: 'Approvate / rifiutate di recente',
+    pending_forbidden: 'Non hai i permessi per vedere le approvazioni. Contatta un amministratore.',
     tab_mine: 'Le mie richieste',
     tab_pending: 'Da approvare',
     no_requests: 'Nessuna richiesta trovata',

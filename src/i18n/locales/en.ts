@@ -1233,6 +1233,7 @@ const en = {
     DEFAULT: 'An error occurred. Please try again.',
     // Shifts
     OVERLAP_CONFLICT: 'Shift conflict: the times overlap with an existing shift.',
+    BALANCE_NOT_CONFIGURED: 'Leave balance not configured for this employee. Configure the available days first, then approve the request.',
     LEAVE_CONFLICT: 'The employee has approved leave on this date.',
     OFF_DAY_SHIFT_BLOCKED: 'This employee is off on the selected day, so shift creation is blocked.',
     OFF_DAY_STATUS_LOCKED: 'Shift status cannot be changed because the shift falls on an off-day.',
@@ -2287,6 +2288,9 @@ const en = {
     filterTitle: 'Filter Leave Requests',
     filterSubtitle: 'Refine your leave request search',
     new_request: 'New Request',
+    section_awaiting: 'Awaiting your decision',
+    section_decided: 'Recently approved / rejected',
+    pending_forbidden: 'You do not have permission to view approvals. Contact an administrator.',
     tab_mine: 'My requests',
     tab_pending: 'Pending approval',
     no_requests: 'No requests found',

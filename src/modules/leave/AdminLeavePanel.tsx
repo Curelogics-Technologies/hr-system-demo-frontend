@@ -40,6 +40,7 @@ import { Store as StoreModel } from '../../types';
 import { useBreakpoint } from '../../hooks/useBreakpoint';
 import { useToast } from '../../context/ToastContext';
 import { formatEmployeeName, matchesEmployeeName } from '../../utils/employeeName';
+import { leaveVisual } from './leaveStatus';
 
 // ── Status badge ───────────────────────────────────────────────────────────
 
@@ -73,71 +74,26 @@ const STATUS_COLORS: Record<string, { bg: string; color: string }> = {
  * it solid green "APPROVED" — indistinguishable from a real approval. It now
  * reads DA VERIFICARE so those rows are visible on sight.
  */
-export function leaveBadgeState(req: LeaveRequest): {
-  key: 'cancelled' | 'rejected' | 'approved' | 'unverified' | 'escalated' | 'in_progress' | 'pending';
-  color: string;
-} {
-  const normalized = (req.status ?? '').toLowerCase().replace(/ /g, '_');
-  const hasApprover = req.approvedBy != null;
-
-  if (normalized === 'cancelled') return { key: 'cancelled', color: '#6b7280' };
-  if (normalized.includes('rejected')) return { key: 'rejected', color: '#dc2626' };
-
-  const looksApproved = normalized === 'approved' || normalized === 'admin_approved'
-    || (normalized === 'hr_approved' && !req.currentApproverRole);
-
-  if (looksApproved) {
-    // Granted with nobody behind it — legacy rows from the escalation defect.
-    return hasApprover
-      ? { key: 'approved', color: '#16a34a' }
-      : { key: 'unverified', color: '#dc2626' };
-  }
-
-  if (normalized === 'pending' && !req.escalated) return { key: 'pending', color: '#6b7280' };
-  // Chased or reassigned by the inactivity job — still awaiting a person.
-  if (req.escalated) return { key: 'escalated', color: '#d97706' };
-  return { key: 'in_progress', color: '#3b82f6' };
-}
-
 function StatusBadge({ req }: { req: LeaveRequest }) {
   const { t } = useTranslation();
-  const { key, color } = leaveBadgeState(req);
-
-  const LABELS: Record<string, string> = {
-    cancelled:   t('leave.badge_cancelled', 'ANNULLATA'),
-    rejected:    t('leave.badge_rejected', 'RIFIUTATA'),
-    approved:    t('leave.badge_approved', 'APPROVATA'),
-    unverified:  t('leave.badge_unverified', 'DA VERIFICARE'),
-    escalated:   t('leave.badge_escalated', 'SOLLECITATA'),
-    in_progress: t('leave.badge_in_progress', 'IN CORSO'),
-    pending:     t('leave.badge_pending', 'IN ATTESA'),
-  };
-
-  const TITLES: Record<string, string> = {
-    unverified: t(
-      'leave.badge_unverified_hint',
-      'Approvata senza alcuna decisione umana (approvazione automatica per inattività). Da rivedere.',
-    ),
-    escalated: t(
-      'leave.badge_escalated_hint',
-      'Ferma da oltre 2 giorni: sollecitata o riassegnata al livello successivo. Nessuna approvazione automatica.',
-    ),
-  };
+  // Shared with the calendar chip — see leaveStatus.ts. Keeping one derivation
+  // is why the two views can no longer disagree about the same request.
+  const visual = leaveVisual(req);
 
   return (
     <span
-      title={TITLES[key] ?? undefined}
+      title={visual.hintKey ? t(`leave.${visual.hintKey}`) : undefined}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 10px', borderRadius: 20,
         fontSize: 11, fontWeight: 700, letterSpacing: '0.5px',
-        background: `${color}10`, color,
-        border: `1px solid ${color}30`,
+        background: visual.fill, color: visual.color,
+        border: `1px solid ${visual.border}`,
         textTransform: 'uppercase', whiteSpace: 'nowrap',
-        cursor: TITLES[key] ? 'help' : undefined,
+        cursor: visual.hintKey ? 'help' : undefined,
       }}
     >
-      {key === 'unverified' && <span aria-hidden>⚠</span>}
-      {LABELS[key]}
+      {visual.state === 'unverified' && <span aria-hidden>⚠</span>}
+      {t(`leave.${visual.labelKey}`)}
     </span>
   );
 }

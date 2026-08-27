@@ -309,6 +309,12 @@ export default function WeeklyCalendar({
     a[1].surname.localeCompare(b[1].surname)
   );
 
+  // Employee column keeps a bounded width so long names ellipsize instead of
+  // stealing space from the day columns. It still breathes when the sidebar
+  // collapses (containerWidth grows), revealing a few more characters.
+  const employeeColWidth = Math.max(160, Math.min(280, Math.round(containerWidth * 0.16)));
+  const employeeColInnerWidth = employeeColWidth - 24; // td horizontal padding
+
   function weeklyTotalsForUser(userId: number, userShifts: Map<string, Shift[]>): { hours: number; hasScheduled: boolean } {
     let hours = 0;
     let hasScheduled = false;
@@ -332,7 +338,7 @@ export default function WeeklyCalendar({
       }}>
         <thead>
           <tr style={{ background: 'var(--primary)', color: '#fff' }}>
-            <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: 140 }}>
+            <th style={{ padding: '10px 12px', textAlign: 'left', width: employeeColWidth, minWidth: employeeColWidth, maxWidth: employeeColWidth }}>
               {t('shifts.employee', 'Dipendente')}
             </th>
             {days.map((day, i) => {
@@ -378,7 +384,7 @@ export default function WeeklyCalendar({
                 onMouseEnter={() => setHoveredRow(rowIdx)}
                 onMouseLeave={() => setHoveredRow(null)}
               >
-                <td style={{ padding: '8px 12px', fontWeight: 500, borderRight: '1px solid var(--border)' }}>
+                <td style={{ padding: '8px 12px', fontWeight: 500, borderRight: '1px solid var(--border)', width: employeeColWidth, minWidth: employeeColWidth, maxWidth: employeeColWidth, overflow: 'hidden' }}>
                   {(() => {
                     const rowTransfers = (transferBlocks ?? [])
                       .filter((tb) => tb.userId === userId && tb.startDate <= weekEndStr && tb.endDate >= weekStartStr)
@@ -415,7 +421,7 @@ export default function WeeklyCalendar({
                         ];
 
                     return (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: employeeColInnerWidth, maxWidth: employeeColInnerWidth, minWidth: 0 }}>
                         {identityRows.map((row) => {
                           const vm = row.isTransfer ? transferVisualMeta(row.status ?? 'active') : null;
                           return (
@@ -444,7 +450,7 @@ export default function WeeklyCalendar({
                                   <img src={avatarUrl} alt={fullName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                 ) : initials}
                               </div>
-                              <div style={{ minWidth: 0 }}>
+                              <div style={{ minWidth: 0, flex: 1, overflow: 'hidden' }}>
                                 <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={fullName}>
                                   {fullName}
                                 </div>

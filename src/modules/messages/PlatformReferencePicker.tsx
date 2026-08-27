@@ -1,18 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { Search, CheckSquare, FileText, Calendar, Building, Users, Briefcase, X, ArrowRight } from 'lucide-react';
+import { Search, X, ArrowRight } from 'lucide-react';
 import { searchGlobal } from '../../api/search';
+import { getAvatarUrl } from '../../api/client';
 import { Spinner } from '../../components/ui/Spinner';
 import { useAuth } from '../../context/AuthContext';
+import { PlatformReference, referenceIcon, referenceBadge } from './platformReference';
 
-export interface PlatformReference {
-  type: 'task' | 'document' | 'shift' | 'store' | 'employee' | 'job';
-  id: number;
-  title: string;
-  subtitle?: string;
-  url: string;
-}
+export type { PlatformReference } from './platformReference';
 
 interface Props {
   onSelect: (ref: PlatformReference) => void;
@@ -48,7 +44,8 @@ export const PlatformReferencePicker: React.FC<Props> = ({ onSelect, onClose }) 
               id: emp.id,
               title: fullName,
               subtitle: `${emp.role ? emp.role.toUpperCase() + ' · ' : ''}${emp.companyName || ''}`,
-              url: `/dipendenti?search=${encodeURIComponent(fullName)}`,
+              avatarFilename: emp.avatarFilename ?? null,
+              url: `/dipendenti/${emp.id}`,
             });
           });
         }
@@ -123,44 +120,6 @@ export const PlatformReferencePicker: React.FC<Props> = ({ onSelect, onClose }) 
   }, [query]);
 
   const filtered = activeTab === 'all' ? results : results.filter((r) => r.type === activeTab);
-
-  const getIcon = (type: PlatformReference['type']) => {
-    switch (type) {
-      case 'task':
-        return <CheckSquare size={16} color="#2563eb" />;
-      case 'document':
-        return <FileText size={16} color="#7c3aed" />;
-      case 'shift':
-        return <Calendar size={16} color="#16a34a" />;
-      case 'store':
-        return <Building size={16} color="#d97706" />;
-      case 'employee':
-        return <Users size={16} color="#0284c7" />;
-      case 'job':
-        return <Briefcase size={16} color="#e11d48" />;
-      default:
-        return <CheckSquare size={16} color="var(--accent)" />;
-    }
-  };
-
-  const getTypeBadge = (type: PlatformReference['type']) => {
-    switch (type) {
-      case 'task':
-        return { label: 'TASK', bg: 'rgba(37,99,235,0.1)', color: '#2563eb', border: 'rgba(37,99,235,0.25)' };
-      case 'document':
-        return { label: 'DOCUMENT', bg: 'rgba(124,58,237,0.1)', color: '#7c3aed', border: 'rgba(124,58,237,0.25)' };
-      case 'shift':
-        return { label: 'SHIFT', bg: 'rgba(22,163,74,0.1)', color: '#16a34a', border: 'rgba(22,163,74,0.25)' };
-      case 'store':
-        return { label: 'STORE', bg: 'rgba(217,119,6,0.1)', color: '#d97706', border: 'rgba(217,119,6,0.25)' };
-      case 'employee':
-        return { label: 'EMPLOYEE', bg: 'rgba(2,132,199,0.1)', color: '#0284c7', border: 'rgba(2,132,199,0.25)' };
-      case 'job':
-        return { label: 'JOB', bg: 'rgba(225,29,72,0.1)', color: '#e11d48', border: 'rgba(225,29,72,0.25)' };
-      default:
-        return { label: 'REF', bg: 'rgba(201,151,58,0.1)', color: 'var(--accent)', border: 'rgba(201,151,58,0.25)' };
-    }
-  };
 
   return createPortal(
     <div
@@ -278,7 +237,8 @@ export const PlatformReferencePicker: React.FC<Props> = ({ onSelect, onClose }) 
             </div>
           ) : (
             filtered.map((item) => {
-              const badge = getTypeBadge(item.type);
+              const badge = referenceBadge(item.type);
+              const avatarUrl = item.type === 'employee' ? getAvatarUrl(item.avatarFilename) : null;
               return (
                 <div
                   key={`${item.type}-${item.id}`}
@@ -300,15 +260,25 @@ export const PlatformReferencePicker: React.FC<Props> = ({ onSelect, onClose }) 
                     <div style={{
                       width: 32,
                       height: 32,
-                      borderRadius: 8,
-                      background: badge.bg,
-                      border: `1px solid ${badge.border}`,
+                      borderRadius: item.type === 'employee' ? '50%' : 8,
+                      overflow: 'hidden',
+                      background: avatarUrl ? 'transparent' : item.type === 'employee' ? 'linear-gradient(135deg,var(--primary),var(--accent))' : badge.bg,
+                      border: avatarUrl || item.type === 'employee' ? 'none' : `1px solid ${badge.border}`,
+                      color: '#fff',
+                      fontSize: 11,
+                      fontWeight: 800,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                       flexShrink: 0,
                     }}>
-                      {getIcon(item.type)}
+                      {avatarUrl ? (
+                        <img src={avatarUrl} alt={item.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      ) : item.type === 'employee' ? (
+                        item.title.trim().split(/s+/).map((w) => w[0] ?? '').slice(0, 2).join('').toUpperCase()
+                      ) : (
+                        referenceIcon(item.type, 16)
+                      )}
                     </div>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

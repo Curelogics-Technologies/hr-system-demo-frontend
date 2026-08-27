@@ -50,11 +50,37 @@ function IconMenu() {
   );
 }
 
+/** Small divider so the queue and the settled history read as two lists. */
+function SectionHeading({ label, count, accent }: { label: string; count: number; accent: string }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 8,
+      padding: '10px 16px 6px', marginTop: 4,
+    }}>
+      <span style={{ width: 3, height: 14, borderRadius: 2, background: accent }} />
+      <span style={{
+        fontSize: 11, fontWeight: 800, letterSpacing: '0.06em',
+        textTransform: 'uppercase', color: 'var(--text-secondary)',
+      }}>
+        {label}
+      </span>
+      <span style={{
+        fontSize: 11, fontWeight: 700, color: 'var(--text-muted)',
+        background: 'var(--surface-warm)', borderRadius: 10, padding: '1px 8px',
+      }}>
+        {count}
+      </span>
+      <span style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+    </div>
+  );
+}
+
 function PersonalLeavePage() {
   const { t } = useTranslation();
   const { user } = useAuth();
   const { isMobile } = useBreakpoint();
 
+  // Set once the user is known: approvers open on their pending queue.
   const [activeTab, setActiveTab] = useState<Tab>('mine');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -66,6 +92,9 @@ function PersonalLeavePage() {
 
   const [loadingMine, setLoadingMine] = useState(true);
   const [loadingPending, setLoadingPending] = useState(false);
+  /** Surfaced instead of swallowed: an empty queue and a failed fetch look identical otherwise. */
+  const [pendingError, setPendingError] = useState<string | null>(null);
+  const [decidedRequests, setDecidedRequests] = useState<LeaveRequest[]>([]);
   const [loadingBalance, setLoadingBalance] = useState(true);
 
   const userIsApprover = user ? (isApprover(user.role) || user.isSuperAdmin) : false;
@@ -77,27 +106,64 @@ function PersonalLeavePage() {
   const fetchMyRequests = useCallback(async () => {
     setLoadingMine(true);
     try {
-      const res = await getLeaveRequests();
+      // Explicitly scoped to the signed-in user. Without user_id the server
+      // returns everything the role can see, so a manager's "My requests" tab
+      // was showing their whole store's leave alongside their own.
+      const res = await getLeaveRequests(user?.id ? { userId: user.id } : undefined);
       setMyRequests(res.requests);
     } catch {
       // Error handled silently — list stays empty
     } finally {
       setLoadingMine(false);
     }
-  }, []);
+  }, [user?.id]);
+
+  // Requests in the approver's scope that have already been decided. Shown
+  // under the queue so an approver can see what they (and the levels below)
+  // have settled, without leaving the tab.
+  const fetchDecidedRequests = useCallback(async () => {
+    if (!userIsApprover) return;
+    try {
+      const res = await getLeaveRequests();
+      const decided = res.requests
+        .filter(r => {
+          const s = (r.status ?? '').toLowerCase();
+          return r.currentApproverRole == null
+            && s !== 'pending'
+            && (r.userId !== user?.id);   // own requests live in "My requests"
+        })
+        .sort((a, b) => (b.lastActionAt ?? b.updatedAt ?? '').localeCompare(a.lastActionAt ?? a.updatedAt ?? ''))
+        .slice(0, 25);
+      setDecidedRequests(decided);
+    } catch {
+      setDecidedRequests([]);
+    }
+  }, [userIsApprover, user?.id]);
 
   const fetchPendingRequests = useCallback(async () => {
     if (!userIsApprover) return;
     setLoadingPending(true);
+    setPendingError(null);
     try {
       const res = await getPendingLeaveApprovals();
       setPendingRequests(res.requests);
-    } catch {
-      // Silently handle
+    } catch (err: any) {
+      // This used to be swallowed. A 403 from the module-permission guard, or
+      // any server error, produced an empty tab with no explanation — which
+      // reads exactly like "there is nothing to approve" and is why an empty
+      // queue was impossible to tell apart from a broken one.
+      const code = err?.response?.data?.code;
+      const status = err?.response?.status;
+      setPendingError(
+        status === 403
+          ? t('leave.pending_forbidden', 'Non hai i permessi per vedere le approvazioni. Contatta un amministratore.')
+          : (code ? t(`errors.${code}`, t('errors.DEFAULT')) : t('errors.DEFAULT')),
+      );
+      setPendingRequests([]);
     } finally {
       setLoadingPending(false);
     }
-  }, [userIsApprover]);
+  }, [userIsApprover, t]);
 
   const fetchBalance = useCallback(async () => {
     setLoadingBalance(true);
@@ -116,8 +182,17 @@ function PersonalLeavePage() {
   useEffect(() => {
     fetchMyRequests();
     fetchBalance();
-    if (userIsApprover) fetchPendingRequests();
-  }, [fetchMyRequests, fetchBalance, fetchPendingRequests, userIsApprover]);
+    if (userIsApprover) { fetchPendingRequests(); fetchDecidedRequests(); }
+  }, [fetchMyRequests, fetchBalance, fetchPendingRequests, fetchDecidedRequests, userIsApprover]);
+
+  // `user` arrives asynchronously, so the landing tab is chosen once it does.
+  // Only moves off the default — never fights a tab the user has clicked.
+  const [tabInitialised, setTabInitialised] = useState(false);
+  useEffect(() => {
+    if (tabInitialised || !user) return;
+    if (userIsApprover) setActiveTab('pending');
+    setTabInitialised(true);
+  }, [user, userIsApprover, tabInitialised]);
 
   const [prefilledDate, setPrefilledDate] = useState<string | undefined>(undefined);
 
@@ -215,10 +290,10 @@ function PersonalLeavePage() {
 
       <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', background: 'var(--surface)' }}>
         {/* Tabs */}
+        {/* Approvers land on their queue first: the decisions they owe other
+            people matter more than their own requests. Employees, who have no
+            queue, still start on "my requests". */}
         <div style={{ borderBottom: '1px solid var(--border)', display: 'flex', gap: 0, padding: '0 12px', background: 'var(--surface-warm)' }}>
-          <button style={tabStyle('mine')} onClick={() => setActiveTab('mine')}>
-            {t('leave.tab_mine')}
-          </button>
           {userIsApprover && (
             <button style={tabStyle('pending')} onClick={() => setActiveTab('pending')}>
               {t('leave.tab_pending')}
@@ -226,7 +301,7 @@ function PersonalLeavePage() {
                 <span style={{
                   marginLeft: 8, display: 'inline-flex',
                   alignItems: 'center', justifyContent: 'center',
-                  width: 20, height: 20, borderRadius: '50%',
+                  minWidth: 20, height: 20, padding: '0 6px', borderRadius: 10,
                   background: 'var(--accent)', color: '#fff',
                   fontSize: 11, fontWeight: 800,
                 }}>
@@ -235,6 +310,9 @@ function PersonalLeavePage() {
               )}
             </button>
           )}
+          <button style={tabStyle('mine')} onClick={() => setActiveTab('mine')}>
+            {t('leave.tab_mine')}
+          </button>
           <button style={tabStyle('calendar')} onClick={() => setActiveTab('calendar')}>
             {t('leave.tab_calendar', 'Calendar')}
           </button>
@@ -251,12 +329,46 @@ function PersonalLeavePage() {
             />
           )}
           {activeTab === 'pending' && userIsApprover && (
-            <LeaveApprovalList
-              requests={pendingRequests}
-              loading={loadingPending}
-              onRefresh={fetchPendingRequests}
-              showActions
-            />
+            <>
+              {pendingError && (
+                <div style={{
+                  margin: '4px 12px 12px', padding: '10px 14px', borderRadius: 8,
+                  background: 'var(--danger-bg)', border: '1px solid var(--danger-border)',
+                  color: 'var(--danger)', fontSize: 13,
+                }}>
+                  {pendingError}
+                </div>
+              )}
+
+              <SectionHeading
+                label={t('leave.section_awaiting', 'In attesa della tua decisione')}
+                count={pendingRequests.length}
+                accent="var(--accent)"
+              />
+              <LeaveApprovalList
+                requests={pendingRequests}
+                loading={loadingPending}
+                onRefresh={() => { fetchPendingRequests(); fetchDecidedRequests(); }}
+                showActions
+              />
+
+              {/* Already settled, so no action buttons — this is history, not a queue. */}
+              {decidedRequests.length > 0 && (
+                <>
+                  <SectionHeading
+                    label={t('leave.section_decided', 'Approvate / rifiutate di recente')}
+                    count={decidedRequests.length}
+                    accent="var(--text-muted)"
+                  />
+                  <LeaveApprovalList
+                    requests={decidedRequests}
+                    loading={false}
+                    onRefresh={fetchDecidedRequests}
+                    showActions={false}
+                  />
+                </>
+              )}
+            </>
           )}
           {activeTab === 'calendar' && (
             <LeaveCalendar onDayClick={handleDayClick} onRefresh={() => { fetchMyRequests(); if (userIsApprover) fetchPendingRequests(); }} />
