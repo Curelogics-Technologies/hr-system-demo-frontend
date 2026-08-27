@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
-import { MessageSquare, Reply, Plus, Inbox, Send, ArrowLeft, Image, Trash2, Check, CheckCheck, MoreVertical, Edit2, Lock, Link2, X } from 'lucide-react';
+import { MessageSquare, Reply, Plus, Inbox, Send, ArrowLeft, Image, Trash2, Check, CheckCheck, MoreVertical, Edit2, Lock, Link2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { Message } from '../../types';
@@ -15,7 +15,14 @@ import { Alert } from '../../components/ui/Alert';
 import { ComposeMessage } from './ComposeMessage';
 import { useBreakpoint } from '../../hooks/useBreakpoint';
 import { useSocket } from '../../context/SocketContext';
-import { PlatformReferencePicker, PlatformReference } from './PlatformReferencePicker';
+import { PlatformReferencePicker } from './PlatformReferencePicker';
+import {
+  PlatformReference,
+  ReferenceChip,
+  buildReferenceToken,
+  parseReferenceToken,
+  stripReferenceTokens,
+} from './platformReference';
 
 /* ─── helpers ────────────────────────────────────────────────────────────── */
 
@@ -129,9 +136,8 @@ const ConversationRow: React.FC<ConversationRowProps> = ({ conv, isSelected, lan
           )}
           {(() => {
             const rawBody = conv.lastMessage.body || '';
-            const cleanBody = rawBody.replace(/\[ref:[^\]]+\]/g, '').trim();
-            const refMatch = rawBody.match(/\[ref:type=([^&]+)&id=([^&]+)&title=([^&]+)&url=([^\]]+)\]/);
-            const refTitle = refMatch ? decodeURIComponent(refMatch[3]) : null;
+            const cleanBody = stripReferenceTokens(rawBody);
+            const refTitle = parseReferenceToken(rawBody)?.title ?? null;
 
             const snippet = conv.lastMessage.subject
               ? conv.lastMessage.subject
@@ -498,7 +504,7 @@ export default function HRChatPage() {
 
       let finalBody = replyText.trim();
       if (selectedRef) {
-        finalBody += `${finalBody ? '\n\n' : ''}[ref:type=${selectedRef.type}&id=${selectedRef.id}&title=${encodeURIComponent(selectedRef.title)}&url=${selectedRef.url}]`;
+        finalBody += `${finalBody ? '\n\n' : ''}${buildReferenceToken(selectedRef)}`;
       }
 
       await sendMessage({
@@ -530,7 +536,7 @@ export default function HRChatPage() {
       setSendingReply(true);
       let finalBody = replyText.trim();
       if (selectedRef) {
-        finalBody += `${finalBody ? '\n\n' : ''}[ref:type=${selectedRef.type}&id=${selectedRef.id}&title=${encodeURIComponent(selectedRef.title)}&url=${selectedRef.url}]`;
+        finalBody += `${finalBody ? '\n\n' : ''}${buildReferenceToken(selectedRef)}`;
       }
 
       await editMessage(
@@ -864,7 +870,7 @@ export default function HRChatPage() {
                                         onClick={() => {
                                           setEditingMessageId(msg.id);
                                           const rawBody = msg.body || '';
-                                          const cleanBody = rawBody.replace(/\[ref:[^\]]+\]/g, '').trim();
+                                          const cleanBody = stripReferenceTokens(rawBody);
                                           setReplyText(cleanBody);
                                           if (msg.subject) {
                                             setSubjectText(msg.subject);
@@ -875,18 +881,7 @@ export default function HRChatPage() {
                                           }
                                           setUploadedFilename(msg.attachmentFilename || (msg as any).attachment_filename || null);
 
-                                          const refMatch = rawBody.match(/\[ref:type=([^&]+)&id=([^&]+)&title=([^&]+)&url=([^\]]+)\]/);
-                                          if (refMatch) {
-                                            const [, refType, refId, refTitleEnc, refUrl] = refMatch;
-                                            setSelectedRef({
-                                              type: refType as any,
-                                              id: Number(refId),
-                                              title: decodeURIComponent(refTitleEnc),
-                                              url: refUrl,
-                                            });
-                                          } else {
-                                            setSelectedRef(null);
-                                          }
+                                          setSelectedRef(parseReferenceToken(rawBody));
                                           setShowOptionsId(null);
                                         }}
                                         style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-primary)', textAlign: 'left', width: '100%' }}
@@ -953,8 +948,8 @@ export default function HRChatPage() {
                             {/* Message body & platform reference rendering */}
                             {(() => {
                               const rawBody = msg.body ?? '';
-                              const refMatch = rawBody.match(/\[ref:type=([^&]+)&id=([^&]+)&title=([^&]+)&url=([^\]]+)\]/);
-                              const cleanBody = rawBody.replace(/\[ref:[^\]]+\]/g, '').trim();
+                              const reference = parseReferenceToken(rawBody);
+                              const cleanBody = stripReferenceTokens(rawBody);
 
                               return (
                                 <>
@@ -964,55 +959,9 @@ export default function HRChatPage() {
                                     </div>
                                   )}
 
-                                  {refMatch && (() => {
-                                    const [, refType, refId, refTitleEnc, refUrl] = refMatch;
-                                    const refTitle = decodeURIComponent(refTitleEnc);
-                                    return (
-                                      <div
-                                        onClick={() => { window.location.href = refUrl; }}
-                                        style={{
-                                          marginTop: 8,
-                                          padding: '10px 12px',
-                                          borderRadius: 10,
-                                          background: isSent ? 'rgba(255,255,255,0.18)' : 'var(--surface-warm)',
-                                          border: `1px solid ${isSent ? 'rgba(255,255,255,0.3)' : 'var(--border)'}`,
-                                          display: 'flex',
-                                          alignItems: 'center',
-                                          justifyContent: 'space-between',
-                                          gap: 10,
-                                          cursor: 'pointer',
-                                          transition: 'transform 0.15s, background 0.15s',
-                                        }}
-                                        onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-1px)'; }}
-                                        onMouseLeave={(e) => { e.currentTarget.style.transform = 'none'; }}
-                                      >
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                                          <span style={{ fontSize: 14 }}>
-                                            {refType === 'task' ? '📋' : refType === 'document' ? '📄' : refType === 'shift' ? '📅' : refType === 'employee' ? '👥' : refType === 'job' ? '💼' : '🏢'}
-                                          </span>
-                                          <div style={{ minWidth: 0 }}>
-                                            <div style={{ fontSize: 10, fontWeight: 800, opacity: 0.85, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                                              {refType} #{refId}
-                                            </div>
-                                            <div style={{ fontSize: 12.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                              {refTitle}
-                                            </div>
-                                          </div>
-                                        </div>
-                                        <span style={{
-                                          fontSize: 10.5,
-                                          fontWeight: 800,
-                                          padding: '3px 8px',
-                                          borderRadius: 6,
-                                          background: isSent ? 'rgba(255,255,255,0.25)' : 'var(--accent)',
-                                          color: isSent ? '#fff' : '#fff',
-                                          flexShrink: 0,
-                                        }}>
-                                          Open →
-                                        </span>
-                                      </div>
-                                    );
-                                  })()}
+                                  {reference && (
+                                    <ReferenceChip reference={reference} onDarkBubble={isSent} />
+                                  )}
                                 </>
                               );
                             })()}
@@ -1090,26 +1039,13 @@ export default function HRChatPage() {
                     padding: '8px 16px',
                     borderTop: '1px solid var(--border-light)',
                     background: 'rgba(201,151,58,0.08)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 8,
                   }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 700, color: 'var(--accent)', minWidth: 0 }}>
-                      <span>🔗 {selectedRef.type.toUpperCase()}: {selectedRef.title}</span>
-                      {selectedRef.subtitle && <span style={{ opacity: 0.7, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>({selectedRef.subtitle})</span>}
-                    </div>
-                    <button
-                      onClick={() => setSelectedRef(null)}
-                      disabled={sendingReply}
-                      style={{
-                        background: 'none', border: 'none', cursor: 'pointer',
-                        color: 'var(--accent)', padding: 4, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        borderRadius: '50%',
-                      }}
-                    >
-                      <X size={14} />
-                    </button>
+                    <ReferenceChip
+                      reference={selectedRef}
+                      variant="draft"
+                      onRemove={() => setSelectedRef(null)}
+                      removeDisabled={sendingReply}
+                    />
                   </div>
                 )}
 
