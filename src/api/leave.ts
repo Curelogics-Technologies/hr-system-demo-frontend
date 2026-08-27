@@ -405,3 +405,15 @@ export async function archiveLeaveRequest(id: number): Promise<{ message: string
   const { data } = await apiClient.put(`/leave/${id}/archive`);
   return data.data;
 }
+
+/**
+ * Send a request that was auto-approved with no human decision back to HR.
+ *
+ * Those requests sit in a terminal approved status, so they cannot be approved
+ * again — and re-approving them on the spot would miss the point, which is that
+ * nobody ever decided. Admin only.
+ */
+export async function reopenLeaveRequest(id: number): Promise<LeaveRequest> {
+  const { data } = await apiClient.put(`/leave/${id}/reopen`);
+  return data.data as LeaveRequest;
+}
