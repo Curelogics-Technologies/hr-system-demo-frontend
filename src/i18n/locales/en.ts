@@ -1645,6 +1645,7 @@ const en = {
       workingDay: 'Working day',
       offDay: 'Off day',
       startTime: 'Start',
+      storeTimezoneHint: 'Times are in the store timezone ({{timezone}}).',
       endTime: 'End',
       breakStart: 'Break start',
       breakEnd: 'Break end',

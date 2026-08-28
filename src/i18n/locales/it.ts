@@ -1639,6 +1639,7 @@ const it = {
       workingDay: 'Giorno lavorativo',
       offDay: 'Giorno off',
       startTime: 'Inizio',
+      storeTimezoneHint: 'Gli orari sono nel fuso orario del negozio ({{timezone}}).',
       endTime: 'Fine',
       breakStart: 'Pausa inizio',
       breakEnd: 'Pausa fine',

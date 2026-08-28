@@ -151,6 +151,17 @@ export default function ShiftDrawer({
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
   const [confirmOpen, setConfirmOpen] = useState(false);
+
+  // The zone the times on this form are expressed in. Shown only when it differs
+  // from the viewer's own, so a manager working away from the shop can tell that
+  // 09:00 means 09:00 at the shop and not 09:00 where they are sitting.
+  const browserTimezone = useMemo(() => {
+    try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { return ''; }
+  }, []);
+  const shiftStoreTimezone = useMemo(() => {
+    const selectedId = form.store_id ? Number(form.store_id) : shift?.storeId;
+    return stores.find((st) => st.id === selectedId)?.timezone ?? shift?.timezone ?? null;
+  }, [form.store_id, shift, stores]);
   const [activeTransferForDate, setActiveTransferForDate] = useState<TransferAssignment | null>(null);
   const [storeTouchedManually, setStoreTouchedManually] = useState(false);
   const [employeePickerOpen, setEmployeePickerOpen] = useState(false);
@@ -1638,6 +1649,20 @@ export default function ShiftDrawer({
                     </div>
                   )}
 
+                  {/* Read-only. The shop's clock is what the rota means and what the
+                      terminal enforces; it must never feed back into a saved value. */}
+                  {shiftStoreTimezone && shiftStoreTimezone !== browserTimezone && (
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8,
+                      fontSize: 12, color: 'var(--text-muted, #6b7280)',
+                    }}>
+                      <Clock size={13} />
+                      <span>{t('shifts.form.storeTimezoneHint', {
+                        defaultValue: 'Times are in the store timezone ({{timezone}}).',
+                        timezone: shiftStoreTimezone,
+                      })}</span>
+                    </div>
+                  )}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 4 }}>
                     <TimePicker
                       label={t('shifts.form.startTime')}
