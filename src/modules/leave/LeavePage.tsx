@@ -96,6 +96,8 @@ function PersonalLeavePage() {
   const [pendingError, setPendingError] = useState<string | null>(null);
   /** Distinguishes "blocked by permissions" from "genuinely nothing here". */
   const [pendingForbidden, setPendingForbidden] = useState(false);
+  /** Set when the viewer has no store to scope to — a config gap, not an empty queue. */
+  const [pendingNoStore, setPendingNoStore] = useState(false);
   const [decidedRequests, setDecidedRequests] = useState<LeaveRequest[]>([]);
   const [loadingBalance, setLoadingBalance] = useState(true);
 
@@ -147,9 +149,11 @@ function PersonalLeavePage() {
     setLoadingPending(true);
     setPendingError(null);
     setPendingForbidden(false);
+    setPendingNoStore(false);
     try {
       const res = await getPendingLeaveApprovals();
       setPendingRequests(res.requests);
+      setPendingNoStore(res.scopeIssue === 'no_store_association');
     } catch (err: any) {
       // This used to be swallowed. A 403 from the module-permission guard, or
       // any server error, produced an empty tab with no explanation — which
@@ -354,7 +358,7 @@ function PersonalLeavePage() {
                 loading={loadingPending}
                 onRefresh={() => { fetchPendingRequests(); fetchDecidedRequests(); }}
                 showActions
-                emptyReason={pendingForbidden ? 'forbidden' : 'none'}
+                emptyReason={pendingForbidden ? 'forbidden' : pendingNoStore ? 'no_store' : 'none'}
               />
 
               {/* Already settled, so no action buttons — this is history, not a queue. */}
