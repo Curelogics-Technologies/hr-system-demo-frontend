@@ -15,6 +15,7 @@ import { translateApiError } from '../../utils/apiErrors';
 import { Spinner } from '../../components/ui';
 import { Monitor, RefreshCw, ShieldCheck, AlertOctagon, RefreshCcw, LogIn, LogOut, Coffee, Play, Clock } from 'lucide-react';
 import { useSocket } from '../../context/SocketContext';
+import { getBrowserTimeZone, getStoreTimezoneTag, getTimezoneLocalTimeLabel, resolveStoreTimezone, viewerDiffersFromStore } from '../../utils/timezone';
 
 const REFRESH_AT_SECONDS = 15;
 
@@ -48,21 +49,35 @@ function getProgressColor(secondsLeft: number, expiresIn: number): string {
   return '#ef4444';
 }
 
-function formatTerminalTime(date: Date, hour12: boolean): string {
-  let hours = date.getHours();
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  const seconds = String(date.getSeconds()).padStart(2, '0');
-  
+/**
+ * Reads the clock in a given zone rather than the tablet's own. This screen is
+ * the one an employee stands in front of, and the check-in window behind it is
+ * enforced on the store's clock — a tablet carried in from another country, or
+ * simply set wrong, must not be able to disagree with it on screen.
+ */
+function formatTerminalTime(date: Date, hour12: boolean, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+  const pick = (type: string) => parts.find((p) => p.type === type)?.value ?? '00';
+
+  let hours = Number(pick('hour'));
+  const minutes = pick('minute');
+  const seconds = pick('second');
+
   if (hour12) {
     const ampm = hours >= 12 ? 'PM' : 'AM';
     hours = hours % 12;
     hours = hours ? hours : 12; // the hour '0' should be '12'
     const hoursStr = String(hours).padStart(2, '0');
     return `${hoursStr}:${minutes}:${seconds} ${ampm}`;
-  } else {
-    const hoursStr = String(hours).padStart(2, '0');
-    return `${hoursStr}:${minutes}:${seconds}`;
   }
+  const hoursStr = String(hours).padStart(2, '0');
+  return `${hoursStr}:${minutes}:${seconds}`;
 }
 
 export default function TerminalPage() {
@@ -341,8 +356,10 @@ export default function TerminalPage() {
   }
 
   const locale = i18n.language === 'en' ? 'en-GB' : 'it-IT';
-  const timeStr = formatTerminalTime(time, hour12);
-  const dateStr = time.toLocaleDateString(locale, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  const storeTimezone = resolveStoreTimezone(store?.timezone);
+  const viewerOffClock = viewerDiffersFromStore(store?.timezone);
+  const timeStr = formatTerminalTime(time, hour12, storeTimezone);
+  const dateStr = time.toLocaleDateString(locale, { timeZone: storeTimezone, weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   const expiresIn = qrData?.expiresIn ?? 60;
   const progress = qrData ? Math.max(0, (secondsLeft / expiresIn) * 100) : 0;
   const progressColor = getProgressColor(secondsLeft, expiresIn);
@@ -759,6 +776,39 @@ export default function TerminalPage() {
                 fontFamily: 'var(--font-body)',
               }}>
                 {dateStr}
+              </div>
+
+              {/* Says whose clock the display above is on. Silent about the tablet
+                  unless the two disagree, which is the only case that needs it. */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 6 }}>
+                <span
+                  title={storeTimezone}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    background: 'rgba(255,255,255,0.06)',
+                    border: '1px solid rgba(255,255,255,0.14)',
+                    borderRadius: 20,
+                    padding: '4px 12px',
+                    fontSize: 12.5,
+                    fontWeight: 700,
+                    letterSpacing: 0.4,
+                    color: 'rgba(255,255,255,0.72)',
+                    fontFamily: 'var(--font-display)',
+                  }}
+                >
+                  <Clock size={13} />
+                  {t('terminal.storeTime', 'Store time')} · {getStoreTimezoneTag(store?.timezone, time)}
+                </span>
+                {viewerOffClock && (
+                  <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', fontFamily: 'var(--font-body)' }}>
+                    {t('terminal.yourTime', 'this device: {{time}} ({{zone}})', {
+                      time: getTimezoneLocalTimeLabel(getBrowserTimeZone(), time),
+                      zone: getStoreTimezoneTag(getBrowserTimeZone(), time),
+                    })}
+                  </span>
+                )}
               </div>
 
               {/* Authorized checkmark/badge under date */}

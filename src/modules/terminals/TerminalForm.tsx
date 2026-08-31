@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Eye, EyeOff, RefreshCw, Copy, CheckCircle2, KeyRound, ChevronDown, Store as StoreIcon, Trash2, QrCode, Monitor, Smartphone, AlertTriangle } from 'lucide-react';
+import { getBrowserTimeZone, getStoreTimezoneTag, getTimezoneLocalTimeLabel, resolveStoreTimezone, viewerDiffersFromStore } from '../../utils/timezone';
 import QRCode from 'react-qr-code';
 import { useBreakpoint } from '../../hooks/useBreakpoint';
 import { createTerminal, updateTerminal, deleteTerminal, getStoresWithTerminalStatus, StoreTerminalStatus, Terminal } from '../../api/terminals';
@@ -61,6 +62,14 @@ export function TerminalForm({ open = true, terminal, onSuccess, onCancel, onRef
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  // Terminals created before plain_password existed — or through any path that
+  // did not store it — have nothing to reveal. Without saying so the field just
+  // sits there empty and the eye button looks broken, which is how this was
+  // reported. The stored value is the only copy; a hash cannot be turned back.
+  const [storedPasswordMissing, setStoredPasswordMissing] = useState(false);
+  // Drives the store clock shown on the details card. Minute precision, so a
+  // half-minute tick keeps it honest without spinning while the modal is open.
+  const [nowTick, setNowTick] = useState<Date>(() => new Date());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | undefined>();
@@ -105,6 +114,13 @@ export function TerminalForm({ open = true, terminal, onSuccess, onCancel, onRef
   }, []);
 
   useEffect(() => {
+    if (!open) return;
+    setNowTick(new Date());
+    const id = setInterval(() => setNowTick(new Date()), 30000);
+    return () => clearInterval(id);
+  }, [open]);
+
+  useEffect(() => {
     if (open) {
       // Must be re-synced on every open, not only when the `terminal` prop
       // changes: the list keeps its selection after closing, so re-opening the
@@ -131,12 +147,16 @@ export function TerminalForm({ open = true, terminal, onSuccess, onCancel, onRef
         setEmail('');
         setQrData(null);
       } else {
-        setPassword(terminal.plainPassword || '');
+        const stored = terminal.plainPassword ?? '';
+        setPassword(stored);
+        setStoredPasswordMissing(!stored);
       }
     } else {
       setSelectedStoreId('');
       setEmail('');
       setPassword('');
+      setStoredPasswordMissing(false);
+      setShowPassword(false);
       setError(null);
       setCreatedCredentials(null);
       setStorePickerOpen(false);
@@ -320,6 +340,7 @@ export function TerminalForm({ open = true, terminal, onSuccess, onCancel, onRef
                   const company = selectedStore ? selectedStore.companyName : (localTerminal ? localTerminal.companyName : '');
                   const address = selectedStore ? selectedStore.address : (stores.find(s => s.id === localTerminal?.storeId)?.address);
                   const cap = selectedStore ? selectedStore.cap : (stores.find(s => s.id === localTerminal?.storeId)?.cap);
+                  const storeTimezone = selectedStore ? selectedStore.timezone : (stores.find(s => s.id === localTerminal?.storeId)?.timezone);
 
                   if (!name && !company) return null;
 
@@ -345,6 +366,26 @@ export function TerminalForm({ open = true, terminal, onSuccess, onCancel, onRef
                       <div style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <span>🏢</span>
                         <span>{company}</span>
+                      </div>
+                      {/* Whoever sets a terminal up is often not standing in the shop.
+                          The clock-in window is enforced on the STORE's clock, so the
+                          store's zone and current time are stated here, and the setter's
+                          own clock only when the two disagree. */}
+                      <div style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                        <span>🕒</span>
+                        <span title={resolveStoreTimezone(storeTimezone)}>
+                          {getTimezoneLocalTimeLabel(resolveStoreTimezone(storeTimezone), nowTick)}
+                          {' · '}
+                          {getStoreTimezoneTag(storeTimezone, nowTick)}
+                        </span>
+                        {viewerDiffersFromStore(storeTimezone) && (
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                            {t('terminals.yourTimeIs', 'your time {{time}} ({{zone}})', {
+                              time: getTimezoneLocalTimeLabel(getBrowserTimeZone(), nowTick),
+                              zone: getStoreTimezoneTag(getBrowserTimeZone(), nowTick),
+                            })}
+                          </span>
+                        )}
                       </div>
                       {address && (
                         <div style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -626,7 +667,18 @@ export function TerminalForm({ open = true, terminal, onSuccess, onCancel, onRef
                         <button
                           type="button"
                           onClick={() => setShowPassword(!showPassword)}
-                          style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: '4px', color: 'var(--text-muted)' }}
+                          disabled={!password}
+                          title={password
+                            ? (showPassword ? t('common.hide', 'Hide') : t('common.show', 'Show'))
+                            : t('terminals.passwordNotStoredShort', 'No password stored')}
+                          aria-label={showPassword ? t('common.hide', 'Hide') : t('common.show', 'Show')}
+                          style={{
+                            position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)',
+                            background: 'none', border: 'none', padding: '4px',
+                            cursor: password ? 'pointer' : 'not-allowed',
+                            opacity: password ? 1 : 0.4,
+                            color: 'var(--text-muted)',
+                          }}
                         >
                           {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                         </button>
@@ -635,6 +687,18 @@ export function TerminalForm({ open = true, terminal, onSuccess, onCancel, onRef
                         <RefreshCw size={16} />
                       </Button>
                     </div>
+                    {storedPasswordMissing && !password && (
+                      <div style={{
+                        display: 'flex', alignItems: 'flex-start', gap: 6, marginTop: 7,
+                        fontSize: 11.5, lineHeight: 1.45, color: 'var(--text-muted)',
+                      }}>
+                        <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 1 }} />
+                        <span>
+                          {t('terminals.passwordNotStored',
+                            'This terminal was created before its password was kept on file, so there is nothing to show. Generate a new one to set it.')}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   {/* QR Code Preview Section with Countdown */}

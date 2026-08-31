@@ -23,6 +23,7 @@ import apiClient from '../../api/client';
 import { getStores } from '../../api/stores';
 import { TerminalFilterModal, FilterValues } from './TerminalFilterModal';
 import { SelectOption } from '../../components/ui/CustomSelect';
+import { getStoreTimezoneTag, resolveStoreTimezone } from '../../utils/timezone';
 
 interface CompanyOption {
   id: number;
@@ -259,8 +260,18 @@ export default function TerminalList() {
       key: 'storeName',
       label: t('employees.colStore'),
       render: (row) => (
-        <span style={{ color: 'var(--text-primary)', fontSize: '13px', fontWeight: 500 }}>
-          {truncateWords(row.storeName ?? '', 2)}
+        <span style={{ display: 'inline-flex', flexDirection: 'column', lineHeight: 1.3 }}>
+          <span style={{ color: 'var(--text-primary)', fontSize: '13px', fontWeight: 500 }}>
+            {truncateWords(row.storeName ?? '', 2)}
+          </span>
+          {/* Which clock this terminal enforces. Two shops can show the same
+              opening time and still admit staff an hour apart. */}
+          <span
+            title={resolveStoreTimezone(row.storeTimezone)}
+            style={{ color: 'var(--text-muted)', fontSize: '10.5px', fontWeight: 600, letterSpacing: '0.02em' }}
+          >
+            {getStoreTimezoneTag(row.storeTimezone)}
+          </span>
         </span>
       ),
     },

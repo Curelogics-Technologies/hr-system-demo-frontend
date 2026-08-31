@@ -832,6 +832,9 @@ const it = {
     duplicateTerminalError: 'Un terminale esiste già per questo negozio.',
     emailLabel: 'Email Terminale (Auto-generata)',
     passwordLabel: 'Password Terminale',
+    passwordNotStored: 'Questo terminale è stato creato prima che la password venisse conservata, quindi non è disponibile. Generane una nuova per impostarla.',
+    passwordNotStoredShort: 'Nessuna password salvata',
+    yourTimeIs: 'la tua ora {{time}} ({{zone}})',
     errorSave: 'Errore durante il salvataggio del terminale.',
     fieldRequired: 'Campo obbligatorio',
     terminalCreatedTitle: 'Terminale creato con successo!',
@@ -2098,6 +2101,8 @@ const it = {
 
   // ─── Terminal ─────────────────────────────────────────────────────────────
   terminal: {
+    storeTime: 'Ora del negozio',
+    yourTime: 'questo dispositivo: {{time}} ({{zone}})',
     title: 'Terminale Presenze',
     checkin: 'ENTRATA',
     checkout: 'USCITA',

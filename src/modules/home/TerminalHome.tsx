@@ -5,11 +5,14 @@ import { Button, Spinner } from '../../components/ui';
 import { useAuth } from '../../context/AuthContext';
 import { getDeviceStatus } from '../../api/device';
 import { getDeviceFingerprint } from '../../utils/deviceFingerprint';
+import { getBrowserTimeZone, getStoreTimezoneTag, resolveStoreTimezone, viewerDiffersFromStore } from '../../utils/timezone';
 
 interface TerminalStore {
   id: number;
   name: string;
   code: string;
+  /** The clock this store's clock-in window is enforced on. */
+  timezone?: string | null;
 }
 
 export interface TerminalHomeData {
@@ -73,17 +76,33 @@ export const TerminalHome: React.FC<TerminalHomeProps> = ({ data }) => {
 
   const locale = i18n.language === 'en' ? 'en-GB' : 'it-IT';
 
+  // This clock sits directly above a Start Check-In button, and the window that
+  // button opens is enforced on the STORE's clock. Rendering the tablet's own
+  // clock here is how an employee ends up staring at 10:04 while being told they
+  // are too early — so the store's zone drives it, and the tablet's is only
+  // mentioned when the two disagree.
+  const storeTimezone = resolveStoreTimezone(store.timezone);
+  const viewerOffClock = viewerDiffersFromStore(store.timezone);
+
   const timeString = currentTime.toLocaleTimeString(locale, {
+    timeZone: storeTimezone,
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
   });
 
   const dateString = currentTime.toLocaleDateString(locale, {
+    timeZone: storeTimezone,
     weekday: 'long',
     year: 'numeric',
     month: 'long',
     day: 'numeric',
+  });
+
+  const viewerTimeString = currentTime.toLocaleTimeString(locale, {
+    timeZone: getBrowserTimeZone(),
+    hour: '2-digit',
+    minute: '2-digit',
   });
 
   const containerStyle: React.CSSProperties = {
@@ -235,6 +254,31 @@ export const TerminalHome: React.FC<TerminalHomeProps> = ({ data }) => {
       <div style={dividerStyle} />
       <div style={timeStyle}>{timeString}</div>
       <div style={dateStyle}>{dateString}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
+        <span
+          title={storeTimezone}
+          style={{
+            fontSize: 12,
+            fontWeight: 700,
+            letterSpacing: '0.04em',
+            color: 'var(--text-muted)',
+            background: 'var(--surface-elevated)',
+            border: '1px solid var(--border)',
+            borderRadius: 999,
+            padding: '4px 12px',
+          }}
+        >
+          {t('terminal.storeTime', 'Store time')} · {getStoreTimezoneTag(store.timezone, currentTime)}
+        </span>
+        {viewerOffClock && (
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            {t('terminal.yourTime', 'this device: {{time}} ({{zone}})', {
+              time: viewerTimeString,
+              zone: getStoreTimezoneTag(getBrowserTimeZone(), currentTime),
+            })}
+          </span>
+        )}
+      </div>
       <Button variant="primary" size="lg" onClick={() => navigate('/terminale')}>
         {t('home.terminal.startCheckin')}
       </Button>
