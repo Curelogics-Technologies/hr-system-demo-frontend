@@ -20,6 +20,7 @@ import CalendarActivitiesModal from './CalendarActivitiesModal';
 import ShiftExportModal, { ExportFormat } from './ShiftExportModal';
 import { useBreakpoint } from '../../hooks/useBreakpoint';
 import CustomSelect, { SelectOption } from '../../components/ui/CustomSelect';
+import { getStoreTimezoneTag, resolveStoreTimezone } from '../../utils/timezone';
 
 type ViewMode = 'day' | 'week' | 'month';
 
@@ -70,6 +71,22 @@ function formatDateDisplay(date: Date): string {
 }
 
 const MANAGEMENT_ROLES = ['admin', 'hr', 'area_manager', 'store_manager'];
+
+// Slightly smaller than the control's own text, so a long store name fits without
+// truncating and the zone tag still has room beside it.
+const FILTER_OPTION_TEXT: React.CSSProperties = {
+  fontSize: 12.5,
+  lineHeight: 1.35,
+};
+
+const FILTER_OPTION_TZ: React.CSSProperties = {
+  fontSize: 10.5,
+  fontWeight: 700,
+  letterSpacing: '0.02em',
+  color: 'var(--text-muted)',
+  whiteSpace: 'nowrap',
+  flexShrink: 0,
+};
 
 // Icon components
 function IconChevronLeft() {
@@ -846,8 +863,8 @@ export default function ShiftsPage() {
               }}>
                 {companies.length > 0 && (
                   <div style={{
-                    minWidth: isMobile ? '100%' : 180,
-                    maxWidth: isMobile ? 'none' : 240,
+                    minWidth: isMobile ? '100%' : 208,
+                    maxWidth: isMobile ? 'none' : 272,
                     flex: isMobile ? 1 : 'none'
                   }}>
                     <CustomSelect
@@ -865,7 +882,9 @@ export default function ShiftsPage() {
                         { value: '', label: t('shifts.allCompanies', 'All Companies') },
                         ...companies.map((c) => ({
                           value: String(c.id),
-                          label: c.name
+                          label: c.name,
+                          render: <span style={FILTER_OPTION_TEXT}>{c.name}</span>,
+                          selectedRender: <span style={FILTER_OPTION_TEXT}>{c.name}</span>,
                         }))
                       ]}
                       searchable={true}
@@ -877,8 +896,8 @@ export default function ShiftsPage() {
 
                 {stores.length > 0 && (
                   <div style={{
-                    minWidth: isMobile ? '100%' : 180,
-                    maxWidth: isMobile ? 'none' : 240,
+                    minWidth: isMobile ? '100%' : 208,
+                    maxWidth: isMobile ? 'none' : 272,
                     flex: isMobile ? 1 : 'none'
                   }}>
                     <CustomSelect
@@ -887,9 +906,23 @@ export default function ShiftsPage() {
                       placeholder={t('shifts.allStores', 'Tutti i negozi')}
                       options={[
                         { value: '', label: t('shifts.allStores', 'Tutti i negozi') },
+                        // The company name was redundant here — the company filter
+                        // sits immediately to the left. The zone is the useful thing:
+                        // it is the clock this store's shifts and clock-ins run on.
                         ...(companyFilter ? stores.filter(s => s.companyId === companyFilter) : stores).map((s) => ({
                           value: String(s.id),
-                          label: s.companyName ? `${s.name} (${s.companyName})` : s.name
+                          label: s.name,
+                          render: (
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, width: '100%' }}>
+                              <span style={{ ...FILTER_OPTION_TEXT, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                                {s.name}
+                              </span>
+                              <span title={resolveStoreTimezone(s.timezone)} style={FILTER_OPTION_TZ}>
+                                {getStoreTimezoneTag(s.timezone)}
+                              </span>
+                            </span>
+                          ),
+                          selectedRender: <span style={FILTER_OPTION_TEXT}>{s.name}</span>,
                         }))
                       ]}
                       searchable={true}

@@ -13,6 +13,7 @@ import { DatePicker } from '../../components/ui/DatePicker';
 import { TimePicker } from '../../components/ui/TimePicker';
 import { Badge } from '../../components/ui/Badge';
 import { Store as StoreIcon, Clock, AlertTriangle, AlertCircle } from 'lucide-react';
+import { getStoreTimezoneTag, resolveStoreTimezone } from '../../utils/timezone';
 import { matchesEmployeeName } from '../../utils/employeeName';
 
 interface ShiftPattern {
@@ -1277,6 +1278,23 @@ export default function ShiftDrawer({
                           </span>
                         </span>
                       </span>
+                      <span
+                        title={resolveStoreTimezone(selectedStore.timezone)}
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          letterSpacing: '0.02em',
+                          color: 'var(--text-muted)',
+                          background: 'var(--surface-elevated)',
+                          border: '1px solid var(--border-light)',
+                          borderRadius: 6,
+                          padding: '2px 6px',
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {getStoreTimezoneTag(selectedStore.timezone)}
+                      </span>
                     </span>
                   ) : showStoreFallback ? (
                     <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
@@ -1386,6 +1404,25 @@ export default function ShiftDrawer({
                                   {` · ${store.employeeCount ?? 0} ${t('employees.employeesLabel', 'Employees')}`}
                                 </span>
                               </span>
+                            </span>
+                            {/* The clock this store's shifts are written on, so the times
+                                typed below are unambiguous before the store is even chosen. */}
+                            <span
+                              title={resolveStoreTimezone(store.timezone)}
+                              style={{
+                                fontSize: 10,
+                                fontWeight: 700,
+                                letterSpacing: '0.02em',
+                                color: 'var(--text-muted)',
+                                background: 'var(--surface-elevated)',
+                                border: '1px solid var(--border-light)',
+                                borderRadius: 6,
+                                padding: '2px 6px',
+                                whiteSpace: 'nowrap',
+                                flexShrink: 0,
+                              }}
+                            >
+                              {getStoreTimezoneTag(store.timezone)}
                             </span>
                           </button>
                         );
