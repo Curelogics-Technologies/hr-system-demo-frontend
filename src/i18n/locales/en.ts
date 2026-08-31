@@ -838,6 +838,9 @@ const en = {
     duplicateTerminalError: 'A terminal already exists for this store.',
     emailLabel: 'Terminal Email (Auto-generated)',
     passwordLabel: 'Terminal Password',
+    passwordNotStored: 'This terminal was created before its password was kept on file, so there is nothing to show. Generate a new one to set it.',
+    passwordNotStoredShort: 'No password stored',
+    yourTimeIs: 'your time {{time}} ({{zone}})',
     errorSave: 'Error during terminal saving.',
     fieldRequired: 'Field required',
     terminalCreatedTitle: 'Terminal created successfully!',
@@ -2104,6 +2107,9 @@ const en = {
 
   // ─── Terminal ─────────────────────────────────────────────────────────────
   terminal: {
+    storeTime: 'Store time',
+    deviceTime: 'This device',
+    yourTime: 'this device: {{time}} ({{zone}})',
     title: 'Attendance Terminal',
     checkin: 'CHECK-IN',
     checkout: 'CHECK-OUT',

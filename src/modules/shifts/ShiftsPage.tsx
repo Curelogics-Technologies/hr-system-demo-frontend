@@ -20,6 +20,7 @@ import CalendarActivitiesModal from './CalendarActivitiesModal';
 import ShiftExportModal, { ExportFormat } from './ShiftExportModal';
 import { useBreakpoint } from '../../hooks/useBreakpoint';
 import CustomSelect, { SelectOption } from '../../components/ui/CustomSelect';
+import { getStoreTimezoneTag, resolveStoreTimezone } from '../../utils/timezone';
 
 type ViewMode = 'day' | 'week' | 'month';
 
@@ -71,6 +72,22 @@ function formatDateDisplay(date: Date): string {
 
 const MANAGEMENT_ROLES = ['admin', 'hr', 'area_manager', 'store_manager'];
 
+// Slightly smaller than the control's own text, so a long store name fits without
+// truncating and the zone tag still has room beside it.
+const FILTER_OPTION_TEXT: React.CSSProperties = {
+  fontSize: 12.5,
+  lineHeight: 1.35,
+};
+
+const FILTER_OPTION_TZ: React.CSSProperties = {
+  fontSize: 10.5,
+  fontWeight: 700,
+  letterSpacing: '0.02em',
+  color: 'var(--text-muted)',
+  whiteSpace: 'nowrap',
+  flexShrink: 0,
+};
+
 // Icon components
 function IconChevronLeft() {
   return (
@@ -83,6 +100,14 @@ function IconChevronRight() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="9 18 15 12 9 6" />
+    </svg>
+  );
+}
+function IconClockSmall() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)', flexShrink: 0 }}>
+      <circle cx="12" cy="12" r="9" />
+      <polyline points="12 7 12 12 15.5 14" />
     </svg>
   );
 }
@@ -153,6 +178,9 @@ export default function ShiftsPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyFilter, setCompanyFilter] = useState<number | null>(null);
   const [storeFilter, setStoreFilter] = useState<number | null>(user?.storeId ?? null);
+  // The store whose clock the calendar is currently showing, or null while more
+  // than one store is in view.
+  const selectedFilterStore = storeFilter ? stores.find((s) => s.id === storeFilter) ?? null : null;
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editingShift, setEditingShift] = useState<Shift | null>(null);
@@ -813,6 +841,34 @@ export default function ShiftsPage() {
             )}
           </div>
 
+          {/* ── CENTRE: which clock the calendar below is on ──
+              Only once a single store is picked. With 'all stores' selected the
+              rows can span several zones and one tag would be a lie. */}
+          {!isMobile && selectedFilterStore && (
+            <div
+              title={resolveStoreTimezone(selectedFilterStore.timezone)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 7,
+                padding: '5px 12px',
+                borderRadius: 999,
+                background: 'var(--surface-warm)',
+                border: '1px solid var(--border)',
+                flexShrink: 0,
+                lineHeight: 1,
+              }}
+            >
+              <IconClockSmall />
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                {resolveStoreTimezone(selectedFilterStore.timezone)}
+              </span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                {getStoreTimezoneTag(selectedFilterStore.timezone)}
+              </span>
+            </div>
+          )}
+
           {/* ── RIGHT: store filter + loading indicator ── */}
           <div style={{
             display: 'flex',
@@ -846,8 +902,8 @@ export default function ShiftsPage() {
               }}>
                 {companies.length > 0 && (
                   <div style={{
-                    minWidth: isMobile ? '100%' : 180,
-                    maxWidth: isMobile ? 'none' : 240,
+                    minWidth: isMobile ? '100%' : 208,
+                    maxWidth: isMobile ? 'none' : 272,
                     flex: isMobile ? 1 : 'none'
                   }}>
                     <CustomSelect
@@ -865,7 +921,9 @@ export default function ShiftsPage() {
                         { value: '', label: t('shifts.allCompanies', 'All Companies') },
                         ...companies.map((c) => ({
                           value: String(c.id),
-                          label: c.name
+                          label: c.name,
+                          render: <span style={FILTER_OPTION_TEXT}>{c.name}</span>,
+                          selectedRender: <span style={FILTER_OPTION_TEXT}>{c.name}</span>,
                         }))
                       ]}
                       searchable={true}
@@ -877,8 +935,8 @@ export default function ShiftsPage() {
 
                 {stores.length > 0 && (
                   <div style={{
-                    minWidth: isMobile ? '100%' : 180,
-                    maxWidth: isMobile ? 'none' : 240,
+                    minWidth: isMobile ? '100%' : 208,
+                    maxWidth: isMobile ? 'none' : 272,
                     flex: isMobile ? 1 : 'none'
                   }}>
                     <CustomSelect
@@ -887,9 +945,23 @@ export default function ShiftsPage() {
                       placeholder={t('shifts.allStores', 'Tutti i negozi')}
                       options={[
                         { value: '', label: t('shifts.allStores', 'Tutti i negozi') },
+                        // The company name was redundant here — the company filter
+                        // sits immediately to the left. The zone is the useful thing:
+                        // it is the clock this store's shifts and clock-ins run on.
                         ...(companyFilter ? stores.filter(s => s.companyId === companyFilter) : stores).map((s) => ({
                           value: String(s.id),
-                          label: s.companyName ? `${s.name} (${s.companyName})` : s.name
+                          label: s.name,
+                          render: (
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, width: '100%' }}>
+                              <span style={{ ...FILTER_OPTION_TEXT, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                                {s.name}
+                              </span>
+                              <span title={resolveStoreTimezone(s.timezone)} style={FILTER_OPTION_TZ}>
+                                {getStoreTimezoneTag(s.timezone)}
+                              </span>
+                            </span>
+                          ),
+                          selectedRender: <span style={FILTER_OPTION_TEXT}>{s.name}</span>,
                         }))
                       ]}
                       searchable={true}

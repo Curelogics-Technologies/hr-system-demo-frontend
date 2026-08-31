@@ -22,6 +22,8 @@ export interface Terminal {
   storeId: number;
   companyName: string;
   storeName: string;
+  /** The clock this terminal's clock-in window is judged on. */
+  storeTimezone?: string | null;
   plainPassword?: string;
   deviceRegistered: boolean;
   deviceRegisteredAt: string | null;
@@ -93,6 +95,8 @@ export interface StoreTerminalStatus {
   maxStaff: number;
   companyId: number;
   companyName: string;
+  /** The clock this store's shifts are written on and its clock-ins judged against. */
+  timezone?: string | null;
   /** A terminal account exists for this store, enabled or not. */
   hasTerminal: boolean;
 }

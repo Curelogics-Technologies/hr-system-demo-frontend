@@ -191,7 +191,11 @@ export default function CustomSelect({
                       : 'transparent';
                   }}
                 >
-                  <div style={{ flex: 1 }}>{opt.render || opt.label}</div>
+                  {/* min-width:0 — a flex child defaults to min-width:auto, which
+                      refuses to shrink below its content and pushed long option
+                      text past the menu, scrolling it sideways. Renders that ask
+                      for an ellipsis can only honour it once this is set. */}
+                  <div style={{ flex: 1, minWidth: 0 }}>{opt.render || opt.label}</div>
                   {showCheck && opt.value === value && <Check size={16} color="#9A6808" />}
                 </div>
               ))
