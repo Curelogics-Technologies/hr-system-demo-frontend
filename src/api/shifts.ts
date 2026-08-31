@@ -53,89 +53,16 @@ function normalizeDateOnly(value: string): string {
   return `${y}-${m}-${d}`;
 }
 
-function getBrowserTimeZone(): string {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-  } catch {
-    return 'UTC';
-  }
-}
-
-function formatUtcToLocalParts(isoValue: string, timeZone: string): { date: string; time: string } | null {
-  const parsed = new Date(isoValue);
-  if (Number.isNaN(parsed.getTime())) return null;
-
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-  });
-
-  const parts = formatter.formatToParts(parsed);
-  const year = parts.find((part) => part.type === 'year')?.value;
-  const month = parts.find((part) => part.type === 'month')?.value;
-  const day = parts.find((part) => part.type === 'day')?.value;
-  const hour = parts.find((part) => part.type === 'hour')?.value;
-  const minute = parts.find((part) => part.type === 'minute')?.value;
-  const second = parts.find((part) => part.type === 'second')?.value;
-
-  if (!year || !month || !day || !hour || !minute || !second) return null;
-
-  return {
-    date: `${year}-${month}-${day}`,
-    time: `${hour}:${minute}:${second}`,
-  };
-}
-
-function convertShiftUtcToLocal(shift: Shift): Shift {
-  if (!shift.startAtUtc || !shift.endAtUtc) {
-    return shift;
-  }
-
-  const tz = getBrowserTimeZone();
-  const startLocal = formatUtcToLocalParts(shift.startAtUtc, tz);
-  const endLocal = formatUtcToLocalParts(shift.endAtUtc, tz);
-  if (!startLocal || !endLocal) {
-    return shift;
-  }
-
-  const breakStartLocal = shift.breakStartAtUtc
-    ? formatUtcToLocalParts(shift.breakStartAtUtc, tz)?.time ?? shift.breakStart
-    : shift.breakStart;
-  const breakEndLocal = shift.breakEndAtUtc
-    ? formatUtcToLocalParts(shift.breakEndAtUtc, tz)?.time ?? shift.breakEnd
-    : shift.breakEnd;
-  const splitStart2Local = shift.splitStart2AtUtc
-    ? formatUtcToLocalParts(shift.splitStart2AtUtc, tz)?.time ?? shift.splitStart2
-    : shift.splitStart2;
-  const splitEnd2Local = shift.splitEnd2AtUtc
-    ? formatUtcToLocalParts(shift.splitEnd2AtUtc, tz)?.time ?? shift.splitEnd2
-    : shift.splitEnd2;
-
-  return {
-    ...shift,
-    date: startLocal.date,
-    startTime: startLocal.time,
-    endTime: endLocal.time,
-    breakStart: breakStartLocal,
-    breakEnd: breakEndLocal,
-    splitStart2: splitStart2Local,
-    splitEnd2: splitEnd2Local,
-  };
-}
+// Times arrive from the server already expressed in the store's own timezone —
+// s.start_time is the wall-clock instruction ("09:00 at Varese") and start_at_utc
+// was derived from it in that same zone. Re-rendering them in the VIEWER's zone
+// used to be the other half of the Varese outage: the calendar showed the manager
+// her own 09:00 back, which hid the fault from the only person who could see it,
+// and because the calendar also seeds the edit form, saving wrote the converted
+// number back. Displaying what the server sent is both simpler and correct.
 
 function normalizeShift(shift: Shift): Shift {
-  const localized = convertShiftUtcToLocal(shift);
-  return {
-    ...shift,
-    ...localized,
-    date: normalizeDateOnly(localized.date),
-  };
+  return { ...shift, date: normalizeDateOnly(shift.date) };
 }
 
 export interface ShiftTemplate {
@@ -192,7 +119,6 @@ export async function listShifts(params: {
   const res = await client.get('/shifts', {
     params: {
       ...params,
-      timezone: getBrowserTimeZone(),
     },
   });
   return {
@@ -204,7 +130,6 @@ export async function listShifts(params: {
 export async function createShift(payload: CreateShiftPayload): Promise<Shift> {
   const res = await client.post('/shifts', {
     ...payload,
-    timezone: payload.timezone ?? getBrowserTimeZone(),
   });
   return normalizeShift(res.data.data as Shift);
 }
@@ -212,7 +137,6 @@ export async function createShift(payload: CreateShiftPayload): Promise<Shift> {
 export async function updateShift(id: number, payload: UpdateShiftPayload): Promise<Shift> {
   const res = await client.put(`/shifts/${id}`, {
     ...payload,
-    timezone: payload.timezone ?? getBrowserTimeZone(),
   });
   return normalizeShift(res.data.data as Shift);
 }
@@ -294,7 +218,6 @@ export interface ImportResult {
 export async function importShifts(file: File): Promise<ImportResult> {
   const form = new FormData();
   form.append('file', file);
-  form.append('timezone', getBrowserTimeZone());
   const res = await client.post('/shifts/import', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
