@@ -167,7 +167,7 @@ function IconMenu() {
 export default function ShiftsPage() {
   const { t, i18n } = useTranslation();
   const { user } = useAuth();
-  const { isMobile } = useBreakpoint();
+  const { isMobile, isDesktop } = useBreakpoint();
 
   const [viewMode, setViewMode] = useState<ViewMode>('week');
   const [currentDate, setCurrentDate] = useState<Date>(getWeekStart(new Date()));
@@ -673,6 +673,20 @@ export default function ShiftsPage() {
             ) : (
               /* Desktop: All buttons */
               <>
+                {/* Activity lives here rather than in the toolbar below: it is an
+                    action like Templates or Export, and keeping it out of the
+                    toolbar leaves the filters and the store clock room to sit on
+                    one line instead of wrapping onto two. */}
+                <button
+                  className={`btn ${activitiesModalOpen ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => openActivitiesModal()}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                    <line x1="3" y1="9" x2="21" y2="9" />
+                  </svg>
+                  {t('shifts.windowDisplayAction', 'Activity')}
+                </button>
                 <button
                   className="btn btn-secondary"
                   onClick={() => setTemplatesOpen(true)}
@@ -733,12 +747,16 @@ export default function ShiftsPage() {
           border: '1px solid var(--border)',
           padding: isMobile ? '8px 8px' : '8px 16px',
           boxShadow: 'var(--shadow-sm)',
-          flexWrap: 'wrap',
+          // One row on desktop. Every item in here can shrink, so the bar absorbs
+          // a narrower window by narrowing the filters and truncating the clock
+          // tag rather than dropping them onto a second line. Below desktop the
+          // tag is not rendered at all and wrapping is allowed again.
+          flexWrap: isDesktop ? 'nowrap' : 'wrap',
           minHeight: 52,
         }}>
 
           {/* ── LEFT: view toggle + navigation + today ── */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', width: isMobile ? '100%' : 'auto' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: isDesktop ? 'nowrap' : 'wrap', width: isMobile ? '100%' : 'auto', flexShrink: 0 }}>
 
             {/* View toggle pill */}
             <div className="shifts-view-toggle" style={{
@@ -842,28 +860,40 @@ export default function ShiftsPage() {
           </div>
 
           {/* ── CENTRE: which clock the calendar below is on ──
-              Only once a single store is picked. With 'all stores' selected the
-              rows can span several zones and one tag would be a lie. */}
-          {!isMobile && selectedFilterStore && (
+              Only once a single store is picked: with several in view their clocks
+              can differ and one tag would be a lie. Desktop only, and allowed to
+              shrink — it is context, and must never be the thing that pushes the
+              filters onto a second row. */}
+          {isDesktop && selectedFilterStore && (
             <div
-              title={resolveStoreTimezone(selectedFilterStore.timezone)}
+              title={`${resolveStoreTimezone(selectedFilterStore.timezone)} · ${getStoreTimezoneTag(selectedFilterStore.timezone)}`}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: 7,
-                padding: '5px 12px',
+                gap: 6,
+                padding: '5px 10px',
                 borderRadius: 999,
                 background: 'var(--surface-warm)',
                 border: '1px solid var(--border)',
-                flexShrink: 0,
                 lineHeight: 1,
+                minWidth: 0,
+                flexShrink: 1,
+                overflow: 'hidden',
               }}
             >
               <IconClockSmall />
-              <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+              <span style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: 'var(--text-secondary)',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                minWidth: 0,
+              }}>
                 {resolveStoreTimezone(selectedFilterStore.timezone)}
               </span>
-              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+              <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--text-muted)', whiteSpace: 'nowrap', flexShrink: 0 }}>
                 {getStoreTimezoneTag(selectedFilterStore.timezone)}
               </span>
             </div>
@@ -874,37 +904,30 @@ export default function ShiftsPage() {
             display: 'flex',
             alignItems: 'center',
             gap: 8,
-            flexShrink: 0,
+            // Shrinks on desktop so the bar stays one row; min-width:0 is what lets
+            // that shrink reach the selects inside rather than stopping here.
+            flexShrink: isDesktop ? 1 : 0,
+            minWidth: 0,
             width: isMobile ? '100%' : 'auto',
             marginTop: isMobile ? 8 : 0
           }}>
-            {/* Activity button (desktop only) */}
-            {!isMobile && (
-              <button
-                className={`btn ${activitiesModalOpen ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => openActivitiesModal()}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="3" width="18" height="18" rx="2" />
-                  <line x1="3" y1="9" x2="21" y2="9" />
-                </svg>
-                {t('shifts.windowDisplayAction', 'Activity')}
-              </button>
-            )}
-
             {!isStoreManager && (companies.length > 0 || stores.length > 0) && (
               <div style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
+                minWidth: 0,
                 width: isMobile ? '100%' : 'auto',
                 flexDirection: isMobile ? 'column' : 'row'
               }}>
                 {companies.length > 0 && (
                   <div style={{
-                    minWidth: isMobile ? '100%' : 208,
+                    // Prefers 208px, shrinks to 168 under pressure. Shrinking is what
+                    // keeps the toolbar on one line: without it these hold their width
+                    // and push the filters onto a second row instead.
+                    flex: isMobile ? 1 : '0 1 208px',
+                    minWidth: isMobile ? '100%' : 168,
                     maxWidth: isMobile ? 'none' : 272,
-                    flex: isMobile ? 1 : 'none'
                   }}>
                     <CustomSelect
                       value={companyFilter ? String(companyFilter) : ''}
@@ -935,9 +958,12 @@ export default function ShiftsPage() {
 
                 {stores.length > 0 && (
                   <div style={{
-                    minWidth: isMobile ? '100%' : 208,
+                    // Prefers 208px, shrinks to 168 under pressure. Shrinking is what
+                    // keeps the toolbar on one line: without it these hold their width
+                    // and push the filters onto a second row instead.
+                    flex: isMobile ? 1 : '0 1 208px',
+                    minWidth: isMobile ? '100%' : 168,
                     maxWidth: isMobile ? 'none' : 272,
-                    flex: isMobile ? 1 : 'none'
                   }}>
                     <CustomSelect
                       value={storeFilter ? String(storeFilter) : ''}
