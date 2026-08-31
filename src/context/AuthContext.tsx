@@ -187,9 +187,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
       .catch((err: unknown) => {
         const status = (err as { response?: { status?: number } })?.response?.status;
-        localStorage.removeItem(TOKEN_KEY);
-        sessionStorage.removeItem(TOKEN_KEY);
-        delete apiClient.defaults.headers.common['Authorization'];
+        // Only a 401 means the session is actually invalid. Discarding the token
+        // on any other failure (a 403 from a secondary bootstrap call, a 5xx, a
+        // dropped connection) silently logs the user out of a session that is
+        // still perfectly valid, and they cannot get back in by logging in again.
+        if (status === 401) {
+          localStorage.removeItem(TOKEN_KEY);
+          sessionStorage.removeItem(TOKEN_KEY);
+          delete apiClient.defaults.headers.common['Authorization'];
+        }
         setAllowedCompanyIds([]);
         setTargetCompanyId(null);
         // Only show a toast for unexpected errors (network down, 5xx).

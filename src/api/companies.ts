@@ -23,6 +23,8 @@ export interface CompanyProfilePayload {
   discountPercent?: number | null;
   discountValidFrom?: string | null;
   discountValidTo?: string | null;
+  billReminderDaysBefore?: number | null;
+  gracePeriodDays?: number | null;
 }
 
 export async function getCompanies(): Promise<Company[]> {

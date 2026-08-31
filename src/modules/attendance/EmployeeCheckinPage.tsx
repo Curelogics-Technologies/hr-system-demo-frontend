@@ -453,10 +453,7 @@ export default function EmployeeCheckinPage() {
             code?: string;
             moduleName?: string;
             shiftStart?: string;
-            shiftEnd?: string;
             allowedFrom?: string;
-            currentTime?: string;
-            storeTimezone?: string;
           };
         };
       };
@@ -472,24 +469,11 @@ export default function EmployeeCheckinPage() {
           module: translatedModuleName
         });
       } else if (errCode === 'SHIFT_TOO_EARLY' && axiosErr?.response?.data?.shiftStart) {
-        // Times arrive already rendered in the store's timezone, alongside the
-        // current time — the employee needs to see both to make sense of a refusal.
-        const { shiftStart, allowedFrom, currentTime, storeTimezone } = axiosErr.response.data;
+        const { shiftStart, allowedFrom } = axiosErr.response.data;
         msg = t('errors.SHIFT_TOO_EARLY_PARAMS', {
-          defaultValue: `Your shift starts at ${shiftStart} (${storeTimezone} time) and you can clock in from ${allowedFrom}. It is now ${currentTime}.`,
+          defaultValue: `Your shift for today starts at ${shiftStart} and you can check in from ${allowedFrom}. Please try again later.`,
           shiftStart,
-          allowedFrom,
-          currentTime,
-          storeTimezone
-        });
-      } else if (errCode === 'SHIFT_ALREADY_ENDED' && axiosErr?.response?.data?.shiftStart) {
-        const { shiftStart, shiftEnd, currentTime, storeTimezone } = axiosErr.response.data;
-        msg = t('errors.SHIFT_ALREADY_ENDED_PARAMS', {
-          defaultValue: `Your shift today (${shiftStart}-${shiftEnd}, ${storeTimezone} time) has already ended. It is now ${currentTime}. Please contact your manager.`,
-          shiftStart,
-          shiftEnd,
-          currentTime,
-          storeTimezone
+          allowedFrom
         });
       } else if (errCode) {
         msg = t(`errors.${errCode}`, errText);

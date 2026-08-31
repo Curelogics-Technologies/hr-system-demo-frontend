@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Palmtree, Thermometer, Trash2, Lock, CheckCheck, Store } from 'lucide-react';
-import { LeaveRequest, LeaveStatus, LeaveBalance, approveLeaveRequest, rejectLeaveRequest, downloadCertificate, cancelLeaveRequest, deleteLeaveRequest, getLeaveBalance, type ApproverOnLeave } from '../../api/leave';
+import { Palmtree, Thermometer, Trash2, Lock, CheckCheck } from 'lucide-react';
+import { LeaveRequest, LeaveStatus, approveLeaveRequest, rejectLeaveRequest, downloadCertificate, cancelLeaveRequest, deleteLeaveRequest } from '../../api/leave';
 import { getAvatarUrl } from '../../api/client';
 import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
@@ -78,74 +78,6 @@ function XIcon() {
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
       <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
     </svg>
-  );
-}
-
-/**
- * The allocation this request will be drawn from, shown beside the decision.
- *
- * An approver was previously deciding blind and only discovered a missing or
- * exhausted balance when the approval was refused. Fetched per request and
- * cached across cards, since a queue commonly holds several requests from the
- * same person.
- */
-const balanceCache = new Map<string, LeaveBalance[]>();
-
-function RequestBalance({ req }: { req: LeaveRequest }) {
-  const { t } = useTranslation();
-  const year = new Date(req.startDate).getFullYear();
-  const key = `${req.userId}:${year}`;
-  const [balances, setBalances] = useState<LeaveBalance[] | null>(balanceCache.get(key) ?? null);
-
-  useEffect(() => {
-    if (balanceCache.has(key)) { setBalances(balanceCache.get(key)!); return; }
-    let alive = true;
-    getLeaveBalance({ userId: req.userId, year })
-      .then((res) => {
-        balanceCache.set(key, res.balances ?? []);
-        if (alive) setBalances(res.balances ?? []);
-      })
-      .catch(() => { if (alive) setBalances([]); });
-    return () => { alive = false; };
-  }, [key, req.userId, year]);
-
-  if (balances === null) {
-    return <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t('common.loading')}</span>;
-  }
-
-  const forType = balances.find((b) => b.leaveType === req.leaveType);
-
-  if (!forType) {
-    return (
-      <span
-        title={t('leave.balance_missing_hint')}
-        style={{
-          display: 'inline-flex', alignItems: 'center', gap: 5,
-          fontSize: 11, fontWeight: 700, color: '#b45309', cursor: 'help',
-        }}
-      >
-        <span aria-hidden>⚠</span>
-        {t('leave.balance_missing', 'Nessun saldo configurato')}
-      </span>
-    );
-  }
-
-  const exhausted = forType.remainingDays <= 0;
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6, fontSize: 11.5 }}>
-      <span style={{
-        fontSize: 9.5, fontWeight: 800, letterSpacing: '0.05em',
-        textTransform: 'uppercase', color: 'var(--text-muted)',
-      }}>
-        {t(`leave.type_${req.leaveType}`)}
-      </span>
-      <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--text-secondary)' }}>
-        <strong style={{ color: 'var(--text-primary)' }}>{forType.usedDays}</strong> / {forType.totalDays}
-      </span>
-      <span style={{ color: exhausted ? '#dc2626' : '#16a34a', fontWeight: exhausted ? 700 : 600 }}>
-        ({forType.remainingDays} {t('leave.balance_remaining_short').toLowerCase()})
-      </span>
-    </span>
   );
 }
 
@@ -273,26 +205,6 @@ export function ApprovalStepper({ req }: { req: LeaveRequest }) {
                   {isOnLeaveSkipped && (
                     <div style={{ color: 'var(--danger)', marginTop: 2, fontSize: 8, fontWeight: 800 }}>
                       {t('leave.stepper_leave', 'LEAVE')}
-                    </div>
-                  )}
-                  {/* Who actually decided this step. The role alone does not
-                      answer "which store manager approved this?", which is the
-                      question an auditor asks first. */}
-                  {(approvalEntry?.approverName || approvalEntry?.approverSurname) && (
-                    <div style={{
-                      fontSize: 8.5, color: 'var(--text-secondary)', marginTop: 2,
-                      textTransform: 'none', fontWeight: 700, whiteSpace: 'nowrap',
-                      overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 92,
-                    }}>
-                      {`${approvalEntry.approverName ?? ''} ${approvalEntry.approverSurname ?? ''}`.trim()}
-                    </div>
-                  )}
-                  {isAuto && !approvalEntry?.approverName && (
-                    <div style={{
-                      fontSize: 8.5, color: '#b45309', marginTop: 2,
-                      textTransform: 'none', fontWeight: 700,
-                    }}>
-                      {t('leave.stepper_auto_system', 'Sistema')}
                     </div>
                   )}
                   {approvalTime && (
@@ -548,12 +460,10 @@ interface Props {
    * means the module permission blocked the fetch; anything else means there
    * genuinely are no rows.
    */
-  emptyReason?: 'none' | 'forbidden' | 'no_store' | 'on_leave';
-  /** Approvers away on granted leave right now, named in a strip above the list. */
-  approversOnLeave?: ApproverOnLeave[];
+  emptyReason?: 'none' | 'forbidden';
 }
 
-export function LeaveApprovalList({ requests, loading, onRefresh, showActions = false, emptyReason = 'none', approversOnLeave = [] }: Props) {
+export function LeaveApprovalList({ requests, loading, onRefresh, showActions = false, emptyReason = 'none' }: Props) {
   const { t, i18n } = useTranslation();
   const { showToast } = useToast();
   const { user } = useAuth();
@@ -693,58 +603,10 @@ export function LeaveApprovalList({ requests, loading, onRefresh, showActions = 
   }
 
   if (requests.length === 0) {
-    // Three different situations that all used to render the same blank panel:
-    // no permission, no store association, and genuinely nothing to approve.
-    // Only the last is normal; the other two need someone to act.
+    // "Nothing to approve" and "you are not allowed to see this" are entirely
+    // different situations, and rendering the same blank panel for both is what
+    // made a permissions problem look like an empty queue.
     const blocked = emptyReason === 'forbidden';
-    const noStore = emptyReason === 'no_store';
-    const onLeave = emptyReason === 'on_leave';
-
-    if (onLeave) {
-      return (
-        <div style={{
-          padding: '44px 32px', textAlign: 'center',
-          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
-        }}>
-          <div style={{
-            width: 46, height: 46, borderRadius: '50%',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: 'rgba(37,99,235,0.10)', color: '#2563eb',
-          }}>
-            <Palmtree size={22} strokeWidth={2.2} />
-          </div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
-            {t('leave.empty_on_leave_title', 'Sei in ferie')}
-          </div>
-          <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', maxWidth: 420, lineHeight: 1.5 }}>
-            {t('leave.empty_on_leave_body', 'Sei attualmente in ferie approvate, quindi le richieste sono stete affidate agli altri approvatori. Torneranno qui al tuo rientro.')}
-          </div>
-        </div>
-      );
-    }
-
-    if (noStore) {
-      return (
-        <div style={{
-          padding: '44px 32px', textAlign: 'center',
-          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
-        }}>
-          <div style={{
-            width: 46, height: 46, borderRadius: '50%',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: 'rgba(180,83,9,0.10)', color: '#b45309',
-          }}>
-            <Store size={22} strokeWidth={2.2} />
-          </div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
-            {t('leave.empty_no_store_title', 'Nessun negozio associato')}
-          </div>
-          <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', maxWidth: 420, lineHeight: 1.5 }}>
-            {t('leave.empty_no_store_body', 'Il tuo profilo non è associato ad alcun negozio, quindi non ci sono richieste da mostrare qui. Chiedi a HR o a un amministratore di assegnarti un negozio.')}
-          </div>
-        </div>
-      );
-    }
     return (
       <div style={{
         padding: '48px 32px', textAlign: 'center',
@@ -793,49 +655,7 @@ export function LeaveApprovalList({ requests, loading, onRefresh, showActions = 
         loading={actionLoading}
       />
 
-      {/* Who is away, named. An approver on leave used to just be a silent gap in
-          the chain — you could not tell whether nobody had acted or nobody could. */}
-      {approversOnLeave.length > 0 && (
-        <div style={{
-          margin: '4px 16px 0', padding: '10px 12px', borderRadius: 10,
-          background: 'var(--surface-warm, rgba(180,83,9,0.06))',
-          border: '1px solid rgba(180,83,9,0.16)',
-          display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10,
-        }}>
-          <Palmtree size={14} strokeWidth={2.2} style={{ color: '#b45309', flexShrink: 0 }} />
-          {approversOnLeave.map((a) => (
-            <div key={a.userId} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              {a.avatarFilename ? (
-                <img
-                  src={getAvatarUrl(a.avatarFilename) ?? undefined}
-                  alt=""
-                  style={{ width: 20, height: 20, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }}
-                />
-              ) : (
-                <div style={{
-                  width: 20, height: 20, borderRadius: '50%', flexShrink: 0,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: 'rgba(180,83,9,0.14)', color: '#b45309',
-                  fontSize: 9, fontWeight: 700,
-                }}>
-                  {(a.name?.[0] ?? '').toUpperCase()}{(a.surname?.[0] ?? '').toUpperCase()}
-                </div>
-              )}
-              <span style={{ fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.35 }}>
-                <strong style={{ color: 'var(--text-primary)', fontWeight: 650 }}>
-                  {a.name} {a.surname}
-                </strong>
-                {' '}({t(`roles.${a.role}`, a.role.replace(/_/g, ' '))})
-                {' '}{t('leave.approver_on_leave', 'è in ferie')} {formatDate(a.startDate)} – {formatDate(a.endDate)}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Inset from the panel edge. The cards previously ran flush against the
-          container border, which read as a rendering fault rather than a list. */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '4px 16px 16px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {requests.slice(0, visibleCount).map((req) => {
           const isVacation = req.leaveType === 'vacation';
           const isShortLeave = req.leaveDurationType === 'short_leave';
@@ -998,16 +818,7 @@ export function LeaveApprovalList({ requests, loading, onRefresh, showActions = 
                   req.currentApproverRole !== null &&
                   req.status !== 'cancelled' &&
                   (user?.isSuperAdmin || req.currentApproverRole === effectiveApproverRole) && (
-                  // Balance on the left, actions on the right: the approver
-                  // needs to know what the request will be drawn from before
-                  // deciding, and the two belong on the same line.
-                  <div style={{
-                    display: 'flex', alignItems: 'center', gap: 12, marginTop: 12,
-                    paddingTop: 12, borderTop: '1px solid var(--border)', flexWrap: 'wrap',
-                  }}>
-                    <RequestBalance req={req} />
-                    <div style={{ flex: 1 }} />
-                    <div style={{ display: 'flex', gap: 8 }}>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
                     <button
                       onClick={() => handleApprove(req.id)}
                       disabled={actionLoading}
@@ -1043,7 +854,6 @@ export function LeaveApprovalList({ requests, loading, onRefresh, showActions = 
                       </svg>
                       {t('leave.action_reject')}
                     </button>
-                    </div>
                   </div>
                 )}
                 {/* Cancel button — only for the request owner when still pending */}

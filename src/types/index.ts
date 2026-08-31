@@ -58,6 +58,8 @@ export interface Company {
   discountPercent?: number | null;
   discountValidFrom?: string | null;
   discountValidTo?: string | null;
+  billReminderDaysBefore?: number | null;
+  gracePeriodDays?: number | null;
   storeCount: number;
   employeeCount: number;
   activeDevicesCount: number;
@@ -293,3 +295,148 @@ export interface EmployeeListResponse {
   limit: number;
   pages: number;
 }
+
+export type PaymentProvider = 'stripe' | 'paypal';
+export type SubscriptionStatus = 'pending' | 'active' | 'past_due' | 'canceled' | 'unpaid' | 'incomplete';
+
+export interface Subscription {
+  id: number;
+  companyId?: number;
+  provider: PaymentProvider;
+  status: SubscriptionStatus;
+  seatQuantity: number;
+  deviceQuantity: number;
+  pendingSeatQuantity: number | null;
+  pendingDeviceQuantity: number | null;
+  unitPriceEmployee: number;
+  unitPriceDevice: number;
+  currency: string;
+  currentPeriodStart: string | null;
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
+  gracePeriodEndsAt: string | null;
+  billReminderDaysBefore?: number;
+  gracePeriodDays?: number;
+  createdAt?: string;
+}
+
+export type BillingTransactionKind =
+  | 'activation'
+  | 'renewal'
+  | 'license_upgrade'
+  | 'failed';
+
+export interface BillingTransaction {
+  /** What the payment was, so its label can be translated. */
+  kind?: BillingTransactionKind | null;
+  id: number;
+  provider: PaymentProvider;
+  amountCents: number;
+  currency: string;
+  status: 'pending' | 'paid' | 'failed' | 'refunded';
+  description: string | null;
+  seatQuantity?: number;
+  deviceQuantity?: number;
+  invoiceUrl: string | null;
+  failureCode?: string | null;
+  failureMessage: string | null;
+  attemptCount?: number;
+  paidAt: string | null;
+  createdAt: string;
+}
+
+export interface LicenseSnapshot {
+  /** False for companies grandfathered in before the billing module. */
+  billingEnforced?: boolean;
+  hasSubscription: boolean;
+  status: string | null;
+  employeesLicensed: number;
+  employeesInUse: number;
+  employeesRemaining: number;
+  terminalsLicensed: number;
+  terminalsInUse: number;
+  terminalsRemaining: number;
+  pendingUpgrade: {
+    employees: number;
+    terminals: number;
+    amountCents: number | null;
+    requestedAt: string | null;
+  } | null;
+  scheduledReduction: { employees: number | null; terminals: number | null } | null;
+}
+
+export interface LicenseQuote {
+  extraEmployees: number;
+  extraTerminals: number;
+  isIncrease: boolean;
+  isDecrease: boolean;
+  additionalMonthly: number;
+  amountDueNow: number;
+  amountDueNowCents: number;
+  newMonthlyTotal: number;
+  remainingRatio: number;
+  daysRemaining: number | null;
+  /** Length of the current billing period in whole days. */
+  totalDays?: number;
+}
+
+export interface BillingOverview {
+  company: {
+    id: number;
+    name: string;
+    currency: string;
+    vatNumber?: string | null;
+    sdiRecipientCode?: string | null;
+    pecEmail?: string | null;
+    pricePerEmployee: number;
+    pricePerDevice: number;
+  };
+  subscription: Subscription | null;
+  liveUsage: {
+    employeeCount: number;
+    deviceCount: number;
+    calculatedMonthlyTotal: number;
+  };
+  readiness?: {
+    canCheckout: boolean;
+    missingFields: string[];
+    pricingConfigured: boolean;
+    hasBillableQuantity: boolean;
+    activeProvider: 'stripe' | 'paypal' | null;
+  };
+  /** What the company bought versus what it is using. */
+  licenses?: LicenseSnapshot;
+  /** The card the provider will bill, when there is one on file. */
+  paymentMethod?: {
+    brand: string;
+    last4: string;
+    expMonth: number;
+    expYear: number;
+  } | null;
+  transactions: BillingTransaction[];
+}
+
+export interface SuperAdminBillingCompanyRow {
+  id: number;
+  name: string;
+  slug: string;
+  currency: string;
+  pricePerEmployee: number;
+  pricePerDevice: number;
+  billReminderDaysBefore: number;
+  gracePeriodDays: number;
+  employeeCount: number;
+  activeDevicesCount: number;
+  subscriptionId: number | null;
+  provider: PaymentProvider | null;
+  subscriptionStatus: SubscriptionStatus | null;
+  seatQuantity: number | null;
+  deviceQuantity: number | null;
+  currentPeriodStart: string | null;
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean | null;
+  gracePeriodEndsAt: string | null;
+  lastPaidAt: string | null;
+  totalRevenueCents: number | null;
+}
+

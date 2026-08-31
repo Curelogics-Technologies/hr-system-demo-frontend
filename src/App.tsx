@@ -65,6 +65,9 @@ const PublicJobDetailPage = lazyRoute(() => import('./modules/publicCareers/Publ
 const PrivacyPolicyPage = lazyRoute(() => import('./pages/legal/PrivacyPolicyPage'));
 const TermsOfServicePage = lazyRoute(() => import('./pages/legal/TermsOfServicePage'));
 const CookiePolicyPage = lazyRoute(() => import('./pages/legal/CookiePolicyPage'));
+const BillingPage = lazyRoute(() => import('./modules/billing/BillingPage'));
+const PaymentProcessingPage = lazyRoute(() => import('./modules/billing/PaymentProcessingPage'));
+import { BillingBlockedOverlay } from './modules/billing/BillingBlockedOverlay';
 
 // Refresh permissions whenever the user navigates to a new route.
 // This ensures that permission changes made by an admin are always picked up
@@ -312,6 +315,18 @@ function AppRoutes() {
         </ProtectedRoute>
       } />
 
+      <Route path="/impostazioni/fatturazione" element={
+        <ProtectedRoute roles={['admin']} permissionKey="impostazioni">
+          <Layout title={t('billing.title', 'Fatturazione & Abbonamento')}><BillingPage /></Layout>
+        </ProtectedRoute>
+      } />
+
+      <Route path="/impostazioni/fatturazione/processing" element={
+        <ProtectedRoute roles={['admin']}>
+          <Layout title={t('billing.processing.title', 'Elaborazione Pagamento')}><PaymentProcessingPage /></Layout>
+        </ProtectedRoute>
+      } />
+
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
     </>
@@ -334,6 +349,7 @@ export default function App() {
           <OfflineSyncProvider>
             <BrowserRouter>
               <ToastContainer />
+              <BillingBlockedOverlay />
               <ErrorBoundary>
                 <Suspense fallback={<SuspenseFallback />}>
                   <AppRoutes />
