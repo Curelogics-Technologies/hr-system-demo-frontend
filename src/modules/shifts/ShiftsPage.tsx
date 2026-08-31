@@ -103,6 +103,14 @@ function IconChevronRight() {
     </svg>
   );
 }
+function IconClockSmall() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)', flexShrink: 0 }}>
+      <circle cx="12" cy="12" r="9" />
+      <polyline points="12 7 12 12 15.5 14" />
+    </svg>
+  );
+}
 function IconTemplate() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -170,6 +178,9 @@ export default function ShiftsPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyFilter, setCompanyFilter] = useState<number | null>(null);
   const [storeFilter, setStoreFilter] = useState<number | null>(user?.storeId ?? null);
+  // The store whose clock the calendar is currently showing, or null while more
+  // than one store is in view.
+  const selectedFilterStore = storeFilter ? stores.find((s) => s.id === storeFilter) ?? null : null;
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editingShift, setEditingShift] = useState<Shift | null>(null);
@@ -829,6 +840,34 @@ export default function ShiftsPage() {
               </button>
             )}
           </div>
+
+          {/* ── CENTRE: which clock the calendar below is on ──
+              Only once a single store is picked. With 'all stores' selected the
+              rows can span several zones and one tag would be a lie. */}
+          {!isMobile && selectedFilterStore && (
+            <div
+              title={resolveStoreTimezone(selectedFilterStore.timezone)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 7,
+                padding: '5px 12px',
+                borderRadius: 999,
+                background: 'var(--surface-warm)',
+                border: '1px solid var(--border)',
+                flexShrink: 0,
+                lineHeight: 1,
+              }}
+            >
+              <IconClockSmall />
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                {resolveStoreTimezone(selectedFilterStore.timezone)}
+              </span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                {getStoreTimezoneTag(selectedFilterStore.timezone)}
+              </span>
+            </div>
+          )}
 
           {/* ── RIGHT: store filter + loading indicator ── */}
           <div style={{

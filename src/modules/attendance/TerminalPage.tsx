@@ -15,7 +15,7 @@ import { translateApiError } from '../../utils/apiErrors';
 import { Spinner } from '../../components/ui';
 import { Monitor, RefreshCw, ShieldCheck, AlertOctagon, RefreshCcw, LogIn, LogOut, Coffee, Play, Clock } from 'lucide-react';
 import { useSocket } from '../../context/SocketContext';
-import { getBrowserTimeZone, getStoreTimezoneTag, getTimezoneLocalTimeLabel, resolveStoreTimezone, viewerDiffersFromStore } from '../../utils/timezone';
+import { getBrowserTimeZone, getStoreTimezoneTag, resolveStoreTimezone, viewerDiffersFromStore } from '../../utils/timezone';
 
 const REFRESH_AT_SECONDS = 15;
 
@@ -389,9 +389,33 @@ export default function TerminalPage() {
         borderBottom: '1px solid rgba(255,255,255,0.06)',
         zIndex: 10
       }}>
-        <div style={{ display: 'flex', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
           <span style={{ fontSize: 11, background: 'rgba(255,255,255,0.1)', padding: '2px 6px', borderRadius: 4, textTransform: 'uppercase', letterSpacing: 0.5, opacity: 0.8 }}>
             Terminal
+          </span>
+          {/* The clock everything on this screen is measured against. Named in
+              full, not just as an offset — two shops an hour apart are far easier
+              to tell apart by 'Europe/Rome' than by 'UTC+02:00'. */}
+          <span
+            title={storeTimezone}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 11,
+              background: 'rgba(255,255,255,0.08)',
+              border: '1px solid rgba(255,255,255,0.14)',
+              padding: '2px 8px',
+              borderRadius: 4,
+              letterSpacing: 0.4,
+              color: 'rgba(255,255,255,0.78)',
+              whiteSpace: 'nowrap',
+              minWidth: 0,
+            }}
+          >
+            <Clock size={12} />
+            <span style={{ fontWeight: 700 }}>{storeTimezone}</span>
+            <span style={{ opacity: 0.7 }}>{getStoreTimezoneTag(store?.timezone, time)}</span>
           </span>
         </div>
 
@@ -778,38 +802,34 @@ export default function TerminalPage() {
                 {dateStr}
               </div>
 
-              {/* Says whose clock the display above is on. Silent about the tablet
-                  unless the two disagree, which is the only case that needs it. */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 6 }}>
-                <span
-                  title={storeTimezone}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    background: 'rgba(255,255,255,0.06)',
-                    border: '1px solid rgba(255,255,255,0.14)',
-                    borderRadius: 20,
-                    padding: '4px 12px',
-                    fontSize: 12.5,
+              {/* The tablet's own clock, echoed small beneath the store clock and
+                  only when the two disagree. Same typeface as the big readout so it
+                  reads as a second clock rather than a warning — the store clock is
+                  the one that governs; this one just explains the difference. */}
+              {viewerOffClock && (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, marginTop: 10 }}>
+                  <div style={{
+                    fontSize: 'clamp(9px, 1.4vh, 11px)',
                     fontWeight: 700,
-                    letterSpacing: 0.4,
-                    color: 'rgba(255,255,255,0.72)',
+                    letterSpacing: 2,
+                    textTransform: 'uppercase',
+                    color: 'rgba(255,255,255,0.38)',
                     fontFamily: 'var(--font-display)',
-                  }}
-                >
-                  <Clock size={13} />
-                  {t('terminal.storeTime', 'Store time')} · {getStoreTimezoneTag(store?.timezone, time)}
-                </span>
-                {viewerOffClock && (
-                  <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', fontFamily: 'var(--font-body)' }}>
-                    {t('terminal.yourTime', 'this device: {{time}} ({{zone}})', {
-                      time: getTimezoneLocalTimeLabel(getBrowserTimeZone(), time),
-                      zone: getStoreTimezoneTag(getBrowserTimeZone(), time),
-                    })}
-                  </span>
-                )}
-              </div>
+                  }}>
+                    {t('terminal.deviceTime', 'This device')} · {getStoreTimezoneTag(getBrowserTimeZone(), time)}
+                  </div>
+                  <div style={{
+                    fontSize: 'clamp(18px, 2.6vh, 26px)',
+                    fontWeight: 800,
+                    letterSpacing: 1,
+                    color: 'rgba(255,255,255,0.5)',
+                    fontFamily: 'var(--font-display)',
+                    fontVariantNumeric: 'tabular-nums',
+                  }}>
+                    {formatTerminalTime(time, hour12, getBrowserTimeZone())}
+                  </div>
+                </div>
+              )}
 
               {/* Authorized checkmark/badge under date */}
               {deviceState.isRegistered && deviceState.isMatched && (

@@ -2102,6 +2102,7 @@ const it = {
   // ─── Terminal ─────────────────────────────────────────────────────────────
   terminal: {
     storeTime: 'Ora del negozio',
+    deviceTime: 'Questo dispositivo',
     yourTime: 'questo dispositivo: {{time}} ({{zone}})',
     title: 'Terminale Presenze',
     checkin: 'ENTRATA',

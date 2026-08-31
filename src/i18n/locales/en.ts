@@ -2108,6 +2108,7 @@ const en = {
   // ─── Terminal ─────────────────────────────────────────────────────────────
   terminal: {
     storeTime: 'Store time',
+    deviceTime: 'This device',
     yourTime: 'this device: {{time}} ({{zone}})',
     title: 'Attendance Terminal',
     checkin: 'CHECK-IN',
