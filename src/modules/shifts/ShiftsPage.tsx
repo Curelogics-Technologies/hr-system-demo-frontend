@@ -72,6 +72,31 @@ function formatDateDisplay(date: Date): string {
 
 const MANAGEMENT_ROLES = ['admin', 'hr', 'area_manager', 'store_manager'];
 
+/**
+ * True only when the toolbar has room to spare. The store-clock tag is context,
+ * not a control: rather than let it squeeze the filters or wrap the bar onto a
+ * second row, it simply is not rendered below this width.
+ */
+function useRoomForClockTag(): boolean {
+  const query = '(min-width: 1440px)';
+  const [hasRoom, setHasRoom] = useState(() =>
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia(query).matches
+      : false,
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mql = window.matchMedia(query);
+    const onChange = () => setHasRoom(mql.matches);
+    onChange();
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  }, []);
+
+  return hasRoom;
+}
+
 // Slightly smaller than the control's own text, so a long store name fits without
 // truncating and the zone tag still has room beside it.
 const FILTER_OPTION_TEXT: React.CSSProperties = {
@@ -167,7 +192,8 @@ function IconMenu() {
 export default function ShiftsPage() {
   const { t, i18n } = useTranslation();
   const { user } = useAuth();
-  const { isMobile, isDesktop } = useBreakpoint();
+  const { isMobile } = useBreakpoint();
+  const roomForClockTag = useRoomForClockTag();
 
   const [viewMode, setViewMode] = useState<ViewMode>('week');
   const [currentDate, setCurrentDate] = useState<Date>(getWeekStart(new Date()));
@@ -747,16 +773,16 @@ export default function ShiftsPage() {
           border: '1px solid var(--border)',
           padding: isMobile ? '8px 8px' : '8px 16px',
           boxShadow: 'var(--shadow-sm)',
-          // One row on desktop. Every item in here can shrink, so the bar absorbs
-          // a narrower window by narrowing the filters and truncating the clock
-          // tag rather than dropping them onto a second line. Below desktop the
-          // tag is not rendered at all and wrapping is allowed again.
-          flexWrap: isDesktop ? 'nowrap' : 'wrap',
+          // One row, but only at a width where everything genuinely fits. Forcing
+          // nowrap on a narrower screen would push content out of the bar instead
+          // of wrapping it, which is worse than the wrap it was meant to prevent —
+          // the filters hold their width and cannot absorb it.
+          flexWrap: roomForClockTag ? 'nowrap' : 'wrap',
           minHeight: 52,
         }}>
 
           {/* ── LEFT: view toggle + navigation + today ── */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: isDesktop ? 'nowrap' : 'wrap', width: isMobile ? '100%' : 'auto', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: roomForClockTag ? 'nowrap' : 'wrap', width: isMobile ? '100%' : 'auto', flexShrink: 0 }}>
 
             {/* View toggle pill */}
             <div className="shifts-view-toggle" style={{
@@ -864,7 +890,7 @@ export default function ShiftsPage() {
               can differ and one tag would be a lie. Desktop only, and allowed to
               shrink — it is context, and must never be the thing that pushes the
               filters onto a second row. */}
-          {isDesktop && selectedFilterStore && (
+          {roomForClockTag && selectedFilterStore && (
             <div
               title={`${resolveStoreTimezone(selectedFilterStore.timezone)} · ${getStoreTimezoneTag(selectedFilterStore.timezone)}`}
               style={{
@@ -906,7 +932,7 @@ export default function ShiftsPage() {
             gap: 8,
             // Shrinks on desktop so the bar stays one row; min-width:0 is what lets
             // that shrink reach the selects inside rather than stopping here.
-            flexShrink: isDesktop ? 1 : 0,
+            flexShrink: 0,
             minWidth: 0,
             width: isMobile ? '100%' : 'auto',
             marginTop: isMobile ? 8 : 0
@@ -922,11 +948,10 @@ export default function ShiftsPage() {
               }}>
                 {companies.length > 0 && (
                   <div style={{
-                    // Prefers 208px, shrinks to 168 under pressure. Shrinking is what
-                    // keeps the toolbar on one line: without it these hold their width
-                    // and push the filters onto a second row instead.
-                    flex: isMobile ? 1 : '0 1 208px',
-                    minWidth: isMobile ? '100%' : 168,
+                    // Held at 208 and never shrunk. When the bar runs out of room the
+                    // clock tag gives way first — it is context, these are controls.
+                    flex: isMobile ? 1 : '0 0 auto',
+                    minWidth: isMobile ? '100%' : 208,
                     maxWidth: isMobile ? 'none' : 272,
                   }}>
                     <CustomSelect
@@ -958,11 +983,10 @@ export default function ShiftsPage() {
 
                 {stores.length > 0 && (
                   <div style={{
-                    // Prefers 208px, shrinks to 168 under pressure. Shrinking is what
-                    // keeps the toolbar on one line: without it these hold their width
-                    // and push the filters onto a second row instead.
-                    flex: isMobile ? 1 : '0 1 208px',
-                    minWidth: isMobile ? '100%' : 168,
+                    // Held at 208 and never shrunk. When the bar runs out of room the
+                    // clock tag gives way first — it is context, these are controls.
+                    flex: isMobile ? 1 : '0 0 auto',
+                    minWidth: isMobile ? '100%' : 208,
                     maxWidth: isMobile ? 'none' : 272,
                   }}>
                     <CustomSelect
