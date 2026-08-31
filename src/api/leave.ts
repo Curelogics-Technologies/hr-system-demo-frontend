@@ -125,6 +125,12 @@ export interface LeaveListResponse {
   page?: number;
   limit?: number;
   pages?: number;
+  /**
+   * Set when the viewer's role is store-scoped but they have no stores to
+   * scope to. Their queue is then correctly empty, but that is
+   * indistinguishable on screen from "nothing to approve" — this says which.
+   */
+  scopeIssue?: 'no_store_association' | null;
 }
 
 export interface BalanceResponse {

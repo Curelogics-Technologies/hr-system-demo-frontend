@@ -169,3 +169,40 @@ export function getTimezoneOptionValues(extra: Array<string | null | undefined> 
   }
   return Array.from(values).sort((a, b) => a.localeCompare(b));
 }
+
+/** Fallback used wherever a store row carries no timezone of its own. */
+export const DEFAULT_STORE_TIMEZONE = 'Europe/Rome';
+
+/** The zone a store's shifts are stored and enforced in. */
+export function resolveStoreTimezone(timezone: string | null | undefined): string {
+  const trimmed = (timezone ?? '').trim();
+  return trimmed || DEFAULT_STORE_TIMEZONE;
+}
+
+/**
+ * Compact zone tag for dropdowns and headers, e.g. "UTC+02:00".
+ * The offset is what people can act on at a glance; the IANA name is long and
+ * means little to a store manager, so it belongs in a tooltip.
+ */
+export function getStoreTimezoneTag(
+  timezone: string | null | undefined,
+  atDate: Date = new Date(),
+): string {
+  return getUtcOffsetLabel(resolveStoreTimezone(timezone), atDate);
+}
+
+/**
+ * True when the viewer is not on the store's clock — the case where showing a
+ * time without saying whose clock it is becomes actively misleading. This is the
+ * condition that hid the Varese outage: the manager's calendar quietly rendered
+ * every shift in her own zone, so it looked correct to the one person who could
+ * have caught it.
+ */
+export function viewerDiffersFromStore(timezone: string | null | undefined): boolean {
+  const store = resolveStoreTimezone(timezone);
+  const viewer = getBrowserTimeZone();
+  if (!viewer || viewer === store) return false;
+  // Same instant on both clocks means nothing to explain, even when the IANA
+  // names differ (Europe/Rome vs Europe/Berlin, say).
+  return getUtcOffsetLabel(store) !== getUtcOffsetLabel(viewer);
+}

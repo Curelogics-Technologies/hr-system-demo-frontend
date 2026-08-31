@@ -15,6 +15,7 @@ import { translateApiError } from '../../utils/apiErrors';
 import { Spinner } from '../../components/ui';
 import { Monitor, RefreshCw, ShieldCheck, AlertOctagon, RefreshCcw, LogIn, LogOut, Coffee, Play, Clock } from 'lucide-react';
 import { useSocket } from '../../context/SocketContext';
+import { getBrowserTimeZone, getStoreTimezoneTag, resolveStoreTimezone, viewerDiffersFromStore } from '../../utils/timezone';
 
 const REFRESH_AT_SECONDS = 15;
 
@@ -48,21 +49,35 @@ function getProgressColor(secondsLeft: number, expiresIn: number): string {
   return '#ef4444';
 }
 
-function formatTerminalTime(date: Date, hour12: boolean): string {
-  let hours = date.getHours();
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  const seconds = String(date.getSeconds()).padStart(2, '0');
-  
+/**
+ * Reads the clock in a given zone rather than the tablet's own. This screen is
+ * the one an employee stands in front of, and the check-in window behind it is
+ * enforced on the store's clock — a tablet carried in from another country, or
+ * simply set wrong, must not be able to disagree with it on screen.
+ */
+function formatTerminalTime(date: Date, hour12: boolean, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+  const pick = (type: string) => parts.find((p) => p.type === type)?.value ?? '00';
+
+  let hours = Number(pick('hour'));
+  const minutes = pick('minute');
+  const seconds = pick('second');
+
   if (hour12) {
     const ampm = hours >= 12 ? 'PM' : 'AM';
     hours = hours % 12;
     hours = hours ? hours : 12; // the hour '0' should be '12'
     const hoursStr = String(hours).padStart(2, '0');
     return `${hoursStr}:${minutes}:${seconds} ${ampm}`;
-  } else {
-    const hoursStr = String(hours).padStart(2, '0');
-    return `${hoursStr}:${minutes}:${seconds}`;
   }
+  const hoursStr = String(hours).padStart(2, '0');
+  return `${hoursStr}:${minutes}:${seconds}`;
 }
 
 export default function TerminalPage() {
@@ -341,8 +356,10 @@ export default function TerminalPage() {
   }
 
   const locale = i18n.language === 'en' ? 'en-GB' : 'it-IT';
-  const timeStr = formatTerminalTime(time, hour12);
-  const dateStr = time.toLocaleDateString(locale, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  const storeTimezone = resolveStoreTimezone(store?.timezone);
+  const viewerOffClock = viewerDiffersFromStore(store?.timezone);
+  const timeStr = formatTerminalTime(time, hour12, storeTimezone);
+  const dateStr = time.toLocaleDateString(locale, { timeZone: storeTimezone, weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   const expiresIn = qrData?.expiresIn ?? 60;
   const progress = qrData ? Math.max(0, (secondsLeft / expiresIn) * 100) : 0;
   const progressColor = getProgressColor(secondsLeft, expiresIn);
@@ -372,9 +389,33 @@ export default function TerminalPage() {
         borderBottom: '1px solid rgba(255,255,255,0.06)',
         zIndex: 10
       }}>
-        <div style={{ display: 'flex', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
           <span style={{ fontSize: 11, background: 'rgba(255,255,255,0.1)', padding: '2px 6px', borderRadius: 4, textTransform: 'uppercase', letterSpacing: 0.5, opacity: 0.8 }}>
             Terminal
+          </span>
+          {/* The clock everything on this screen is measured against. Named in
+              full, not just as an offset — two shops an hour apart are far easier
+              to tell apart by 'Europe/Rome' than by 'UTC+02:00'. */}
+          <span
+            title={storeTimezone}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 11,
+              background: 'rgba(255,255,255,0.08)',
+              border: '1px solid rgba(255,255,255,0.14)',
+              padding: '2px 8px',
+              borderRadius: 4,
+              letterSpacing: 0.4,
+              color: 'rgba(255,255,255,0.78)',
+              whiteSpace: 'nowrap',
+              minWidth: 0,
+            }}
+          >
+            <Clock size={12} />
+            <span style={{ fontWeight: 700 }}>{storeTimezone}</span>
+            <span style={{ opacity: 0.7 }}>{getStoreTimezoneTag(store?.timezone, time)}</span>
           </span>
         </div>
 
@@ -760,6 +801,35 @@ export default function TerminalPage() {
               }}>
                 {dateStr}
               </div>
+
+              {/* The tablet's own clock, echoed small beneath the store clock and
+                  only when the two disagree. Same typeface as the big readout so it
+                  reads as a second clock rather than a warning — the store clock is
+                  the one that governs; this one just explains the difference. */}
+              {viewerOffClock && (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, marginTop: 10 }}>
+                  <div style={{
+                    fontSize: 'clamp(9px, 1.4vh, 11px)',
+                    fontWeight: 700,
+                    letterSpacing: 2,
+                    textTransform: 'uppercase',
+                    color: 'rgba(255,255,255,0.38)',
+                    fontFamily: 'var(--font-display)',
+                  }}>
+                    {t('terminal.deviceTime', 'This device')} · {getStoreTimezoneTag(getBrowserTimeZone(), time)}
+                  </div>
+                  <div style={{
+                    fontSize: 'clamp(18px, 2.6vh, 26px)',
+                    fontWeight: 800,
+                    letterSpacing: 1,
+                    color: 'rgba(255,255,255,0.5)',
+                    fontFamily: 'var(--font-display)',
+                    fontVariantNumeric: 'tabular-nums',
+                  }}>
+                    {formatTerminalTime(time, hour12, getBrowserTimeZone())}
+                  </div>
+                </div>
+              )}
 
               {/* Authorized checkmark/badge under date */}
               {deviceState.isRegistered && deviceState.isMatched && (
