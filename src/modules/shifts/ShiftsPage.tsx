@@ -72,6 +72,31 @@ function formatDateDisplay(date: Date): string {
 
 const MANAGEMENT_ROLES = ['admin', 'hr', 'area_manager', 'store_manager'];
 
+/**
+ * True only when the toolbar has room to spare. The store-clock tag is context,
+ * not a control: rather than let it squeeze the filters or wrap the bar onto a
+ * second row, it simply is not rendered below this width.
+ */
+function useRoomForClockTag(): boolean {
+  const query = '(min-width: 1440px)';
+  const [hasRoom, setHasRoom] = useState(() =>
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia(query).matches
+      : false,
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mql = window.matchMedia(query);
+    const onChange = () => setHasRoom(mql.matches);
+    onChange();
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  }, []);
+
+  return hasRoom;
+}
+
 // Slightly smaller than the control's own text, so a long store name fits without
 // truncating and the zone tag still has room beside it.
 const FILTER_OPTION_TEXT: React.CSSProperties = {
@@ -168,6 +193,7 @@ export default function ShiftsPage() {
   const { t, i18n } = useTranslation();
   const { user } = useAuth();
   const { isMobile } = useBreakpoint();
+  const roomForClockTag = useRoomForClockTag();
 
   const [viewMode, setViewMode] = useState<ViewMode>('week');
   const [currentDate, setCurrentDate] = useState<Date>(getWeekStart(new Date()));
@@ -673,6 +699,20 @@ export default function ShiftsPage() {
             ) : (
               /* Desktop: All buttons */
               <>
+                {/* Activity lives here rather than in the toolbar below: it is an
+                    action like Templates or Export, and keeping it out of the
+                    toolbar leaves the filters and the store clock room to sit on
+                    one line instead of wrapping onto two. */}
+                <button
+                  className={`btn ${activitiesModalOpen ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => openActivitiesModal()}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                    <line x1="3" y1="9" x2="21" y2="9" />
+                  </svg>
+                  {t('shifts.windowDisplayAction', 'Activity')}
+                </button>
                 <button
                   className="btn btn-secondary"
                   onClick={() => setTemplatesOpen(true)}
@@ -733,12 +773,16 @@ export default function ShiftsPage() {
           border: '1px solid var(--border)',
           padding: isMobile ? '8px 8px' : '8px 16px',
           boxShadow: 'var(--shadow-sm)',
-          flexWrap: 'wrap',
+          // One row, but only at a width where everything genuinely fits. Forcing
+          // nowrap on a narrower screen would push content out of the bar instead
+          // of wrapping it, which is worse than the wrap it was meant to prevent —
+          // the filters hold their width and cannot absorb it.
+          flexWrap: roomForClockTag ? 'nowrap' : 'wrap',
           minHeight: 52,
         }}>
 
           {/* ── LEFT: view toggle + navigation + today ── */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', width: isMobile ? '100%' : 'auto' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: roomForClockTag ? 'nowrap' : 'wrap', width: isMobile ? '100%' : 'auto', flexShrink: 0 }}>
 
             {/* View toggle pill */}
             <div className="shifts-view-toggle" style={{
@@ -842,28 +886,40 @@ export default function ShiftsPage() {
           </div>
 
           {/* ── CENTRE: which clock the calendar below is on ──
-              Only once a single store is picked. With 'all stores' selected the
-              rows can span several zones and one tag would be a lie. */}
-          {!isMobile && selectedFilterStore && (
+              Only once a single store is picked: with several in view their clocks
+              can differ and one tag would be a lie. Desktop only, and allowed to
+              shrink — it is context, and must never be the thing that pushes the
+              filters onto a second row. */}
+          {roomForClockTag && selectedFilterStore && (
             <div
-              title={resolveStoreTimezone(selectedFilterStore.timezone)}
+              title={`${resolveStoreTimezone(selectedFilterStore.timezone)} · ${getStoreTimezoneTag(selectedFilterStore.timezone)}`}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: 7,
-                padding: '5px 12px',
+                gap: 6,
+                padding: '5px 10px',
                 borderRadius: 999,
                 background: 'var(--surface-warm)',
                 border: '1px solid var(--border)',
-                flexShrink: 0,
                 lineHeight: 1,
+                minWidth: 0,
+                flexShrink: 1,
+                overflow: 'hidden',
               }}
             >
               <IconClockSmall />
-              <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+              <span style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: 'var(--text-secondary)',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                minWidth: 0,
+              }}>
                 {resolveStoreTimezone(selectedFilterStore.timezone)}
               </span>
-              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+              <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--text-muted)', whiteSpace: 'nowrap', flexShrink: 0 }}>
                 {getStoreTimezoneTag(selectedFilterStore.timezone)}
               </span>
             </div>
@@ -874,37 +930,29 @@ export default function ShiftsPage() {
             display: 'flex',
             alignItems: 'center',
             gap: 8,
+            // Shrinks on desktop so the bar stays one row; min-width:0 is what lets
+            // that shrink reach the selects inside rather than stopping here.
             flexShrink: 0,
+            minWidth: 0,
             width: isMobile ? '100%' : 'auto',
             marginTop: isMobile ? 8 : 0
           }}>
-            {/* Activity button (desktop only) */}
-            {!isMobile && (
-              <button
-                className={`btn ${activitiesModalOpen ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => openActivitiesModal()}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="3" width="18" height="18" rx="2" />
-                  <line x1="3" y1="9" x2="21" y2="9" />
-                </svg>
-                {t('shifts.windowDisplayAction', 'Activity')}
-              </button>
-            )}
-
             {!isStoreManager && (companies.length > 0 || stores.length > 0) && (
               <div style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
+                minWidth: 0,
                 width: isMobile ? '100%' : 'auto',
                 flexDirection: isMobile ? 'column' : 'row'
               }}>
                 {companies.length > 0 && (
                   <div style={{
+                    // Held at 208 and never shrunk. When the bar runs out of room the
+                    // clock tag gives way first — it is context, these are controls.
+                    flex: isMobile ? 1 : '0 0 auto',
                     minWidth: isMobile ? '100%' : 208,
                     maxWidth: isMobile ? 'none' : 272,
-                    flex: isMobile ? 1 : 'none'
                   }}>
                     <CustomSelect
                       value={companyFilter ? String(companyFilter) : ''}
@@ -935,9 +983,11 @@ export default function ShiftsPage() {
 
                 {stores.length > 0 && (
                   <div style={{
+                    // Held at 208 and never shrunk. When the bar runs out of room the
+                    // clock tag gives way first — it is context, these are controls.
+                    flex: isMobile ? 1 : '0 0 auto',
                     minWidth: isMobile ? '100%' : 208,
                     maxWidth: isMobile ? 'none' : 272,
-                    flex: isMobile ? 1 : 'none'
                   }}>
                     <CustomSelect
                       value={storeFilter ? String(storeFilter) : ''}
