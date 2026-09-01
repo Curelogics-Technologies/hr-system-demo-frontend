@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { Globe2 } from 'lucide-react';
 import apiClient from '../../api/client';
 import { BalancesTab } from '../leave/AdminLeavePanel';
+import { BillingSummaryCard } from '../billing/BillingSummaryCard';
 import CustomSelect, { SelectOption } from '../../components/ui/CustomSelect';
 import { TimezoneOptionContent } from '../../components/timezone/TimezoneOptionContent';
 import {
@@ -661,6 +662,9 @@ const SettingsPage: React.FC = () => {
           {t('settings.subtitle')}
         </p>
       </div>
+
+      {/* Plan, licenses, billing period and receipts at a glance. */}
+      <BillingSummaryCard />
 
       <div style={{
         background: 'var(--surface)', border: '1px solid var(--border)',

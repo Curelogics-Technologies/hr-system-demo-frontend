@@ -9,6 +9,7 @@ import {
   getLeaveBalance,
   LeaveRequest,
   LeaveBalance,
+  type ApproverOnLeave,
 } from '../../api/leave';
 import { LeaveBalanceCard } from './LeaveBalanceCard';
 import { LeaveRequestDrawer } from './LeaveRequestDrawer';
@@ -98,6 +99,9 @@ function PersonalLeavePage() {
   const [pendingForbidden, setPendingForbidden] = useState(false);
   /** Set when the viewer has no store to scope to — a config gap, not an empty queue. */
   const [pendingNoStore, setPendingNoStore] = useState(false);
+  const [callerOnLeave, setCallerOnLeave] = useState(false);
+  const [callerLeave, setCallerLeave] = useState<{ startDate: string; endDate: string; leaveType: string } | null>(null);
+  const [approversOnLeave, setApproversOnLeave] = useState<ApproverOnLeave[]>([]);
   const [decidedRequests, setDecidedRequests] = useState<LeaveRequest[]>([]);
   const [loadingBalance, setLoadingBalance] = useState(true);
 
@@ -154,6 +158,9 @@ function PersonalLeavePage() {
       const res = await getPendingLeaveApprovals();
       setPendingRequests(res.requests);
       setPendingNoStore(res.scopeIssue === 'no_store_association');
+      setCallerOnLeave(res.callerOnLeave === true);
+      setCallerLeave(res.callerLeave ?? null);
+      setApproversOnLeave(res.approversOnLeave ?? []);
     } catch (err: any) {
       // This used to be swallowed. A 403 from the module-permission guard, or
       // any server error, produced an empty tab with no explanation — which
@@ -359,6 +366,8 @@ function PersonalLeavePage() {
                 onRefresh={() => { fetchPendingRequests(); fetchDecidedRequests(); }}
                 showActions
                 emptyReason={pendingForbidden ? 'forbidden' : pendingNoStore ? 'no_store' : 'none'}
+                approversOnLeave={approversOnLeave}
+                callerLeave={callerLeave}
               />
 
               {/* Already settled, so no action buttons — this is history, not a queue. */}

@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { Upload, Download, Filter, Search, X, MoreVertical, Plus } from "lucide-react";
+import { useLicenses, LicenseNotice } from '../billing/useLicenses';
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowLeftRight } from "lucide-react";
@@ -81,6 +82,8 @@ export function EmployeeList() {
   const { t } = useTranslation();
   const { showToast } = useToast();
   const [showNewForm, setShowNewForm] = useState(false);
+  // Paid allowance, so the create action can be honest before the form opens.
+  const { licenses, enforced, canAddEmployee, refresh: refreshLicenses } = useLicenses();
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [showFilterModal, setShowFilterModal] = useState(false);
@@ -979,6 +982,15 @@ export function EmployeeList() {
                 </button>
                 <button
                   onClick={() => setShowNewForm(true)}
+                  disabled={!canAddEmployee}
+                  title={
+                    canAddEmployee
+                      ? undefined
+                      : t(
+                          'billing.employeeLicensesFullShort',
+                          'Licenze dipendenti esaurite: acquistane altre da Fatturazione'
+                        )
+                  }
                   className="btn btn-primary"
                   style={{
                     background: "var(--primary)",
@@ -1014,6 +1026,8 @@ export function EmployeeList() {
           </div>
         )}
       </div>
+
+      <LicenseNotice resource="employee" licenses={licenses} enforced={enforced} />
 
       {/* Filter bar - New Improved Design */}
       <div

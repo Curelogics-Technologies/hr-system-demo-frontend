@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { useLicenses, LicenseNotice } from '../billing/useLicenses';
 import {
   getTerminals,
   getTerminalOperationalState,
@@ -78,6 +79,7 @@ export default function TerminalList() {
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [showForm, setShowForm] = useState(false);
+  const { licenses, enforced, canAddTerminal, refresh: refreshLicenses } = useLicenses();
   const [selectedTerminal, setSelectedTerminal] = useState<Terminal | null>(null);
   const [listReloadTick, setListReloadTick] = useState(0);
 
@@ -350,6 +352,15 @@ export default function TerminalList() {
         {(isAdminOrHr || isSuperAdmin) && (
           <Button
             onClick={() => handleOpenForm(null)}
+            disabled={!canAddTerminal}
+            title={
+              canAddTerminal
+                ? undefined
+                : t(
+                    'billing.terminalLicensesFullShort',
+                    'Licenze terminali esaurite: acquistane altre da Fatturazione'
+                  )
+            }
             style={{ width: isMobile ? '100%' : 'auto' }}
           >
             <Plus size={15} />
@@ -357,6 +368,10 @@ export default function TerminalList() {
           </Button>
         )}
       </div>
+
+      {(isAdminOrHr || isSuperAdmin) && (
+        <LicenseNotice resource="terminal" licenses={licenses} enforced={enforced} />
+      )}
 
       {/* Filter bar - Search on left, Filter button on right */}
       <div

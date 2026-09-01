@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Palmtree, Thermometer, Trash2, Lock, CheckCheck, Store } from 'lucide-react';
-import { LeaveRequest, LeaveStatus, LeaveBalance, approveLeaveRequest, rejectLeaveRequest, downloadCertificate, cancelLeaveRequest, deleteLeaveRequest, getLeaveBalance } from '../../api/leave';
+import { LeaveRequest, LeaveStatus, LeaveBalance, approveLeaveRequest, rejectLeaveRequest, downloadCertificate, cancelLeaveRequest, deleteLeaveRequest, getLeaveBalance, type ApproverOnLeave } from '../../api/leave';
 import { getAvatarUrl } from '../../api/client';
 import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
@@ -548,10 +548,26 @@ interface Props {
    * means the module permission blocked the fetch; anything else means there
    * genuinely are no rows.
    */
-  emptyReason?: 'none' | 'forbidden' | 'no_store';
+  emptyReason?: 'none' | 'forbidden' | 'no_store' | 'on_leave';
+  /** Approvers away on granted leave right now, named in a strip above the list. */
+  approversOnLeave?: ApproverOnLeave[];
+  /** The viewer's own leave covering today. Set = read-only queue. */
+  callerLeave?: { startDate: string; endDate: string; leaveType: string } | null;
 }
 
-export function LeaveApprovalList({ requests, loading, onRefresh, showActions = false, emptyReason = 'none' }: Props) {
+/**
+ * Chain order, mirroring the server. A request is actionable by the role whose
+ * turn it is and by every role above it: an area manager does not have to wait
+ * for the store manager. Once someone acts the stage moves up, and the roles
+ * below it lose their buttons because their turn has passed.
+ */
+const ROLE_RANK: Record<string, number> = {
+  admin: 100, hr: 80, area_manager: 60, store_manager: 40, employee: 20,
+};
+const rankOf = (r?: string | null) =>
+  ROLE_RANK[String(r ?? '').toLowerCase().replace(/s+/g, '_')] ?? 0;
+
+export function LeaveApprovalList({ requests, loading, onRefresh, showActions = false, emptyReason = 'none', approversOnLeave = [], callerLeave = null }: Props) {
   const { t, i18n } = useTranslation();
   const { showToast } = useToast();
   const { user } = useAuth();
@@ -696,6 +712,30 @@ export function LeaveApprovalList({ requests, loading, onRefresh, showActions = 
     // Only the last is normal; the other two need someone to act.
     const blocked = emptyReason === 'forbidden';
     const noStore = emptyReason === 'no_store';
+    const onLeave = emptyReason === 'on_leave';
+
+    if (onLeave) {
+      return (
+        <div style={{
+          padding: '44px 32px', textAlign: 'center',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
+        }}>
+          <div style={{
+            width: 46, height: 46, borderRadius: '50%',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'rgba(37,99,235,0.10)', color: '#2563eb',
+          }}>
+            <Palmtree size={22} strokeWidth={2.2} />
+          </div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
+            {t('leave.empty_on_leave_title', 'Sei in ferie')}
+          </div>
+          <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', maxWidth: 420, lineHeight: 1.5 }}>
+            {t('leave.empty_on_leave_body', 'Sei attualmente in ferie approvate, quindi le richieste sono stete affidate agli altri approvatori. Torneranno qui al tuo rientro.')}
+          </div>
+        </div>
+      );
+    }
 
     if (noStore) {
       return (
@@ -766,6 +806,67 @@ export function LeaveApprovalList({ requests, loading, onRefresh, showActions = 
         onConfirm={handleDeleteConfirm}
         loading={actionLoading}
       />
+
+      {/* The viewer's own leave. The queue stays fully visible — only the
+          decisions are withheld — so "I can see it but cannot act" is stated
+          rather than left to be inferred from missing buttons. */}
+      {callerLeave && (
+        <div style={{
+          margin: '4px 16px 0', padding: '11px 14px', borderRadius: 10,
+          background: 'var(--surface-warm, rgba(37,99,235,0.07))',
+          border: '1px solid rgba(37,99,235,0.20)',
+          display: 'flex', alignItems: 'flex-start', gap: 9,
+        }}>
+          <Palmtree size={15} strokeWidth={2.2} style={{ color: '#2563eb', flexShrink: 0, marginTop: 1 }} />
+          <div style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+            <strong style={{ color: 'var(--text-primary)', fontWeight: 650 }}>
+              {t('leave.caller_on_leave_title', 'Sei in ferie approvate')}
+            </strong>{' '}
+            {formatDate(callerLeave.startDate)} – {formatDate(callerLeave.endDate)}.{' '}
+            {t('leave.caller_on_leave_body', 'Puoi consultare tutte le richieste, ma le decisioni sono affidate agli altri approvatori fino al tuo rientro.')}
+          </div>
+        </div>
+      )}
+
+      {/* Who is away, named. An approver on leave used to just be a silent gap in
+          the chain — you could not tell whether nobody had acted or nobody could. */}
+      {approversOnLeave.length > 0 && (
+        <div style={{
+          margin: '4px 16px 0', padding: '10px 12px', borderRadius: 10,
+          background: 'var(--surface-warm, rgba(180,83,9,0.06))',
+          border: '1px solid rgba(180,83,9,0.16)',
+          display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10,
+        }}>
+          <Palmtree size={14} strokeWidth={2.2} style={{ color: '#b45309', flexShrink: 0 }} />
+          {approversOnLeave.map((a) => (
+            <div key={a.userId} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              {a.avatarFilename ? (
+                <img
+                  src={getAvatarUrl(a.avatarFilename) ?? undefined}
+                  alt=""
+                  style={{ width: 20, height: 20, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }}
+                />
+              ) : (
+                <div style={{
+                  width: 20, height: 20, borderRadius: '50%', flexShrink: 0,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'rgba(180,83,9,0.14)', color: '#b45309',
+                  fontSize: 9, fontWeight: 700,
+                }}>
+                  {(a.name?.[0] ?? '').toUpperCase()}{(a.surname?.[0] ?? '').toUpperCase()}
+                </div>
+              )}
+              <span style={{ fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.35 }}>
+                <strong style={{ color: 'var(--text-primary)', fontWeight: 650 }}>
+                  {a.name} {a.surname}
+                </strong>
+                {' '}({t(`roles.${a.role}`, a.role.replace(/_/g, ' '))})
+                {' '}{t('leave.approver_on_leave', 'è in ferie')} {formatDate(a.startDate)} – {formatDate(a.endDate)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Inset from the panel edge. The cards previously ran flush against the
           container border, which read as a rendering fault rather than a list. */}
@@ -931,7 +1032,9 @@ export function LeaveApprovalList({ requests, loading, onRefresh, showActions = 
                   req.status !== 'admin_approved' &&
                   req.currentApproverRole !== null &&
                   req.status !== 'cancelled' &&
-                  (user?.isSuperAdmin || req.currentApproverRole === effectiveApproverRole) && (
+                  !callerLeave &&
+                  (user?.isSuperAdmin ||
+                    rankOf(effectiveApproverRole) >= rankOf(req.currentApproverRole)) && (
                   // Balance on the left, actions on the right: the approver
                   // needs to know what the request will be drawn from before
                   // deciding, and the two belong on the same line.
