@@ -120,6 +120,7 @@ const it = {
 
   // ─── Navigation ───────────────────────────────────────────────────────────
   nav: {
+    billing: 'Fatturazione',
     dashboard: 'Dashboard',
     companies: 'Aziende',
     stores: 'Negozi',

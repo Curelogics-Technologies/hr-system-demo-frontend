@@ -121,6 +121,7 @@ const en = {
 
   // ─── Navigation ───────────────────────────────────────────────────────────
   nav: {
+    billing: 'Billing',
     dashboard: 'Dashboard',
     companies: 'Companies',
     stores: 'Stores',
