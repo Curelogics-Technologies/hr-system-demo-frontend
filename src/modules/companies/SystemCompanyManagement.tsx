@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { CURRENCIES, currencyLabel, normaliseCurrency } from '../../constants/currencies';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import ReactCountryFlag from 'react-country-flag';
@@ -1316,7 +1317,7 @@ export default function SystemCompanyManagement() {
                 {t('companies.currency', 'Currency')}
               </label>
               <select
-                value={formProfile.currency || 'EUR'}
+                value={normaliseCurrency(formProfile.currency)}
                 onChange={(e) => setFormProfile((prev) => ({ ...prev, currency: e.target.value }))}
                 disabled={formSaving}
                 style={{
@@ -1329,23 +1330,11 @@ export default function SystemCompanyManagement() {
                   fontSize: 13,
                 }}
               >
-                <option value="EUR">EUR (€)</option>
-                <option value="GBP">GBP (£)</option>
-                <option value="USD">USD ($)</option>
-                <option value="CHF">CHF</option>
-                <option value="SEK">SEK</option>
-                <option value="NOK">NOK</option>
-                <option value="DKK">DKK</option>
-                <option value="PLN">PLN</option>
-                <option value="CZK">CZK</option>
-                <option value="RON">RON</option>
-                <option value="HUF">HUF</option>
-                <option value="CAD">CAD</option>
-                <option value="AUD">AUD</option>
-                <option value="AED">AED</option>
-                <option value="SAR">SAR</option>
-                <option value="PKR">PKR</option>
-                <option value="INR">INR</option>
+                {CURRENCIES.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {currencyLabel(c)}
+                  </option>
+                ))}
               </select>
             </div>
           </div>

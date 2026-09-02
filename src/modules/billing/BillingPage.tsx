@@ -37,6 +37,7 @@ import {
 } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
 import { Spinner } from '../../components/ui/Spinner';
+import CustomSelect from '../../components/ui/CustomSelect';
 import { Badge } from '../../components/ui/Badge';
 import { Alert } from '../../components/ui/Alert';
 import { Modal } from '../../components/ui/Modal';
@@ -141,6 +142,10 @@ export const BillingPage: React.FC = () => {
   }, [showToast, t]);
 
   useEffect(() => {
+    // Clear first: keeping the previous company's numbers visible while the
+    // next ones load is how someone reads the wrong company's bill.
+    setOverview(null);
+    setLoading(true);
     fetchOverview(selectedCompanyId);
   }, [fetchOverview, selectedCompanyId]);
 
@@ -321,30 +326,80 @@ export const BillingPage: React.FC = () => {
               </div>
             </div>
           </div>
-          <select
-            value={selectedCompanyId || ''}
-            onChange={(e) => {
-              const val = parseInt(e.target.value, 10);
-              if (!isNaN(val)) setSelectedCompanyId(val);
-            }}
-            style={{
-              padding: '8px 14px',
-              borderRadius: 'var(--radius-sm)',
-              border: '1px solid var(--border)',
-              background: 'var(--background)',
-              color: 'var(--text-primary)',
-              fontSize: 13,
-              fontWeight: 600,
-              minWidth: 220,
-              cursor: 'pointer',
-            }}
-          >
-            {companiesList.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name} (ID: {c.id})
-              </option>
-            ))}
-          </select>
+          <div style={{ minWidth: 260, flex: '0 1 320px' }}>
+            <CustomSelect
+              value={selectedCompanyId ? String(selectedCompanyId) : null}
+              onChange={(v) => {
+                const next = v ? parseInt(v, 10) : NaN;
+                if (!Number.isNaN(next) && next !== selectedCompanyId) {
+                  setSelectedCompanyId(next);
+                }
+              }}
+              searchable
+              placeholder={t('companies.selectCompany', 'Azienda')}
+              options={companiesList.map((c) => ({
+                value: String(c.id),
+                label: `${c.name} ${c.id}`,
+                render: (
+                  <span style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    width: '100%',
+                  }}>
+                    <span style={{
+                      fontWeight: 600,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}>
+                      {c.name}
+                    </span>
+                    <span style={{
+                      flexShrink: 0,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: 'var(--text-muted)',
+                      background: 'var(--surface-warm)',
+                      border: '1px solid var(--border-light)',
+                      borderRadius: 20,
+                      padding: '1px 8px',
+                      fontVariantNumeric: 'tabular-nums',
+                    }}>
+                      ID {c.id}
+                    </span>
+                  </span>
+                ),
+                selectedRender: (
+                  <span style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 10,
+                    width: '100%',
+                  }}>
+                    <span style={{
+                      fontWeight: 600,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}>
+                      {c.name}
+                    </span>
+                    <span style={{
+                      flexShrink: 0,
+                      fontSize: 11,
+                      color: 'var(--text-muted)',
+                      fontVariantNumeric: 'tabular-nums',
+                    }}>
+                      ID {c.id}
+                    </span>
+                  </span>
+                ),
+              }))}
+            />
+          </div>
         </div>
       )}
 

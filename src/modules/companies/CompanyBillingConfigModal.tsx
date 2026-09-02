@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { CURRENCIES, currencyLabel, normaliseCurrency } from '../../constants/currencies';
 import { useTranslation } from 'react-i18next';
 import { Company } from '../../types';
 import { updateCompany } from '../../api/companies';
@@ -24,7 +25,7 @@ export const CompanyBillingConfigModal: React.FC<Props> = ({
   const { showToast } = useToast();
 
   const [saving, setSaving] = useState(false);
-  const [currency, setCurrency] = useState(company.currency || 'EUR');
+  const [currency, setCurrency] = useState(normaliseCurrency(company.currency));
   const [pricePerEmployee, setPricePerEmployee] = useState<string>(
     company.pricePerEmployee !== null && company.pricePerEmployee !== undefined
       ? String(company.pricePerEmployee)
@@ -141,10 +142,11 @@ export const CompanyBillingConfigModal: React.FC<Props> = ({
                   fontSize: 13,
                 }}
               >
-                <option value="EUR">EUR (€)</option>
-                <option value="USD">USD ($)</option>
-                <option value="GBP">GBP (£)</option>
-                <option value="CHF">CHF (Fr)</option>
+                {CURRENCIES.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {currencyLabel(c)}
+                  </option>
+                ))}
               </select>
             </div>
 
