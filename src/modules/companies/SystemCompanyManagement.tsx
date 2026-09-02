@@ -1311,12 +1311,43 @@ export default function SystemCompanyManagement() {
               onChange={(e) => setFormProfile((prev) => ({ ...prev, officesLocations: e.target.value }))}
               disabled={formSaving}
             />
-            <Input
-              label={t('companies.currency', 'Currency')}
-              value={formProfile.currency}
-              onChange={(e) => setFormProfile((prev) => ({ ...prev, currency: e.target.value }))}
-              disabled={formSaving}
-            />
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>
+                {t('companies.currency', 'Currency')}
+              </label>
+              <select
+                value={formProfile.currency || 'EUR'}
+                onChange={(e) => setFormProfile((prev) => ({ ...prev, currency: e.target.value }))}
+                disabled={formSaving}
+                style={{
+                  width: '100%',
+                  padding: '9px 12px',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--border)',
+                  background: 'var(--surface)',
+                  color: 'var(--text-primary)',
+                  fontSize: 13,
+                }}
+              >
+                <option value="EUR">EUR (€)</option>
+                <option value="GBP">GBP (£)</option>
+                <option value="USD">USD ($)</option>
+                <option value="CHF">CHF</option>
+                <option value="SEK">SEK</option>
+                <option value="NOK">NOK</option>
+                <option value="DKK">DKK</option>
+                <option value="PLN">PLN</option>
+                <option value="CZK">CZK</option>
+                <option value="RON">RON</option>
+                <option value="HUF">HUF</option>
+                <option value="CAD">CAD</option>
+                <option value="AUD">AUD</option>
+                <option value="AED">AED</option>
+                <option value="SAR">SAR</option>
+                <option value="PKR">PKR</option>
+                <option value="INR">INR</option>
+              </select>
+            </div>
           </div>
 
           {/* Italian e-invoicing block — kept together and mirrored from the
