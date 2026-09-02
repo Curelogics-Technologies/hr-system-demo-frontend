@@ -289,6 +289,10 @@ export const BillingPage: React.FC = () => {
     }
   };
 
+  // Payments are dated by when the money moved (paid_at), not by when the row
+  // was written (created_at). The two normally match, because a webhook writes
+  // the row as the payment happens — but they diverge whenever history is
+  // rebuilt from the provider, and then created_at is simply the import date.
   const formatDate = (dateStr?: string | null) => {
     if (!dateStr) return '—';
     const d = new Date(dateStr);
@@ -1055,7 +1059,7 @@ export const BillingPage: React.FC = () => {
                 {overview.transactions.map((tx: any) => (
                   <tr key={tx.id} style={{ borderBottom: '1px solid var(--border-light)' }}>
                     <td style={{ padding: '12px', color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
-                      {formatDate(tx.createdAt)}
+                      {formatDate(tx.paidAt || tx.createdAt)}
                     </td>
                     <td style={{ padding: '12px', color: 'var(--text-primary)' }}>
                       {billingTransactionLabel(tx, t)}
