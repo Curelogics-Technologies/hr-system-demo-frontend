@@ -156,6 +156,18 @@ export const BillingPage: React.FC = () => {
   // Load companies if user can manage multiple
   useEffect(() => {
     if (isSuperAdmin) {
+      // Per-company billing rows, so each option can show its payment status
+      // and licenses in use. Best-effort: the selector still lists companies
+      // if this call fails.
+      billingApi
+        .getSuperAdminOverview()
+        .then((rows) => {
+          const byId: Record<number, SuperAdminBillingCompanyRow> = {};
+          for (const r of rows) byId[r.id] = r;
+          setCompanyBilling(byId);
+        })
+        .catch(() => setCompanyBilling({}));
+
       getCompanies()
         .then((comps) => {
           if (Array.isArray(comps) && comps.length > 0) {
@@ -531,6 +543,24 @@ export const BillingPage: React.FC = () => {
       </div>
 
       {/* 2. Critical Alert Banners */}
+      {(() => {
+        // The provider settled an invoice without taking money because the
+        // total was under its minimum charge. Say so plainly: the company is
+        // active but nothing was paid, and the amount rolls forward.
+        const carried = overview?.transactions?.find((tx) => tx.kind === 'carried_over');
+        if (!carried) return null;
+        return (
+          <Alert variant="warning">
+            <div style={{ fontWeight: 700, marginBottom: 2 }}>{t('billing.carriedOverTitle')}</div>
+            <div style={{ fontSize: 13 }}>
+              {t('billing.carriedOverBody', {
+                amount: formatMoney((carried.amountCents ?? 0) / 100, carried.currency || companyCurrency),
+              })}
+            </div>
+          </Alert>
+        );
+      })()}
+
       {isPastDue && (
         <Alert variant="danger">
           <div style={{ fontWeight: 700, marginBottom: 2 }}>{t('billing.pastDueTitle', 'Pagamento in sospeso')}</div>

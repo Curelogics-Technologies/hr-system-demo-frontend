@@ -3879,6 +3879,9 @@ const it = {
     }
   },
   billing: {
+    txKindCarriedOver: 'Non incassato — sotto il minimo del gestore, aggiunto alla prossima fattura',
+    carriedOverTitle: 'L’ultimo addebito non è stato incassato',
+    carriedOverBody: '{{amount}} era sotto il minimo incassabile dal gestore di pagamento, quindi non è stato prelevato nulla. È stato aggiunto alla prossima fattura. Aumentare i prezzi unitari evita questa situazione.',
     daysUntilRenewal: '{{days}} giorni al rinnovo',
     refunds: 'Rimborsi',
     refundsHelp: 'Per ora i rimborsi si effettuano dal pannello del gestore di pagamento.',

@@ -3878,6 +3878,9 @@ const en = {
     }
   },
   billing: {
+    txKindCarriedOver: 'Not collected — below the provider minimum, added to the next invoice',
+    carriedOverTitle: 'Last charge was not collected',
+    carriedOverBody: '{{amount}} was below the minimum your payment provider will charge, so nothing was taken. It has been added to your next invoice. Raising your unit prices avoids this.',
     daysUntilRenewal: '{{days}} days until renewal',
     refunds: 'Refunds',
     refundsHelp: 'Refunds are issued from the payment provider dashboard for now.',
