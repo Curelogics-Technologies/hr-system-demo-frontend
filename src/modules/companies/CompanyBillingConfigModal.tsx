@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
-import { CURRENCIES, currencyLabel, normaliseCurrency } from '../../constants/currencies';
+import { DatePicker } from '../../components/ui/DatePicker';
+import CurrencySelect from '../../components/ui/CurrencySelect';
+import { normaliseCurrency, currencySymbol } from '../../constants/currencies';
 import { useTranslation } from 'react-i18next';
 import { Company } from '../../types';
 import { updateCompany } from '../../api/companies';
@@ -29,22 +31,22 @@ export const CompanyBillingConfigModal: React.FC<Props> = ({
   const [pricePerEmployee, setPricePerEmployee] = useState<string>(
     company.pricePerEmployee !== null && company.pricePerEmployee !== undefined
       ? String(company.pricePerEmployee)
-      : '3.50'
+      : '10.00'
   );
   const [pricePerDevice, setPricePerDevice] = useState<string>(
     company.pricePerDevice !== null && company.pricePerDevice !== undefined
       ? String(company.pricePerDevice)
-      : '19.00'
+      : '15.00'
   );
   const [storageLimitGb, setStorageLimitGb] = useState<string>(
     company.storageLimitGb !== null && company.storageLimitGb !== undefined
       ? String(company.storageLimitGb)
-      : '500'
+      : '1'
   );
   const [extraStoragePricePerGb, setExtraStoragePricePerGb] = useState<string>(
     company.extraStoragePricePerGb !== null && company.extraStoragePricePerGb !== undefined
       ? String(company.extraStoragePricePerGb)
-      : '0.00'
+      : '5.00'
   );
   const [discountPercent, setDiscountPercent] = useState<string>(
     company.discountPercent !== null && company.discountPercent !== undefined
@@ -125,33 +127,15 @@ export const CompanyBillingConfigModal: React.FC<Props> = ({
             {t('companies.unitPrices', 'Prezzi Unitari Licenze')}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14 }}>
-            <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>
-                {t('companies.currency', 'Valuta')}
-              </label>
-              <select
-                value={currency}
-                onChange={(e) => setCurrency(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '9px 12px',
-                  borderRadius: 'var(--radius-sm)',
-                  border: '1px solid var(--border)',
-                  background: 'var(--surface)',
-                  color: 'var(--text-primary)',
-                  fontSize: 13,
-                }}
-              >
-                {CURRENCIES.map((c) => (
-                  <option key={c.code} value={c.code}>
-                    {currencyLabel(c)}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <CurrencySelect
+              label={t('companies.currency', 'Valuta')}
+              value={currency}
+              onChange={setCurrency}
+              disabled={saving}
+            />
 
             <Input
-              label={t('companies.pricePerEmployee', 'Prezzo per dipendente (€/mese)')}
+              label={t('companies.pricePerEmployee', { cur: currencySymbol(currency) })}
               type="number"
               step="0.01"
               min="0"
@@ -161,7 +145,7 @@ export const CompanyBillingConfigModal: React.FC<Props> = ({
             />
 
             <Input
-              label={t('companies.pricePerDevice', 'Prezzo per terminale (€/mese)')}
+              label={t('companies.pricePerDevice', { cur: currencySymbol(currency) })}
               type="number"
               step="0.01"
               min="0"
@@ -179,7 +163,7 @@ export const CompanyBillingConfigModal: React.FC<Props> = ({
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
             <Input
-              label={t('companies.billReminderDays', 'Preavviso emissione fattura (giorni prima)')}
+              label={t('companies.billReminderDays')}
               type="number"
               min="1"
               max="30"
@@ -190,7 +174,7 @@ export const CompanyBillingConfigModal: React.FC<Props> = ({
             />
 
             <Input
-              label={t('companies.gracePeriodDays', 'Periodo di grazia mancato pagamento (giorni)')}
+              label={t('companies.gracePeriodDays')}
               type="number"
               min="0"
               max="30"
@@ -244,7 +228,7 @@ export const CompanyBillingConfigModal: React.FC<Props> = ({
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
             <Input
-              label={t('companies.storageLimitGb', 'Limite incluso (GB)')}
+              label={t('companies.storageLimitGb')}
               type="number"
               step="1"
               min="0"
@@ -253,7 +237,7 @@ export const CompanyBillingConfigModal: React.FC<Props> = ({
             />
 
             <Input
-              label={t('companies.extraStoragePricePerGb', 'Prezzo extra storage (€/GB/mese)')}
+              label={t('companies.extraStoragePricePerGb', { cur: currencySymbol(currency) })}
               type="number"
               step="0.01"
               min="0"
@@ -279,18 +263,18 @@ export const CompanyBillingConfigModal: React.FC<Props> = ({
               onChange={(e) => setDiscountPercent(e.target.value)}
             />
 
-            <Input
-              label={t('companies.discountValidFrom', 'Sconto valido dal')}
-              type="date"
+            <DatePicker
+              label={t('companies.discountValidFrom')}
               value={discountValidFrom}
-              onChange={(e) => setDiscountValidFrom(e.target.value)}
+              onChange={setDiscountValidFrom}
+              disabled={saving}
             />
 
-            <Input
-              label={t('companies.discountValidTo', 'Sconto valido al')}
-              type="date"
+            <DatePicker
+              label={t('companies.discountValidTo')}
               value={discountValidTo}
-              onChange={(e) => setDiscountValidTo(e.target.value)}
+              onChange={setDiscountValidTo}
+              disabled={saving}
             />
           </div>
         </div>

@@ -1,5 +1,6 @@
 import { getApiErrorCode } from '../../utils/apiErrors';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import CurrencySelect from '../../components/ui/CurrencySelect';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import ReactCountryFlag from 'react-country-flag';
@@ -1646,11 +1647,38 @@ export default function CompanyDetail() {
             {/* Right Column: Billing & Access Settings */}
             {isSuperAdmin && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14, height: '100%', position: 'relative' }}>
-                <h3 style={{ fontSize: 13, fontWeight: 800, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.04em', margin: '0 0 4px 0', borderBottom: '1px solid var(--border)', paddingBottom: 6 }}>
-                  {t('companies.editBillingAccessSection', 'Billing & Access Settings')}
+                <h3 style={{
+                  fontSize: 13, fontWeight: 800, color: 'var(--accent)',
+                  textTransform: 'uppercase', letterSpacing: '0.04em',
+                  margin: '0 0 4px 0', borderBottom: '1px solid var(--border)',
+                  paddingBottom: 6, display: 'flex', alignItems: 'center',
+                  justifyContent: 'space-between', gap: 10,
+                }}>
+                  <span>{t('companies.editBillingAccessSection')}</span>
+                  <span style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.03em',
+                    textTransform: 'none',
+                    color: 'var(--text-muted)',
+                    background: 'var(--surface-warm)',
+                    border: '1px solid var(--border-light)',
+                    borderRadius: 20,
+                    padding: '2px 8px',
+                    whiteSpace: 'nowrap',
+                  }}>
+                    {t('companies.superAdminOnly')}
+                  </span>
                 </h3>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {/* The currency the prices below are expressed in. */}
+                  <CurrencySelect
+                    label={t('companies.currency', 'Currency')}
+                    value={editProfile.currency}
+                    onChange={(code) => setEditProfile(p => ({ ...p, currency: code }))}
+                    disabled={editSaving}
+                  />
                   <Input
                     type="number"
                     label={t('companies.pricePerEmployee', 'Set price per employee')}

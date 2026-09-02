@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { formatMoney } from '../../constants/currencies';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -191,7 +192,7 @@ export const BillingSummaryCard: React.FC = () => {
                   <CreditCard size={12} /> {t('billing.totalMonthly', 'Totale mensile')}
                 </div>
                 <div style={{ ...cellValue, color: 'var(--accent)' }}>
-                  €{monthly.toFixed(2)}
+                  {formatMoney(monthly, currency)}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
                   {currency}
@@ -269,7 +270,7 @@ export const BillingSummaryCard: React.FC = () => {
                           fontVariantNumeric: 'tabular-nums',
                         }}
                       >
-                        €{((tx.amountCents ?? 0) / 100).toFixed(2)}
+                        {formatMoney((tx.amountCents ?? 0) / 100, tx.currency || currency)}
                       </span>
                       <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         {tx.status === 'paid' ? (

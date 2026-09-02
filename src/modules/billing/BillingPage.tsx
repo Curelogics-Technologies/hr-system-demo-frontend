@@ -1,13 +1,17 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { formatMoney } from '../../constants/currencies';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import { billingApi } from '../../api/billing';
 import { getCompanies } from '../../api/companies';
 import { useAuth } from '../../context/AuthContext';
+import { useSocket } from '../../context/SocketContext';
 import {
   BillingOverview,
   BillingTransaction,
   PaymentProvider,
   Company,
+  SuperAdminBillingCompanyRow,
 } from '../../types';
 import {
   FiscalDataModal,
@@ -47,13 +51,34 @@ import { Button } from '../../components/ui/Button';
  * One licensed resource line: how many of the paid licenses are in use, with a
  * bar that turns amber as it fills and red once nothing is left.
  */
+/** Colour and wording for a subscription's state, used in the selector. */
+function statusTag(status: string | null, t: (k: string, d?: any) => string) {
+  switch (status) {
+    case 'active':
+      return { label: t('billing.status_active', 'active'), bg: 'rgba(22,163,74,0.12)', fg: '#16a34a' };
+    case 'past_due':
+      return { label: t('billing.status_past_due', 'past due'), bg: 'rgba(217,119,6,0.14)', fg: '#b45309' };
+    case 'unpaid':
+      return { label: t('billing.status_unpaid', 'unpaid'), bg: 'rgba(220,38,38,0.12)', fg: '#dc2626' };
+    case 'canceled':
+      return { label: t('billing.status_canceled', 'canceled'), bg: 'rgba(120,120,120,0.16)', fg: 'var(--text-muted)' };
+    case 'pending':
+    case 'incomplete':
+      return { label: t('billing.status_pending', 'pending'), bg: 'rgba(59,130,246,0.12)', fg: '#2563eb' };
+    default:
+      return { label: t('billing.noSubscription', 'No subscription'), bg: 'rgba(120,120,120,0.12)', fg: 'var(--text-muted)' };
+  }
+}
+
 const UsageRow: React.FC<{
   icon: React.ReactNode;
   label: string;
   inUse: number;
   licensed: number;
   unitPrice: number;
-}> = ({ icon, label, inUse, licensed, unitPrice }) => {
+  /** The company's currency, so figures never show a foreign symbol. */
+  currency: string;
+}> = ({ icon, label, inUse, licensed, unitPrice, currency }) => {
   const pct = licensed > 0 ? Math.min(100, (inUse / licensed) * 100) : 0;
   const full = licensed > 0 && inUse >= licensed;
   const color = full ? '#dc2626' : pct > 85 ? '#d97706' : 'var(--accent)';
@@ -66,7 +91,7 @@ const UsageRow: React.FC<{
           {label}
         </span>
         <strong style={{ color: 'var(--text-primary)', fontVariantNumeric: 'tabular-nums' }}>
-          {inUse} / {licensed} · €{(licensed * unitPrice).toFixed(2)}
+          {inUse} / {licensed} · {formatMoney(licensed * unitPrice, currency)}
         </strong>
       </div>
       <div style={{
@@ -86,6 +111,7 @@ export const BillingPage: React.FC = () => {
   const { t } = useTranslation();
   const { showToast } = useToast();
   const { user, allowedCompanyIds } = useAuth();
+  const { socket } = useSocket();
 
   const isSuperAdmin = !!user?.isSuperAdmin;
 
@@ -105,11 +131,42 @@ export const BillingPage: React.FC = () => {
 
   // Multi-company support for Super Admin & Multi-company managers
   const [companiesList, setCompaniesList] = useState<Company[]>([]);
-  const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(user?.companyId || null);
+  const [companyBilling, setCompanyBilling] = useState<Record<number, SuperAdminBillingCompanyRow>>({});
+  const [searchParams, setSearchParams] = useSearchParams();
+  const companyIdFromUrl = (() => {
+    const raw = searchParams.get('companyId');
+    const n = raw ? parseInt(raw, 10) : NaN;
+    return Number.isNaN(n) ? null : n;
+  })();
+  const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(
+    companyIdFromUrl ?? user?.companyId ?? null
+  );
+
+  // Mirror the selection into the URL, replacing rather than pushing so the
+  // back button still leaves the page instead of walking company by company.
+  useEffect(() => {
+    if (!selectedCompanyId) return;
+    if (companyIdFromUrl === selectedCompanyId) return;
+    const next = new URLSearchParams(searchParams);
+    next.set('companyId', String(selectedCompanyId));
+    setSearchParams(next, { replace: true });
+  }, [selectedCompanyId, companyIdFromUrl, searchParams, setSearchParams]);
 
   // Load companies if user can manage multiple
   useEffect(() => {
     if (isSuperAdmin) {
+      // Per-company billing rows, so each option can show its payment status
+      // and licenses in use. Best-effort: the selector still lists companies
+      // if this call fails.
+      billingApi
+        .getSuperAdminOverview()
+        .then((rows) => {
+          const byId: Record<number, SuperAdminBillingCompanyRow> = {};
+          for (const r of rows) byId[r.id] = r;
+          setCompanyBilling(byId);
+        })
+        .catch(() => setCompanyBilling({}));
+
       getCompanies()
         .then((comps) => {
           if (Array.isArray(comps) && comps.length > 0) {
@@ -148,6 +205,21 @@ export const BillingPage: React.FC = () => {
     setLoading(true);
     fetchOverview(selectedCompanyId);
   }, [fetchOverview, selectedCompanyId]);
+
+  // Billing state changes when the provider's webhook lands, not when the user
+  // does anything, so the page has to be told. The server announces it on the
+  // company's existing socket room and the page refetches — no polling, and no
+  // manual refresh to see a payment confirm.
+  useEffect(() => {
+    if (!socket) return;
+    const onBillingUpdated = () => {
+      fetchOverview(selectedCompanyId);
+    };
+    socket.on('billing:updated', onBillingUpdated);
+    return () => {
+      socket.off('billing:updated', onBillingUpdated);
+    };
+  }, [socket, fetchOverview, selectedCompanyId]);
 
   // The provider buttons only appear while something is unpaid, so an already
   // paying company needs its own route to the card form.
@@ -217,6 +289,10 @@ export const BillingPage: React.FC = () => {
     }
   };
 
+  // Payments are dated by when the money moved (paid_at), not by when the row
+  // was written (created_at). The two normally match, because a webhook writes
+  // the row as the payment happens — but they diverge whenever history is
+  // rebuilt from the provider, and then created_at is simply the import date.
   const formatDate = (dateStr?: string | null) => {
     if (!dateStr) return '—';
     const d = new Date(dateStr);
@@ -286,6 +362,14 @@ export const BillingPage: React.FC = () => {
   const licensedMonthlyTotal =
     licensedEmployees * employeePrice + licensedTerminals * devicePrice;
 
+  // Every amount on this page is shown in the company's own currency.
+  const companyCurrency = company?.currency || 'EUR';
+
+  // Whole days left in the paid period, shown beside the cancel action.
+  const daysUntilRenewal = sub?.currentPeriodEnd
+    ? Math.max(0, Math.ceil((new Date(sub.currentPeriodEnd).getTime() - Date.now()) / 86_400_000))
+    : 0;
+
   return (
     <div style={{ maxWidth: 1120, margin: '0 auto', padding: '20px 20px 60px', display: 'flex', flexDirection: 'column', gap: 24 }}>
       {/* 0. Company selector — Super Admin only.
@@ -326,7 +410,7 @@ export const BillingPage: React.FC = () => {
               </div>
             </div>
           </div>
-          <div style={{ minWidth: 260, flex: '0 1 320px' }}>
+          <div style={{ minWidth: 300, flex: '0 1 420px' }}>
             <CustomSelect
               value={selectedCompanyId ? String(selectedCompanyId) : null}
               onChange={(v) => {
@@ -337,67 +421,82 @@ export const BillingPage: React.FC = () => {
               }}
               searchable
               placeholder={t('companies.selectCompany', 'Azienda')}
-              options={companiesList.map((c) => ({
-                value: String(c.id),
-                label: `${c.name} ${c.id}`,
-                render: (
-                  <span style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 12,
-                    width: '100%',
-                  }}>
-                    <span style={{
-                      fontWeight: 600,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}>
-                      {c.name}
+              options={companiesList.map((c) => {
+                const b = companyBilling[c.id];
+                const status = b?.subscriptionStatus ?? null;
+                const tag = statusTag(status, t);
+                return {
+                  value: String(c.id),
+                  label: `${c.name} ${c.id}`,
+                  render: (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', minWidth: 0 }}>
+                      <span style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{
+                          display: 'flex', alignItems: 'center', gap: 8, minWidth: 0,
+                        }}>
+                          <span style={{
+                            fontWeight: 600, overflow: 'hidden',
+                            textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          }}>
+                            {c.name}
+                          </span>
+                          <span style={{
+                            flexShrink: 0, fontSize: 10, fontWeight: 700,
+                            padding: '1px 7px', borderRadius: 20,
+                            background: tag.bg, color: tag.fg,
+                          }}>
+                            {tag.label}
+                          </span>
+                        </span>
+                        <span style={{
+                          display: 'flex', gap: 10, marginTop: 2,
+                          fontSize: 11, color: 'var(--text-muted)',
+                          fontVariantNumeric: 'tabular-nums',
+                        }}>
+                          <span>
+                            {t('billing.employeesShort', 'dipendenti')}:{' '}
+                            {b ? `${b.employeeCount}/${b.seatQuantity ?? '—'}` : '—'}
+                          </span>
+                          <span>
+                            {t('billing.terminalsShort', 'terminali')}:{' '}
+                            {b ? `${b.activeDevicesCount}/${b.deviceQuantity ?? '—'}` : '—'}
+                          </span>
+                        </span>
+                      </span>
+                      <span style={{
+                        flexShrink: 0, fontSize: 11, fontWeight: 700,
+                        color: 'var(--text-muted)',
+                        background: 'var(--surface-warm)',
+                        border: '1px solid var(--border-light)',
+                        borderRadius: 20, padding: '1px 8px',
+                        fontVariantNumeric: 'tabular-nums',
+                      }}>
+                        ID {c.id}
+                      </span>
                     </span>
-                    <span style={{
-                      flexShrink: 0,
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: 'var(--text-muted)',
-                      background: 'var(--surface-warm)',
-                      border: '1px solid var(--border-light)',
-                      borderRadius: 20,
-                      padding: '1px 8px',
-                      fontVariantNumeric: 'tabular-nums',
-                    }}>
-                      ID {c.id}
+                  ),
+                  selectedRender: (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', minWidth: 0 }}>
+                      <span style={{
+                        fontWeight: 600, overflow: 'hidden',
+                        textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>
+                        {c.name}
+                      </span>
+                      <span style={{
+                        flexShrink: 0, fontSize: 10, fontWeight: 700,
+                        padding: '1px 7px', borderRadius: 20,
+                        background: tag.bg, color: tag.fg,
+                      }}>
+                        {tag.label}
+                      </span>
+                      <span style={{ marginLeft: 'auto', flexShrink: 0, fontSize: 11, color: 'var(--text-muted)' }}>
+                        ID {c.id}
+                      </span>
                     </span>
-                  </span>
-                ),
-                selectedRender: (
-                  <span style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 10,
-                    width: '100%',
-                  }}>
-                    <span style={{
-                      fontWeight: 600,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}>
-                      {c.name}
-                    </span>
-                    <span style={{
-                      flexShrink: 0,
-                      fontSize: 11,
-                      color: 'var(--text-muted)',
-                      fontVariantNumeric: 'tabular-nums',
-                    }}>
-                      ID {c.id}
-                    </span>
-                  </span>
-                ),
-              }))}
+                  ),
+                };
+              })}
             />
           </div>
         </div>
@@ -447,6 +546,24 @@ export const BillingPage: React.FC = () => {
       </div>
 
       {/* 2. Critical Alert Banners */}
+      {(() => {
+        // The provider settled an invoice without taking money because the
+        // total was under its minimum charge. Say so plainly: the company is
+        // active but nothing was paid, and the amount rolls forward.
+        const carried = overview?.transactions?.find((tx) => tx.kind === 'carried_over');
+        if (!carried) return null;
+        return (
+          <Alert variant="warning">
+            <div style={{ fontWeight: 700, marginBottom: 2 }}>{t('billing.carriedOverTitle')}</div>
+            <div style={{ fontSize: 13 }}>
+              {t('billing.carriedOverBody', {
+                amount: formatMoney((carried.amountCents ?? 0) / 100, carried.currency || companyCurrency),
+              })}
+            </div>
+          </Alert>
+        );
+      })()}
+
       {isPastDue && (
         <Alert variant="danger">
           <div style={{ fontWeight: 700, marginBottom: 2 }}>{t('billing.pastDueTitle', 'Pagamento in sospeso')}</div>
@@ -530,6 +647,7 @@ export const BillingPage: React.FC = () => {
                 inUse={licenses?.employeesInUse ?? liveEmployees}
                 licensed={licenses?.employeesLicensed ?? 0}
                 unitPrice={employeePrice}
+                currency={companyCurrency}
               />
 
               {/* Terminal licenses */}
@@ -539,6 +657,7 @@ export const BillingPage: React.FC = () => {
                 inUse={licenses?.terminalsInUse ?? liveDevices}
                 licensed={licenses?.terminalsLicensed ?? 0}
                 unitPrice={devicePrice}
+                currency={companyCurrency}
               />
 
               {/* Total Divider */}
@@ -549,7 +668,7 @@ export const BillingPage: React.FC = () => {
                   {t('billing.totalMonthly', 'Totale mensile')}
                 </span>
                 <span style={{ fontSize: 20, fontWeight: 900, fontFamily: 'var(--font-display)', color: 'var(--accent)' }}>
-                  €{licensedMonthlyTotal.toFixed(2)}
+                  {formatMoney(licensedMonthlyTotal, companyCurrency)}
                   <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-muted)' }}> / {t('billing.month', 'mese')}</span>
                 </span>
               </div>
@@ -758,7 +877,27 @@ export const BillingPage: React.FC = () => {
 
           {/* Cancellation Option for Active Subscriptions */}
           {hasSubscription && isActive && !sub.cancelAtPeriodEnd && (
-            <div style={{ borderTop: '1px solid var(--border-light)', paddingTop: 14, display: 'flex', justifyContent: 'flex-end' }}>
+            <div style={{
+              borderTop: '1px solid var(--border-light)',
+              paddingTop: 14,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              flexWrap: 'wrap',
+            }}>
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 12,
+                color: 'var(--text-muted)',
+              }}>
+                <Calendar size={13} />
+                {t('billing.daysUntilRenewal', {
+                  days: daysUntilRenewal,
+                })}
+              </span>
               <button
                 type="button"
                 onClick={() => setCancelModalOpen(true)}
@@ -920,7 +1059,7 @@ export const BillingPage: React.FC = () => {
                 {overview.transactions.map((tx: any) => (
                   <tr key={tx.id} style={{ borderBottom: '1px solid var(--border-light)' }}>
                     <td style={{ padding: '12px', color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
-                      {formatDate(tx.createdAt)}
+                      {formatDate(tx.paidAt || tx.createdAt)}
                     </td>
                     <td style={{ padding: '12px', color: 'var(--text-primary)' }}>
                       {billingTransactionLabel(tx, t)}
@@ -929,7 +1068,7 @@ export const BillingPage: React.FC = () => {
                       {tx.provider}
                     </td>
                     <td style={{ padding: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                      €{((tx.amountCents || 0) / 100).toFixed(2)}
+                      {formatMoney((tx.amountCents || 0) / 100, tx.currency || companyCurrency)}
                     </td>
                     <td style={{ padding: '12px' }}>
                       {tx.status === 'paid' ? (

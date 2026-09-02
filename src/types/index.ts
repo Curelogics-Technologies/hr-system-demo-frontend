@@ -324,6 +324,8 @@ export type BillingTransactionKind =
   | 'activation'
   | 'renewal'
   | 'license_upgrade'
+  /** Under the provider's minimum charge: nothing taken, carried forward. */
+  | 'carried_over'
   | 'failed';
 
 export interface BillingTransaction {

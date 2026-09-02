@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { formatMoney } from '../../constants/currencies';
 import { useTranslation } from 'react-i18next';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
@@ -7,18 +8,28 @@ import { Badge } from '../../components/ui/Badge';
 import { Spinner } from '../../components/ui/Spinner';
 import { ExternalLink, UserPlus, UserMinus, Smartphone, Users } from 'lucide-react';
 import billingApi from '../../api/billing';
+import { getAvatarUrl, getStoreLogoUrl } from '../../api/client';
 import { billingErrorMessage, billingTransactionLabel } from './billingErrors';
 import { updateCompany } from '../../api/companies';
 import type { BillingOverview, BillingTransaction, LicenseSnapshot } from '../../types';
 
-const fmtDate = (v?: string | null) =>
-  v ? new Date(v).toLocaleDateString('it-IT', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+/** Resolves the active language to a date locale. */
+const dateLocale = (lang: string | undefined) => (lang?.startsWith('en') ? 'en-GB' : 'it-IT');
 
-const fmtDateTime = (v?: string | null) =>
+const fmtDate = (v: string | null | undefined, lang?: string) =>
   v
-    ? new Date(v).toLocaleString('it-IT', {
-        day: '2-digit',
-        month: 'short',
+    ? new Date(v).toLocaleDateString(dateLocale(lang), {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      })
+    : '—';
+
+const fmtDateTime = (v: string | null | undefined, lang?: string) =>
+  v
+    ? new Date(v).toLocaleString(dateLocale(lang), {
+        day: 'numeric',
+        month: 'long',
         year: 'numeric',
         hour: '2-digit',
         minute: '2-digit',
@@ -55,7 +66,7 @@ export const FiscalDataModal: React.FC<FiscalModalProps> = ({
   onSaved,
   showToast,
 }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [vat, setVat] = useState('');
   const [sdi, setSdi] = useState('');
   const [pec, setPec] = useState('');
@@ -154,10 +165,11 @@ export const ReceiptModal: React.FC<{
   companyName?: string;
   fiscal?: { vatNumber?: string | null; sdiRecipientCode?: string | null; pecEmail?: string | null };
 }> = ({ open, onClose, tx, companyName, fiscal }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   if (!tx) return null;
 
-  const money = (cents?: number | null) => `€${((cents ?? 0) / 100).toFixed(2)}`;
+  // Each receipt is shown in the currency it was actually charged in.
+  const money = (cents?: number | null) => formatMoney((cents ?? 0) / 100, tx.currency);
   const empCents = (tx as any).unitPriceEmployeeCents ?? null;
   const devCents = (tx as any).unitPriceDeviceCents ?? null;
 
@@ -198,7 +210,7 @@ export const ReceiptModal: React.FC<{
         </div>
         <div style={row}>
           <span style={{ color: 'var(--text-muted)' }}>{t('billing.date', 'Data')}</span>
-          <strong>{fmtDateTime(tx.paidAt || tx.createdAt)}</strong>
+          <strong>{fmtDateTime(tx.paidAt || tx.createdAt, i18n.language)}</strong>
         </div>
         <div style={row}>
           <span style={{ color: 'var(--text-muted)' }}>{t('billing.method', 'Metodo')}</span>
@@ -268,6 +280,54 @@ export const ReceiptModal: React.FC<{
   );
 };
 
+/**
+ * Picture for a ledger row: the employee's photo, or the store's logo for a
+ * terminal. Falls back to initials so a row without a picture still reads.
+ */
+const Avatar: React.FC<{
+  src: string | null;
+  label: string;
+  icon: React.ReactNode;
+  tone: { fg: string; bg: string; ring: string };
+}> = ({ src, label, icon, tone }) => {
+  const [broken, setBroken] = useState(false);
+  const initials = label
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join('')
+    .toUpperCase();
+
+  const base: React.CSSProperties = {
+    width: 24,
+    height: 24,
+    borderRadius: '50%',
+    flexShrink: 0,
+    objectFit: 'cover',
+    boxShadow: `0 0 0 1.5px ${tone.ring}`,
+  };
+
+  if (src && !broken) {
+    return <img src={src} alt="" style={base} onError={() => setBroken(true)} />;
+  }
+
+  return (
+    <span style={{
+      ...base,
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: tone.bg,
+      color: tone.fg,
+      fontSize: 9.5,
+      fontWeight: 800,
+    }}>
+      {icon ?? (initials || '?')}
+    </span>
+  );
+};
+
 /* ------------------------------------------------------------------ */
 /* Headcount ledger — why the billed quantities are what they are      */
 /* ------------------------------------------------------------------ */
@@ -279,7 +339,7 @@ export const HeadcountHistoryModal: React.FC<{
   licenses?: LicenseSnapshot | null;
   subscriptionStatus?: string | null;
 }> = ({ open, onClose, companyId, licenses, subscriptionStatus }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<Awaited<ReturnType<typeof billingApi.getHeadcountHistory>> | null>(null);
 
@@ -366,39 +426,74 @@ export const HeadcountHistoryModal: React.FC<{
                 </tr>
               </thead>
               <tbody>
-                {data.events.map((e) => (
-                  <tr key={e.id} style={{ borderTop: '1px solid var(--border-light)' }}>
-                    <td style={{ padding: '7px 8px', whiteSpace: 'nowrap' }}>{fmtDate(e.occurredAt)}</td>
-                    <td style={{ padding: '7px 8px' }}>
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 4,
-                          color: e.changeType === 'added' ? '#16a34a' : '#dc2626',
-                          fontWeight: 600,
-                        }}
-                      >
-                        {e.changeType === 'added' ? <UserPlus size={12} /> : <UserMinus size={12} />}
-                        {e.delta > 0 ? `+${e.delta}` : e.delta}{' '}
-                        {e.resourceType === 'terminal'
-                          ? t('billing.terminalsShort', 'terminali')
-                          : t('billing.employeesShort', 'dipendenti')}
-                      </span>
-                    </td>
-                    <td style={{ padding: '7px 8px', color: 'var(--text-secondary)' }}>{e.userLabel || '—'}</td>
-                    <td style={{ padding: '7px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                      {e.resultingCount}
-                    </td>
-                    <td style={{ padding: '7px 8px', textAlign: 'right' }}>
-                      {e.billedAt ? (
-                        <Badge variant="success">{t('billing.billedYes', 'Sì')}</Badge>
-                      ) : (
-                        <Badge variant="neutral">{t('billing.billedNo', 'In attesa')}</Badge>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {data.events.map((e) => {
+                  const isTerminal = e.resourceType === 'terminal';
+                  // Employees green, terminals blue, so the two billed
+                  // quantities are separable at a glance.
+                  const tone = isTerminal
+                    ? { fg: '#2563eb', bg: 'rgba(37,99,235,0.10)', ring: 'rgba(37,99,235,0.25)' }
+                    : { fg: '#16a34a', bg: 'rgba(22,163,74,0.10)', ring: 'rgba(22,163,74,0.25)' };
+                  const removed = e.changeType === 'removed';
+                  const picture = isTerminal
+                    ? getStoreLogoUrl(e.storeLogoFilename)
+                    : getAvatarUrl(e.avatarFilename);
+                  const label = e.userLabel || (isTerminal ? e.storeName : null) || '—';
+
+                  return (
+                    <tr key={e.id} style={{ borderTop: '1px solid var(--border-light)' }}>
+                      <td style={{ padding: '8px', whiteSpace: 'nowrap', color: 'var(--text-muted)' }}>
+                        {fmtDate(e.occurredAt, i18n.language)}
+                      </td>
+
+                      <td style={{ padding: '8px' }}>
+                        <span style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 5,
+                          padding: '2px 8px', borderRadius: 20,
+                          background: removed ? 'rgba(220,38,38,0.10)' : tone.bg,
+                          color: removed ? '#dc2626' : tone.fg,
+                          fontWeight: 700, fontSize: 11, whiteSpace: 'nowrap',
+                        }}>
+                          {removed ? <UserMinus size={11} /> : <UserPlus size={11} />}
+                          {e.delta > 0 ? `+${e.delta}` : e.delta}{' '}
+                          {isTerminal
+                            ? t('billing.terminalsShort', 'terminali')
+                            : t('billing.employeesShort', 'dipendenti')}
+                        </span>
+                      </td>
+
+                      <td style={{ padding: '8px' }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                          <Avatar
+                            src={picture}
+                            label={label}
+                            icon={isTerminal ? <Smartphone size={12} /> : null}
+                            tone={tone}
+                          />
+                          <span style={{
+                            overflow: 'hidden', textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap', color: 'var(--text-secondary)',
+                          }}>
+                            {label}
+                          </span>
+                        </span>
+                      </td>
+
+                      <td style={{ padding: '8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>
+                        {e.resultingCount}
+                      </td>
+
+                      <td style={{ padding: '8px', textAlign: 'right' }}>
+                        {e.billedAt ? (
+                          <Badge variant="success">{t('billing.billedYes', 'Sì')}</Badge>
+                        ) : (
+                          <span title={t('billing.billedNoHint')}>
+                            <Badge variant="neutral">{t('billing.billedNo', 'In attesa')}</Badge>
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
