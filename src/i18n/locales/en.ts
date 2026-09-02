@@ -3878,6 +3878,10 @@ const en = {
     }
   },
   billing: {
+    daysUntilRenewal: '{{days}} days until renewal',
+    refunds: 'Refunds',
+    refundsHelp: 'Refunds are issued from the payment provider dashboard for now.',
+    comingSoon: 'Coming soon',
     title: 'Billing & Subscription',
     selectCompanyDesc: 'Select the company to manage its subscription and view its invoice history',
     activeMethodDesc: 'Your subscription is active and renews automatically every month.',

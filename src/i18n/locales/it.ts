@@ -3879,6 +3879,10 @@ const it = {
     }
   },
   billing: {
+    daysUntilRenewal: '{{days}} giorni al rinnovo',
+    refunds: 'Rimborsi',
+    refundsHelp: 'Per ora i rimborsi si effettuano dal pannello del gestore di pagamento.',
+    comingSoon: 'Prossimamente',
     title: 'Fatturazione & Abbonamento',
     selectCompanyDesc: 'Seleziona l’azienda per gestirne l’abbonamento e visualizzare lo storico fatture',
     activeMethodDesc: 'Il tuo abbonamento è attivo e si rinnova automaticamente ogni mese.',

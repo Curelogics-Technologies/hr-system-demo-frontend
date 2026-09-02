@@ -11,6 +11,7 @@ import {
   BillingTransaction,
   PaymentProvider,
   Company,
+  SuperAdminBillingCompanyRow,
 } from '../../types';
 import {
   FiscalDataModal,
@@ -37,6 +38,7 @@ import {
   History as HistoryIcon,
   Info,
   Building2,
+  RotateCcw,
 } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
 import { Spinner } from '../../components/ui/Spinner';
@@ -50,6 +52,25 @@ import { Button } from '../../components/ui/Button';
  * One licensed resource line: how many of the paid licenses are in use, with a
  * bar that turns amber as it fills and red once nothing is left.
  */
+/** Colour and wording for a subscription's state, used in the selector. */
+function statusTag(status: string | null, t: (k: string, d?: any) => string) {
+  switch (status) {
+    case 'active':
+      return { label: t('billing.status_active', 'active'), bg: 'rgba(22,163,74,0.12)', fg: '#16a34a' };
+    case 'past_due':
+      return { label: t('billing.status_past_due', 'past due'), bg: 'rgba(217,119,6,0.14)', fg: '#b45309' };
+    case 'unpaid':
+      return { label: t('billing.status_unpaid', 'unpaid'), bg: 'rgba(220,38,38,0.12)', fg: '#dc2626' };
+    case 'canceled':
+      return { label: t('billing.status_canceled', 'canceled'), bg: 'rgba(120,120,120,0.16)', fg: 'var(--text-muted)' };
+    case 'pending':
+    case 'incomplete':
+      return { label: t('billing.status_pending', 'pending'), bg: 'rgba(59,130,246,0.12)', fg: '#2563eb' };
+    default:
+      return { label: t('billing.noSubscription', 'No subscription'), bg: 'rgba(120,120,120,0.12)', fg: 'var(--text-muted)' };
+  }
+}
+
 const UsageRow: React.FC<{
   icon: React.ReactNode;
   label: string;
@@ -111,6 +132,7 @@ export const BillingPage: React.FC = () => {
 
   // Multi-company support for Super Admin & Multi-company managers
   const [companiesList, setCompaniesList] = useState<Company[]>([]);
+  const [companyBilling, setCompanyBilling] = useState<Record<number, SuperAdminBillingCompanyRow>>({});
   const [searchParams, setSearchParams] = useSearchParams();
   const companyIdFromUrl = (() => {
     const raw = searchParams.get('companyId');
@@ -328,6 +350,11 @@ export const BillingPage: React.FC = () => {
   // Every amount on this page is shown in the company's own currency.
   const companyCurrency = company?.currency || 'EUR';
 
+  // Whole days left in the paid period, shown beside the cancel action.
+  const daysUntilRenewal = sub?.currentPeriodEnd
+    ? Math.max(0, Math.ceil((new Date(sub.currentPeriodEnd).getTime() - Date.now()) / 86_400_000))
+    : 0;
+
   return (
     <div style={{ maxWidth: 1120, margin: '0 auto', padding: '20px 20px 60px', display: 'flex', flexDirection: 'column', gap: 24 }}>
       {/* 0. Company selector — Super Admin only.
@@ -368,7 +395,7 @@ export const BillingPage: React.FC = () => {
               </div>
             </div>
           </div>
-          <div style={{ minWidth: 260, flex: '0 1 320px' }}>
+          <div style={{ minWidth: 300, flex: '0 1 420px' }}>
             <CustomSelect
               value={selectedCompanyId ? String(selectedCompanyId) : null}
               onChange={(v) => {
@@ -379,67 +406,82 @@ export const BillingPage: React.FC = () => {
               }}
               searchable
               placeholder={t('companies.selectCompany', 'Azienda')}
-              options={companiesList.map((c) => ({
-                value: String(c.id),
-                label: `${c.name} ${c.id}`,
-                render: (
-                  <span style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 12,
-                    width: '100%',
-                  }}>
-                    <span style={{
-                      fontWeight: 600,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}>
-                      {c.name}
+              options={companiesList.map((c) => {
+                const b = companyBilling[c.id];
+                const status = b?.subscriptionStatus ?? null;
+                const tag = statusTag(status, t);
+                return {
+                  value: String(c.id),
+                  label: `${c.name} ${c.id}`,
+                  render: (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', minWidth: 0 }}>
+                      <span style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{
+                          display: 'flex', alignItems: 'center', gap: 8, minWidth: 0,
+                        }}>
+                          <span style={{
+                            fontWeight: 600, overflow: 'hidden',
+                            textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          }}>
+                            {c.name}
+                          </span>
+                          <span style={{
+                            flexShrink: 0, fontSize: 10, fontWeight: 700,
+                            padding: '1px 7px', borderRadius: 20,
+                            background: tag.bg, color: tag.fg,
+                          }}>
+                            {tag.label}
+                          </span>
+                        </span>
+                        <span style={{
+                          display: 'flex', gap: 10, marginTop: 2,
+                          fontSize: 11, color: 'var(--text-muted)',
+                          fontVariantNumeric: 'tabular-nums',
+                        }}>
+                          <span>
+                            {t('billing.employeesShort', 'dipendenti')}:{' '}
+                            {b ? `${b.employeeCount}/${b.seatQuantity ?? '—'}` : '—'}
+                          </span>
+                          <span>
+                            {t('billing.terminalsShort', 'terminali')}:{' '}
+                            {b ? `${b.activeDevicesCount}/${b.deviceQuantity ?? '—'}` : '—'}
+                          </span>
+                        </span>
+                      </span>
+                      <span style={{
+                        flexShrink: 0, fontSize: 11, fontWeight: 700,
+                        color: 'var(--text-muted)',
+                        background: 'var(--surface-warm)',
+                        border: '1px solid var(--border-light)',
+                        borderRadius: 20, padding: '1px 8px',
+                        fontVariantNumeric: 'tabular-nums',
+                      }}>
+                        ID {c.id}
+                      </span>
                     </span>
-                    <span style={{
-                      flexShrink: 0,
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: 'var(--text-muted)',
-                      background: 'var(--surface-warm)',
-                      border: '1px solid var(--border-light)',
-                      borderRadius: 20,
-                      padding: '1px 8px',
-                      fontVariantNumeric: 'tabular-nums',
-                    }}>
-                      ID {c.id}
+                  ),
+                  selectedRender: (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', minWidth: 0 }}>
+                      <span style={{
+                        fontWeight: 600, overflow: 'hidden',
+                        textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>
+                        {c.name}
+                      </span>
+                      <span style={{
+                        flexShrink: 0, fontSize: 10, fontWeight: 700,
+                        padding: '1px 7px', borderRadius: 20,
+                        background: tag.bg, color: tag.fg,
+                      }}>
+                        {tag.label}
+                      </span>
+                      <span style={{ marginLeft: 'auto', flexShrink: 0, fontSize: 11, color: 'var(--text-muted)' }}>
+                        ID {c.id}
+                      </span>
                     </span>
-                  </span>
-                ),
-                selectedRender: (
-                  <span style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 10,
-                    width: '100%',
-                  }}>
-                    <span style={{
-                      fontWeight: 600,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}>
-                      {c.name}
-                    </span>
-                    <span style={{
-                      flexShrink: 0,
-                      fontSize: 11,
-                      color: 'var(--text-muted)',
-                      fontVariantNumeric: 'tabular-nums',
-                    }}>
-                      ID {c.id}
-                    </span>
-                  </span>
-                ),
-              }))}
+                  ),
+                };
+              })}
             />
           </div>
         </div>
@@ -802,7 +844,27 @@ export const BillingPage: React.FC = () => {
 
           {/* Cancellation Option for Active Subscriptions */}
           {hasSubscription && isActive && !sub.cancelAtPeriodEnd && (
-            <div style={{ borderTop: '1px solid var(--border-light)', paddingTop: 14, display: 'flex', justifyContent: 'flex-end' }}>
+            <div style={{
+              borderTop: '1px solid var(--border-light)',
+              paddingTop: 14,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              flexWrap: 'wrap',
+            }}>
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 12,
+                color: 'var(--text-muted)',
+              }}>
+                <Calendar size={13} />
+                {t('billing.daysUntilRenewal', {
+                  days: daysUntilRenewal,
+                })}
+              </span>
               <button
                 type="button"
                 onClick={() => setCancelModalOpen(true)}
@@ -1021,6 +1083,47 @@ export const BillingPage: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Refunds are handled in the provider's dashboard for now. Stated here
+          so an admin looking for them knows where they stand. */}
+      {hasSubscription && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          flexWrap: 'wrap',
+          padding: '12px 16px',
+          borderRadius: 'var(--radius)',
+          border: '1px dashed var(--border)',
+          background: 'var(--surface-warm)',
+        }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <RotateCcw size={16} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+            <span>
+              <span style={{ display: 'block', fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+                {t('billing.refunds')}
+              </span>
+              <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)' }}>
+                {t('billing.refundsHelp')}
+              </span>
+            </span>
+          </span>
+          <span style={{
+            flexShrink: 0,
+            fontSize: 10.5,
+            fontWeight: 700,
+            letterSpacing: '0.04em',
+            textTransform: 'uppercase',
+            padding: '3px 9px',
+            borderRadius: 20,
+            background: 'rgba(59,130,246,0.12)',
+            color: '#2563eb',
+          }}>
+            {t('billing.comingSoon')}
+          </span>
+        </div>
+      )}
 
       {/* 6. Cancel Subscription Confirmation Modal */}
       <Modal
