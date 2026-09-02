@@ -48,7 +48,6 @@ const en = {
     showingResults: 'Showing {{from}}–{{to}} of {{total}} results',
     new: 'New',
     phase2: 'Available in Phase 2',
-    comingSoon: 'Coming soon',
     unsavedChanges: 'There are unsaved changes',
     saveChanges: 'Save changes',
     name: 'Name',
@@ -3878,13 +3877,11 @@ const en = {
     }
   },
   billing: {
+    billedNoHint: 'Recorded, and included in the next invoice',
     txKindCarriedOver: 'Not collected — below the provider minimum, added to the next invoice',
     carriedOverTitle: 'Last charge was not collected',
     carriedOverBody: '{{amount}} was below the minimum your payment provider will charge, so nothing was taken. It has been added to your next invoice. Raising your unit prices avoids this.',
     daysUntilRenewal: '{{days}} days until renewal',
-    refunds: 'Refunds',
-    refundsHelp: 'Refunds are issued from the payment provider dashboard for now.',
-    comingSoon: 'Coming soon',
     title: 'Billing & Subscription',
     selectCompanyDesc: 'Select the company to manage its subscription and view its invoice history',
     activeMethodDesc: 'Your subscription is active and renews automatically every month.',

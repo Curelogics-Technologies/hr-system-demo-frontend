@@ -38,7 +38,6 @@ import {
   History as HistoryIcon,
   Info,
   Building2,
-  RotateCcw,
 } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
 import { Spinner } from '../../components/ui/Spinner';
@@ -1113,47 +1112,6 @@ export const BillingPage: React.FC = () => {
           </div>
         )}
       </div>
-
-      {/* Refunds are handled in the provider's dashboard for now. Stated here
-          so an admin looking for them knows where they stand. */}
-      {hasSubscription && (
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 12,
-          flexWrap: 'wrap',
-          padding: '12px 16px',
-          borderRadius: 'var(--radius)',
-          border: '1px dashed var(--border)',
-          background: 'var(--surface-warm)',
-        }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <RotateCcw size={16} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
-            <span>
-              <span style={{ display: 'block', fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
-                {t('billing.refunds')}
-              </span>
-              <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)' }}>
-                {t('billing.refundsHelp')}
-              </span>
-            </span>
-          </span>
-          <span style={{
-            flexShrink: 0,
-            fontSize: 10.5,
-            fontWeight: 700,
-            letterSpacing: '0.04em',
-            textTransform: 'uppercase',
-            padding: '3px 9px',
-            borderRadius: 20,
-            background: 'rgba(59,130,246,0.12)',
-            color: '#2563eb',
-          }}>
-            {t('billing.comingSoon')}
-          </span>
-        </div>
-      )}
 
       {/* 6. Cancel Subscription Confirmation Modal */}
       <Modal

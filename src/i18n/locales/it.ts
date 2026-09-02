@@ -47,7 +47,6 @@ const it = {
     showingResults: 'Mostrando {{from}}–{{to}} di {{total}} risultati',
     new: 'Nuovo',
     phase2: 'Disponibile nella Fase 2',
-    comingSoon: 'Prossimamente',
     unsavedChanges: 'Ci sono modifiche non salvate',
     saveChanges: 'Salva modifiche',
     name: 'Nome',
@@ -3879,13 +3878,11 @@ const it = {
     }
   },
   billing: {
+    billedNoHint: 'Registrato e incluso nella prossima fattura',
     txKindCarriedOver: 'Non incassato — sotto il minimo del gestore, aggiunto alla prossima fattura',
     carriedOverTitle: 'L’ultimo addebito non è stato incassato',
     carriedOverBody: '{{amount}} era sotto il minimo incassabile dal gestore di pagamento, quindi non è stato prelevato nulla. È stato aggiunto alla prossima fattura. Aumentare i prezzi unitari evita questa situazione.',
     daysUntilRenewal: '{{days}} giorni al rinnovo',
-    refunds: 'Rimborsi',
-    refundsHelp: 'Per ora i rimborsi si effettuano dal pannello del gestore di pagamento.',
-    comingSoon: 'Prossimamente',
     title: 'Fatturazione & Abbonamento',
     selectCompanyDesc: 'Seleziona l’azienda per gestirne l’abbonamento e visualizzare lo storico fatture',
     activeMethodDesc: 'Il tuo abbonamento è attivo e si rinnova automaticamente ogni mese.',

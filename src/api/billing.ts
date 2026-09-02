@@ -176,6 +176,11 @@ export const billingApi = {
       delta: number;
       resultingCount: number;
       userLabel: string | null;
+      /** Employee photo, read live so a changed photo shows everywhere. */
+      avatarFilename: string | null;
+      /** For a terminal, the logo and name of the store it belongs to. */
+      storeLogoFilename: string | null;
+      storeName: string | null;
       billedAt: string | null;
       occurredAt: string;
     }>;
