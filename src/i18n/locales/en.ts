@@ -982,6 +982,9 @@ const en = {
 
   // ─── Companies ────────────────────────────────────────────────────────────
   companies: {
+    viewPaymentHistory: 'Payment history',
+    paymentHistoryFor: 'Payment history — {{name}}',
+    viewAllPayments: 'View all',
     group: 'Group',
     selectCompany: 'Company',
     billingConfigUpdated: 'Billing configuration updated successfully',
@@ -997,8 +1000,8 @@ const en = {
     billingEnforced: 'Subscription required for this company',
     billingEnforcedHelp: 'When on, the company needs a paid subscription to use the platform and cannot exceed the licenses it bought. When off, the company keeps working without billing.',
     storageLimits: 'Storage & document archive',
-    storageLimitGb: 'Storage limit (GB)',
-    extraStoragePricePerGb: 'Extra storage price per GB',
+    storageLimitGb: 'Included storage (GB)',
+    extraStoragePricePerGb: 'Extra storage price ({{cur}}/GB/month)',
     discounts: 'Discounts',
     discountPercent: 'Discount (%)',
     discountValidFrom: 'Discount valid from',

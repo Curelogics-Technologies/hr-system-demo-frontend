@@ -976,6 +976,9 @@ const it = {
 
   // ─── Companies ────────────────────────────────────────────────────────────
   companies: {
+    viewPaymentHistory: 'Storico pagamenti',
+    paymentHistoryFor: 'Storico pagamenti — {{name}}',
+    viewAllPayments: 'Vedi tutto',
     group: 'Gruppo',
     selectCompany: 'Azienda',
     billingConfigUpdated: 'Configurazione tariffaria aggiornata con successo',
@@ -991,8 +994,8 @@ const it = {
     billingEnforced: 'Abbonamento obbligatorio per questa azienda',
     billingEnforcedHelp: 'Se attivo, l’azienda deve avere un abbonamento pagato per usare la piattaforma e non può superare le licenze acquistate. Se disattivo, l’azienda continua a funzionare senza fatturazione.',
     storageLimits: 'Archiviazione & documenti',
-    storageLimitGb: 'Limite di archiviazione (GB)',
-    extraStoragePricePerGb: 'Prezzo archiviazione extra per GB',
+    storageLimitGb: 'Archiviazione inclusa (GB)',
+    extraStoragePricePerGb: 'Prezzo extra archiviazione ({{cur}}/GB/mese)',
     discounts: 'Sconti',
     discountPercent: 'Sconto (%)',
     discountValidFrom: 'Sconto valido dal',

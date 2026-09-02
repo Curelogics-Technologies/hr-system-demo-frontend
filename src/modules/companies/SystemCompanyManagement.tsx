@@ -1,10 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import CurrencySelect from '../../components/ui/CurrencySelect';
+import CurrencyFlag from '../../components/ui/CurrencyFlag';
+import CompanyPaymentHistoryModal from './CompanyPaymentHistoryModal';
 import { CURRENCIES, currencyLabel, normaliseCurrency } from '../../constants/currencies';
+import { formatMoney } from '../../constants/currencies';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import ReactCountryFlag from 'react-country-flag';
-import { ArrowRight, Building2, Users, Store, Plus, Layers, Smartphone, HardDrive, CalendarClock, Search, CreditCard } from 'lucide-react';
+import { ArrowRight, Building2, Users, Store, Plus, Layers, Smartphone, HardDrive, CalendarClock, Search, CreditCard, Receipt } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
 import { useBreakpoint } from '../../hooks/useBreakpoint';
 import { useAuth } from '../../context/AuthContext';
@@ -351,6 +354,8 @@ export default function SystemCompanyManagement() {
   const [formProfile, setFormProfile] = useState<CompanyProfileForm>({ ...EMPTY_COMPANY_PROFILE_FORM });
   const [formError, setFormError] = useState<string | null>(null);
   const [formSaving, setFormSaving] = useState(false);
+  // Company whose payment history is open, from the card's receipt button.
+  const [historyCompany, setHistoryCompany] = useState<Company | null>(null);
   const [logoUploading, setLogoUploading] = useState(false);
   const [logoError, setLogoError] = useState<string | null>(null);
   const [bannerUploading, setBannerUploading] = useState(false);
@@ -1151,8 +1156,34 @@ export default function SystemCompanyManagement() {
                 })()}
                 
                 {/* Total Price */}
-                <div style={{ padding: '14px 20px', background: 'var(--surface-warm)', borderTop: '1px solid var(--border-light)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{
+                  // marginTop:auto pins this to the bottom of the flex column,
+                  // so it lines up across cards of differing heights.
+                  marginTop: 'auto',
+                  padding: '14px 20px',
+                  background: 'var(--surface-warm)',
+                  borderTop: '1px solid var(--border-light)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: 12,
+                }}>
+                  <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                    <button
+                      type="button"
+                      title={t('companies.viewPaymentHistory')}
+                      aria-label={t('companies.viewPaymentHistory')}
+                      onClick={(e) => { e.stopPropagation(); setHistoryCompany(c); }}
+                      style={{
+                        width: 28, height: 28, flexShrink: 0,
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)',
+                        background: 'var(--surface)', color: 'var(--accent)', cursor: 'pointer',
+                      }}
+                    >
+                      <Receipt size={14} />
+                    </button>
+                    <CurrencyFlag code={c.currency} />
                     {t('companies.totalPrice', 'Total Price')}
                     {(() => {
                       if (c.discountPercent && c.discountPercent > 0) {
@@ -1206,10 +1237,10 @@ export default function SystemCompanyManagement() {
                         <>
                           {finalBill < totalBill && (
                             <span style={{ fontSize: 12, textDecoration: 'line-through', color: 'var(--text-muted)', marginRight: 6, fontWeight: 500 }}>
-                              €{totalBill.toFixed(2)}
+                              {formatMoney(totalBill, c.currency)}
                             </span>
                           )}
-                          €{finalBill.toFixed(2)}
+                          {formatMoney(finalBill, c.currency)}
                         </>
                       );
                     })()}
@@ -1661,6 +1692,13 @@ export default function SystemCompanyManagement() {
           }}
         />
       )}
+
+      <CompanyPaymentHistoryModal
+        companyId={historyCompany?.id ?? null}
+        companyName={historyCompany?.name}
+        currency={historyCompany?.currency}
+        onClose={() => setHistoryCompany(null)}
+      />
     </div>
   );
 }

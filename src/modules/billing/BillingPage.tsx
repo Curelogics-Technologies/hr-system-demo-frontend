@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { formatMoney } from '../../constants/currencies';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import { billingApi } from '../../api/billing';
 import { getCompanies } from '../../api/companies';
 import { useAuth } from '../../context/AuthContext';
@@ -108,7 +109,25 @@ export const BillingPage: React.FC = () => {
 
   // Multi-company support for Super Admin & Multi-company managers
   const [companiesList, setCompaniesList] = useState<Company[]>([]);
-  const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(user?.companyId || null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const companyIdFromUrl = (() => {
+    const raw = searchParams.get('companyId');
+    const n = raw ? parseInt(raw, 10) : NaN;
+    return Number.isNaN(n) ? null : n;
+  })();
+  const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(
+    companyIdFromUrl ?? user?.companyId ?? null
+  );
+
+  // Mirror the selection into the URL, replacing rather than pushing so the
+  // back button still leaves the page instead of walking company by company.
+  useEffect(() => {
+    if (!selectedCompanyId) return;
+    if (companyIdFromUrl === selectedCompanyId) return;
+    const next = new URLSearchParams(searchParams);
+    next.set('companyId', String(selectedCompanyId));
+    setSearchParams(next, { replace: true });
+  }, [selectedCompanyId, companyIdFromUrl, searchParams, setSearchParams]);
 
   // Load companies if user can manage multiple
   useEffect(() => {
