@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { formatMoney } from '../../constants/currencies';
 import { useTranslation } from 'react-i18next';
 import { billingApi } from '../../api/billing';
 import { getCompanies } from '../../api/companies';
@@ -53,7 +54,9 @@ const UsageRow: React.FC<{
   inUse: number;
   licensed: number;
   unitPrice: number;
-}> = ({ icon, label, inUse, licensed, unitPrice }) => {
+  /** The company's currency, so figures never show a foreign symbol. */
+  currency: string;
+}> = ({ icon, label, inUse, licensed, unitPrice, currency }) => {
   const pct = licensed > 0 ? Math.min(100, (inUse / licensed) * 100) : 0;
   const full = licensed > 0 && inUse >= licensed;
   const color = full ? '#dc2626' : pct > 85 ? '#d97706' : 'var(--accent)';
@@ -66,7 +69,7 @@ const UsageRow: React.FC<{
           {label}
         </span>
         <strong style={{ color: 'var(--text-primary)', fontVariantNumeric: 'tabular-nums' }}>
-          {inUse} / {licensed} · €{(licensed * unitPrice).toFixed(2)}
+          {inUse} / {licensed} · {formatMoney(licensed * unitPrice, currency)}
         </strong>
       </div>
       <div style={{
@@ -285,6 +288,9 @@ export const BillingPage: React.FC = () => {
   const licensedTerminals = licenses?.terminalsLicensed ?? 0;
   const licensedMonthlyTotal =
     licensedEmployees * employeePrice + licensedTerminals * devicePrice;
+
+  // Every amount on this page is shown in the company's own currency.
+  const companyCurrency = company?.currency || 'EUR';
 
   return (
     <div style={{ maxWidth: 1120, margin: '0 auto', padding: '20px 20px 60px', display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -530,6 +536,7 @@ export const BillingPage: React.FC = () => {
                 inUse={licenses?.employeesInUse ?? liveEmployees}
                 licensed={licenses?.employeesLicensed ?? 0}
                 unitPrice={employeePrice}
+                currency={companyCurrency}
               />
 
               {/* Terminal licenses */}
@@ -539,6 +546,7 @@ export const BillingPage: React.FC = () => {
                 inUse={licenses?.terminalsInUse ?? liveDevices}
                 licensed={licenses?.terminalsLicensed ?? 0}
                 unitPrice={devicePrice}
+                currency={companyCurrency}
               />
 
               {/* Total Divider */}
@@ -549,7 +557,7 @@ export const BillingPage: React.FC = () => {
                   {t('billing.totalMonthly', 'Totale mensile')}
                 </span>
                 <span style={{ fontSize: 20, fontWeight: 900, fontFamily: 'var(--font-display)', color: 'var(--accent)' }}>
-                  €{licensedMonthlyTotal.toFixed(2)}
+                  {formatMoney(licensedMonthlyTotal, companyCurrency)}
                   <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-muted)' }}> / {t('billing.month', 'mese')}</span>
                 </span>
               </div>
@@ -929,7 +937,7 @@ export const BillingPage: React.FC = () => {
                       {tx.provider}
                     </td>
                     <td style={{ padding: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                      €{((tx.amountCents || 0) / 100).toFixed(2)}
+                      {formatMoney((tx.amountCents || 0) / 100, tx.currency || companyCurrency)}
                     </td>
                     <td style={{ padding: '12px' }}>
                       {tx.status === 'paid' ? (

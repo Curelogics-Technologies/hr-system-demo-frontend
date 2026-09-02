@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import CurrencySelect from '../../components/ui/CurrencySelect';
 import { CURRENCIES, currencyLabel, normaliseCurrency } from '../../constants/currencies';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -1312,31 +1313,12 @@ export default function SystemCompanyManagement() {
               onChange={(e) => setFormProfile((prev) => ({ ...prev, officesLocations: e.target.value }))}
               disabled={formSaving}
             />
-            <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>
-                {t('companies.currency', 'Currency')}
-              </label>
-              <select
-                value={normaliseCurrency(formProfile.currency)}
-                onChange={(e) => setFormProfile((prev) => ({ ...prev, currency: e.target.value }))}
-                disabled={formSaving}
-                style={{
-                  width: '100%',
-                  padding: '9px 12px',
-                  borderRadius: 'var(--radius-sm)',
-                  border: '1px solid var(--border)',
-                  background: 'var(--surface)',
-                  color: 'var(--text-primary)',
-                  fontSize: 13,
-                }}
-              >
-                {CURRENCIES.map((c) => (
-                  <option key={c.code} value={c.code}>
-                    {currencyLabel(c)}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <CurrencySelect
+              label={t('companies.currency', 'Currency')}
+              value={formProfile.currency}
+              onChange={(code) => setFormProfile((prev) => ({ ...prev, currency: code }))}
+              disabled={formSaving}
+            />
           </div>
 
           {/* Italian e-invoicing block — kept together and mirrored from the

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { formatMoney } from '../../constants/currencies';
 import { useTranslation } from 'react-i18next';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
@@ -157,7 +158,8 @@ export const ReceiptModal: React.FC<{
   const { t } = useTranslation();
   if (!tx) return null;
 
-  const money = (cents?: number | null) => `€${((cents ?? 0) / 100).toFixed(2)}`;
+  // Each receipt is shown in the currency it was actually charged in.
+  const money = (cents?: number | null) => formatMoney((cents ?? 0) / 100, tx.currency);
   const empCents = (tx as any).unitPriceEmployeeCents ?? null;
   const devCents = (tx as any).unitPriceDeviceCents ?? null;
 

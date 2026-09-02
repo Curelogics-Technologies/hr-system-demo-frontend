@@ -7,8 +7,10 @@
  * currency box is what let "Pakistani Rupee" reach the billing tables and
  * break checkout, so every place a currency is chosen uses this list.
  *
- * The flag is a plain emoji — no image assets, no dependency, and it renders
- * on every platform the admin panel runs on.
+ * Each entry carries the ISO country code its flag is drawn from. Emoji flags
+ * were tried first and do not work: Windows has no glyphs for regional
+ * indicator pairs and prints the two letters instead, so the picker showed
+ * "EU" and "GB" rather than flags.
  */
 export interface CurrencyOption {
   /** ISO 4217 code — the value stored and sent to the payment provider. */
@@ -16,29 +18,30 @@ export interface CurrencyOption {
   /** English name, shown beside the code. */
   name: string;
   symbol: string;
-  flag: string;
+  /** ISO 3166 code used to pick the flag artwork. */
+  country: string;
 }
 
 export const CURRENCIES: CurrencyOption[] = [
-  { code: 'EUR', name: 'Euro',              symbol: '€',  flag: '🇪🇺' },
-  { code: 'GBP', name: 'British Pound',     symbol: '£',  flag: '🇬🇧' },
-  { code: 'USD', name: 'US Dollar',         symbol: '$',  flag: '🇺🇸' },
-  { code: 'CHF', name: 'Swiss Franc',       symbol: 'Fr', flag: '🇨🇭' },
-  { code: 'SEK', name: 'Swedish Krona',     symbol: 'kr', flag: '🇸🇪' },
-  { code: 'NOK', name: 'Norwegian Krone',   symbol: 'kr', flag: '🇳🇴' },
-  { code: 'DKK', name: 'Danish Krone',      symbol: 'kr', flag: '🇩🇰' },
-  { code: 'PLN', name: 'Polish Złoty',      symbol: 'zł', flag: '🇵🇱' },
-  { code: 'CZK', name: 'Czech Koruna',      symbol: 'Kč', flag: '🇨🇿' },
-  { code: 'RON', name: 'Romanian Leu',      symbol: 'lei', flag: '🇷🇴' },
-  { code: 'HUF', name: 'Hungarian Forint',  symbol: 'Ft', flag: '🇭🇺' },
-  { code: 'CAD', name: 'Canadian Dollar',   symbol: '$',  flag: '🇨🇦' },
-  { code: 'AUD', name: 'Australian Dollar', symbol: '$',  flag: '🇦🇺' },
-  { code: 'AED', name: 'UAE Dirham',        symbol: 'د.إ', flag: '🇦🇪' },
-  { code: 'SAR', name: 'Saudi Riyal',       symbol: '﷼',  flag: '🇸🇦' },
-  { code: 'PKR', name: 'Pakistani Rupee',   symbol: '₨',  flag: '🇵🇰' },
-  { code: 'INR', name: 'Indian Rupee',      symbol: '₹',  flag: '🇮🇳' },
-  { code: 'TRY', name: 'Turkish Lira',      symbol: '₺',  flag: '🇹🇷' },
-  { code: 'JPY', name: 'Japanese Yen',      symbol: '¥',  flag: '🇯🇵' },
+  { code: 'EUR', name: 'Euro',              symbol: '€',  country: 'EU' },
+  { code: 'GBP', name: 'British Pound',     symbol: '£',  country: 'GB' },
+  { code: 'USD', name: 'US Dollar',         symbol: '$',  country: 'US' },
+  { code: 'CHF', name: 'Swiss Franc',       symbol: 'Fr', country: 'CH' },
+  { code: 'SEK', name: 'Swedish Krona',     symbol: 'kr', country: 'SE' },
+  { code: 'NOK', name: 'Norwegian Krone',   symbol: 'kr', country: 'NO' },
+  { code: 'DKK', name: 'Danish Krone',      symbol: 'kr', country: 'DK' },
+  { code: 'PLN', name: 'Polish Złoty',      symbol: 'zł', country: 'PL' },
+  { code: 'CZK', name: 'Czech Koruna',      symbol: 'Kč', country: 'CZ' },
+  { code: 'RON', name: 'Romanian Leu',      symbol: 'lei', country: 'RO' },
+  { code: 'HUF', name: 'Hungarian Forint',  symbol: 'Ft', country: 'HU' },
+  { code: 'CAD', name: 'Canadian Dollar',   symbol: '$',  country: 'CA' },
+  { code: 'AUD', name: 'Australian Dollar', symbol: '$',  country: 'AU' },
+  { code: 'AED', name: 'UAE Dirham',        symbol: 'د.إ', country: 'AE' },
+  { code: 'SAR', name: 'Saudi Riyal',       symbol: '﷼',  country: 'SA' },
+  { code: 'PKR', name: 'Pakistani Rupee',   symbol: '₨',  country: 'PK' },
+  { code: 'INR', name: 'Indian Rupee',      symbol: '₹',  country: 'IN' },
+  { code: 'TRY', name: 'Turkish Lira',      symbol: '₺',  country: 'TR' },
+  { code: 'JPY', name: 'Japanese Yen',      symbol: '¥',  country: 'JP' },
 ];
 
 export const DEFAULT_CURRENCY = 'EUR';
@@ -49,9 +52,23 @@ export function findCurrency(code: string | null | undefined): CurrencyOption | 
   return CURRENCIES.find((c) => c.code === wanted);
 }
 
-/** "🇬🇧 GBP — British Pound (£)", for a plain <option> label. */
+/** "GBP — British Pound (£)", for contexts that can only take text. */
 export function currencyLabel(c: CurrencyOption): string {
-  return `${c.flag} ${c.code} — ${c.name} (${c.symbol})`;
+  return `${c.code} — ${c.name} (${c.symbol})`;
+}
+
+/** The symbol for a stored currency, falling back to the code itself. */
+export function currencySymbol(code: string | null | undefined): string {
+  return findCurrency(normaliseCurrency(code))?.symbol ?? normaliseCurrency(code);
+}
+
+/**
+ * Formats an amount in the company's own currency.
+ * Used everywhere billing shows money, so a company billed in PKR never sees
+ * a euro sign against its figures.
+ */
+export function formatMoney(amount: number, code: string | null | undefined): string {
+  return `${currencySymbol(code)}${amount.toFixed(2)}`;
 }
 
 /**

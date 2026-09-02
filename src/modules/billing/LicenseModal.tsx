@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { formatMoney } from '../../constants/currencies';
 import { useTranslation } from 'react-i18next';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
@@ -37,7 +38,8 @@ const CapacityBar: React.FC<{
   /** Extra licenses being added in this session, drawn as a lighter segment. */
   adding?: number;
   unitPrice: number;
-}> = ({ icon, label, inUse, licensed, adding = 0, unitPrice }) => {
+  currency: string;
+}> = ({ icon, label, inUse, licensed, adding = 0, unitPrice, currency }) => {
   const { t } = useTranslation();
   const total = Math.max(licensed + adding, 1);
   const usedPct = Math.min(100, (inUse / total) * 100);
@@ -96,7 +98,7 @@ const CapacityBar: React.FC<{
             ? t('billing.capacityFull', 'Nessuna licenza libera')
             : t('billing.capacityFree', '{{n}} libere', { n: licensed + adding - inUse })}
         </span>
-        <span>€{unitPrice.toFixed(2)} {t('billing.perUnitMonth', 'cad./mese')}</span>
+        <span>{formatMoney(unitPrice, currency)} {t('billing.perUnitMonth', 'cad./mese')}</span>
       </div>
     </div>
   );
@@ -414,8 +416,8 @@ export const LicenseModal: React.FC<Props> = ({
                     ? t('billing.scheduleIncrease', 'Programma aumento')
                     : quoting
                     ? t('billing.calculating', 'Calcolo...')
-                    : t('billing.payAndAdd', 'Paga €{{amount}} e aggiungi', {
-                        amount: (quote?.amountDueNow ?? 0).toFixed(2),
+                    : t('billing.payAndAdd', {
+                        amount: formatMoney(quote?.amountDueNow ?? 0, currency),
                       })}
             </Button>
           </>
@@ -538,6 +540,7 @@ export const LicenseModal: React.FC<Props> = ({
           licensed={currentEmployees}
           adding={addingEmployees}
           unitPrice={unitPriceEmployee}
+          currency={currency}
         />
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
@@ -556,6 +559,7 @@ export const LicenseModal: React.FC<Props> = ({
           licensed={currentTerminals}
           adding={addingTerminals}
           unitPrice={unitPriceDevice}
+          currency={currency}
         />
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
@@ -578,9 +582,9 @@ export const LicenseModal: React.FC<Props> = ({
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span style={{ color: 'var(--text-muted)' }}>
-              {employees} × €{unitPriceEmployee.toFixed(2)} + {terminals} × €{unitPriceDevice.toFixed(2)}
+              {employees} × {formatMoney(unitPriceEmployee, currency)} + {terminals} × {formatMoney(unitPriceDevice, currency)}
             </span>
-            <strong>€{monthlyTotal.toFixed(2)} / {t('billing.month', 'mese')}</strong>
+            <strong>{formatMoney(monthlyTotal, currency)} / {t('billing.month', 'mese')}</strong>
           </div>
 
           {mode === 'manage' && dirty && (
@@ -618,14 +622,13 @@ export const LicenseModal: React.FC<Props> = ({
                       })}
                     </span>
                     <strong style={{ fontSize: 18, color: 'var(--accent)' }}>
-                      €{(quote?.amountDueNow ?? 0).toFixed(2)}
+                      {formatMoney(quote?.amountDueNow ?? 0, currency)}
                     </strong>
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                     {t(
                       'billing.alreadyPaidUnaffected',
-                      'Le licenze già pagate non vengono riaddebitate. Dal rinnovo il canone sarà €{{total}}.',
-                      { total: (quote?.newMonthlyTotal ?? monthlyTotal).toFixed(2) }
+                      { total: formatMoney(quote?.newMonthlyTotal ?? monthlyTotal, currency) }
                     )}
                   </div>
                 </>

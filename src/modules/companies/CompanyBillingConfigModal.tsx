@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import CurrencySelect from '../../components/ui/CurrencySelect';
 import { CURRENCIES, currencyLabel, normaliseCurrency } from '../../constants/currencies';
 import { useTranslation } from 'react-i18next';
 import { Company } from '../../types';
@@ -125,30 +126,12 @@ export const CompanyBillingConfigModal: React.FC<Props> = ({
             {t('companies.unitPrices', 'Prezzi Unitari Licenze')}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14 }}>
-            <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>
-                {t('companies.currency', 'Valuta')}
-              </label>
-              <select
-                value={currency}
-                onChange={(e) => setCurrency(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '9px 12px',
-                  borderRadius: 'var(--radius-sm)',
-                  border: '1px solid var(--border)',
-                  background: 'var(--surface)',
-                  color: 'var(--text-primary)',
-                  fontSize: 13,
-                }}
-              >
-                {CURRENCIES.map((c) => (
-                  <option key={c.code} value={c.code}>
-                    {currencyLabel(c)}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <CurrencySelect
+              label={t('companies.currency', 'Valuta')}
+              value={currency}
+              onChange={setCurrency}
+              disabled={saving}
+            />
 
             <Input
               label={t('companies.pricePerEmployee', 'Prezzo per dipendente (€/mese)')}
