@@ -5,6 +5,7 @@ import { useSearchParams } from 'react-router-dom';
 import { billingApi } from '../../api/billing';
 import { getCompanies } from '../../api/companies';
 import { useAuth } from '../../context/AuthContext';
+import { useSocket } from '../../context/SocketContext';
 import {
   BillingOverview,
   BillingTransaction,
@@ -90,6 +91,7 @@ export const BillingPage: React.FC = () => {
   const { t } = useTranslation();
   const { showToast } = useToast();
   const { user, allowedCompanyIds } = useAuth();
+  const { socket } = useSocket();
 
   const isSuperAdmin = !!user?.isSuperAdmin;
 
@@ -170,6 +172,21 @@ export const BillingPage: React.FC = () => {
     setLoading(true);
     fetchOverview(selectedCompanyId);
   }, [fetchOverview, selectedCompanyId]);
+
+  // Billing state changes when the provider's webhook lands, not when the user
+  // does anything, so the page has to be told. The server announces it on the
+  // company's existing socket room and the page refetches — no polling, and no
+  // manual refresh to see a payment confirm.
+  useEffect(() => {
+    if (!socket) return;
+    const onBillingUpdated = () => {
+      fetchOverview(selectedCompanyId);
+    };
+    socket.on('billing:updated', onBillingUpdated);
+    return () => {
+      socket.off('billing:updated', onBillingUpdated);
+    };
+  }, [socket, fetchOverview, selectedCompanyId]);
 
   // The provider buttons only appear while something is unpaid, so an already
   // paying company needs its own route to the card form.
