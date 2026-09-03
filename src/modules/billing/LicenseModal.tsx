@@ -633,6 +633,26 @@ export const LicenseModal: React.FC<Props> = ({
                       {addingTerminals > 0 ? `, +${addingTerminals} ${t('billing.terminalsShort', 'terminali')}` : ''}
                     </span>
                   </div>
+
+                  {/* A prorated figure that appears without its working looks
+                      arbitrary. Showing the full monthly cost of what is being
+                      added, and the fraction of the period being charged for,
+                      lets the admin arrive at the same number with a
+                      calculator. */}
+                  {(quote?.additionalMonthly ?? 0) > 0 && (
+                    <div style={{
+                      display: 'flex', justifyContent: 'space-between', gap: 8,
+                      fontSize: 11, color: 'var(--text-muted)', flexWrap: 'wrap',
+                    }}>
+                      <span>
+                        {t('billing.prorationBasis', {
+                          amount: formatMoney(quote!.additionalMonthly, currency),
+                          days: quote?.daysRemaining ?? 0,
+                          total: quote?.totalDays ?? 0,
+                        })}
+                      </span>
+                    </div>
+                  )}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                     <span style={{ fontWeight: 700 }}>
                       {t('billing.payNowProrated', 'Da pagare ora (rateo {{days}} gg)', {

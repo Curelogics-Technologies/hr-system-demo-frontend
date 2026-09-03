@@ -3955,6 +3955,7 @@ const en = {
     licensesIntro: 'You pay for a number of licenses, not for the employees you create. You cannot create more employees or terminals than the licenses you bought — buy licenses first to go beyond the limit.',
     addingNow: 'Adding now',
     payNowProrated: 'To pay now (prorated, {{days}} days)',
+    prorationBasis: '{{amount}} per month for the added licences, charged for {{days}} of {{total}} days',
     alreadyPaidUnaffected: 'Licenses already paid for are not charged again. From the renewal the fee will be {{total}}.',
     reductionNote: 'Reductions are not refunded: the new amount applies from the next renewal.',
     scheduleReduction: 'Schedule reduction',

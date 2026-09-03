@@ -3956,6 +3956,7 @@ const it = {
     licensesIntro: 'Paghi un numero di licenze, non i dipendenti creati. Non è possibile creare più dipendenti o terminali delle licenze acquistate: per superare il limite, acquista prima le licenze.',
     addingNow: 'Aggiunte ora',
     payNowProrated: 'Da pagare ora (rateo {{days}} gg)',
+    prorationBasis: '{{amount}} al mese per le licenze aggiunte, addebitate per {{days}} giorni su {{total}}',
     alreadyPaidUnaffected: 'Le licenze già pagate non vengono riaddebitate. Dal rinnovo il canone sarà {{total}}.',
     reductionNote: 'Le riduzioni non prevedono rimborsi: il nuovo importo si applica dal prossimo rinnovo.',
     scheduleReduction: 'Programma riduzione',
