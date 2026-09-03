@@ -184,6 +184,10 @@ interface Props {
   companyId: number | null;
   licenses: LicenseSnapshot | null | undefined;
   unitPriceEmployee: number;
+  /** Set when the company holds a discount, so the modal can say so. */
+  discountPercent?: number;
+  discountActive?: boolean;
+  listPriceEmployee?: number;
   unitPriceDevice: number;
   currency: string;
   /** First purchase goes through hosted checkout; later changes do not. */
@@ -211,6 +215,9 @@ export const LicenseModal: React.FC<Props> = ({
   companyId,
   licenses,
   unitPriceEmployee,
+  discountPercent,
+  discountActive,
+  listPriceEmployee,
   unitPriceDevice,
   currency,
   mode,
@@ -586,6 +593,17 @@ export const LicenseModal: React.FC<Props> = ({
             </span>
             <strong>{formatMoney(monthlyTotal, currency)} / {t('billing.month', 'mese')}</strong>
           </div>
+          {discountActive && (discountPercent ?? 0) > 0 && (
+            <div style={{ fontSize: 11, color: '#16a34a', fontWeight: 600 }}>
+              {t('billing.discountApplied', 'Sconto applicato')}: −{discountPercent}%
+              {(listPriceEmployee ?? 0) > 0 && (
+                <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>
+                  {' '}({formatMoney(listPriceEmployee!, currency)}{' → '}
+                  {formatMoney(unitPriceEmployee, currency)})
+                </span>
+              )}
+            </div>
+          )}
 
           {mode === 'manage' && dirty && (
             <>
@@ -615,6 +633,26 @@ export const LicenseModal: React.FC<Props> = ({
                       {addingTerminals > 0 ? `, +${addingTerminals} ${t('billing.terminalsShort', 'terminali')}` : ''}
                     </span>
                   </div>
+
+                  {/* A prorated figure that appears without its working looks
+                      arbitrary. Showing the full monthly cost of what is being
+                      added, and the fraction of the period being charged for,
+                      lets the admin arrive at the same number with a
+                      calculator. */}
+                  {(quote?.additionalMonthly ?? 0) > 0 && (
+                    <div style={{
+                      display: 'flex', justifyContent: 'space-between', gap: 8,
+                      fontSize: 11, color: 'var(--text-muted)', flexWrap: 'wrap',
+                    }}>
+                      <span>
+                        {t('billing.prorationBasis', {
+                          amount: formatMoney(quote!.additionalMonthly, currency),
+                          days: quote?.daysRemaining ?? 0,
+                          total: quote?.totalDays ?? 0,
+                        })}
+                      </span>
+                    </div>
+                  )}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                     <span style={{ fontWeight: 700 }}>
                       {t('billing.payNowProrated', 'Da pagare ora (rateo {{days}} gg)', {

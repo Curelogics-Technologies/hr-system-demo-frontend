@@ -359,8 +359,14 @@ export const BillingPage: React.FC = () => {
   // only shows how much of the paid allowance is consumed.
   const licensedEmployees = licenses?.employeesLicensed ?? 0;
   const licensedTerminals = licenses?.terminalsLicensed ?? 0;
-  const licensedMonthlyTotal =
-    licensedEmployees * employeePrice + licensedTerminals * devicePrice;
+  // Before a subscription exists there are no licences, so licences x price is
+  // zero - and a card headed "estimated monthly total" showing 0.00 reads as a
+  // fault rather than as "nothing bought yet". Until the company subscribes the
+  // estimate is based on the people and terminals it actually has, which is
+  // what it would pay; afterwards the figure is the real fee for what it holds.
+  const licensedMonthlyTotal = hasSubscription
+    ? licensedEmployees * employeePrice + licensedTerminals * devicePrice
+    : liveEmployees * employeePrice + liveDevices * devicePrice;
 
   // Every amount on this page is shown in the company's own currency.
   const companyCurrency = company?.currency || 'EUR';
@@ -672,6 +678,27 @@ export const BillingPage: React.FC = () => {
                   <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-muted)' }}> / {t('billing.month', 'mese')}</span>
                 </span>
               </div>
+
+              {company?.discountActive && (company?.discountPercent ?? 0) > 0 && (
+                <div style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  fontSize: 11, color: 'var(--text-muted)',
+                }}>
+                  <span>
+                    {t('billing.discountApplied', 'Sconto applicato')}
+                  </span>
+                  <span style={{ fontWeight: 700, color: '#16a34a' }}>
+                    −{company.discountPercent}%
+                    {(company.listPricePerEmployee ?? 0) > 0 && (
+                      <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>
+                        {' '}({formatMoney(company.listPricePerEmployee!, companyCurrency)}
+                        {' → '}
+                        {formatMoney(employeePrice, companyCurrency)})
+                      </span>
+                    )}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -1179,6 +1206,9 @@ export const BillingPage: React.FC = () => {
         companyId={selectedCompanyId ?? company?.id ?? null}
         licenses={licenses}
         unitPriceEmployee={employeePrice}
+        discountPercent={company?.discountPercent}
+        discountActive={company?.discountActive}
+        listPriceEmployee={company?.listPricePerEmployee}
         unitPriceDevice={devicePrice}
         currency={company?.currency || 'EUR'}
         mode={isActive ? 'manage' : 'activate'}
