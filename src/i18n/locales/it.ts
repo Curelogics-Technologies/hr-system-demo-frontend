@@ -4033,6 +4033,7 @@ const it = {
     activeEmployees: 'Dipendenti attivi',
     activeTerminals: 'Terminali punto vendita attivi',
     totalMonthly: 'Totale mensile stimato',
+    discountApplied: 'Sconto applicato',
     nextRenewal: 'Prossimo rinnovo',
     paymentMethod: 'Metodo attivo',
     chooseProvider: 'Scegli il metodo di pagamento per attivare l’abbonamento:',

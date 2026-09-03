@@ -4032,6 +4032,7 @@ const en = {
     activeEmployees: 'Active Employees',
     activeTerminals: 'Active POS Terminals',
     totalMonthly: 'Estimated Monthly Total',
+    discountApplied: 'Discount applied',
     nextRenewal: 'Next Renewal Date',
     paymentMethod: 'Active Payment Method',
     chooseProvider: 'Choose payment method to activate subscription:',

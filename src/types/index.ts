@@ -392,6 +392,11 @@ export interface BillingOverview {
     pecEmail?: string | null;
     pricePerEmployee: number;
     pricePerDevice: number;
+    /** Price before discount, for showing what the discount saved. */
+    listPricePerEmployee?: number;
+    listPricePerDevice?: number;
+    discountPercent?: number;
+    discountActive?: boolean;
   };
   subscription: Subscription | null;
   liveUsage: {
