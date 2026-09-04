@@ -4033,6 +4033,8 @@ const en = {
     activeEmployees: 'Active Employees',
     activeTerminals: 'Active POS Terminals',
     totalMonthly: 'Estimated Monthly Total',
+    periodCovered: 'Period covered',
+    providerSubscriptionMissing: 'This subscription was created with different PayPal credentials and can no longer be managed. Cancel it in PayPal and start a new subscription.',
     discountApplied: 'Discount applied',
     nextRenewal: 'Next Renewal Date',
     paymentMethod: 'Active Payment Method',

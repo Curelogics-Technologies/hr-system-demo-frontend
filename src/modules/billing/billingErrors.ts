@@ -74,6 +74,9 @@ export function billingErrorMessage(err: any, t: TFunction): string {
     case 'NO_ACTIVE_SUBSCRIPTION':
       return t('billing.err_noActiveSubscription');
 
+    case 'PROVIDER_SUBSCRIPTION_MISSING':
+      return t('billing.providerSubscriptionMissing');
+
     case 'PROVIDER_NOT_SUPPORTED':
       return t('billing.err_providerNotSupported');
 

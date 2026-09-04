@@ -339,6 +339,15 @@ export interface BillingTransaction {
   description: string | null;
   seatQuantity?: number;
   deviceQuantity?: number;
+  /** Unit prices as charged, so a receipt can show each line amount. */
+  unitPriceEmployeeCents?: number | null;
+  unitPriceDeviceCents?: number | null;
+  /** The billing cycle this payment covered. */
+  periodStart?: string | null;
+  periodEnd?: string | null;
+  /** The card as it was when this payment was taken. */
+  paymentMethodBrand?: string | null;
+  paymentMethodLast4?: string | null;
   invoiceUrl: string | null;
   failureCode?: string | null;
   failureMessage: string | null;

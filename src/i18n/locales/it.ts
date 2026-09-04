@@ -4034,6 +4034,8 @@ const it = {
     activeEmployees: 'Dipendenti attivi',
     activeTerminals: 'Terminali punto vendita attivi',
     totalMonthly: 'Totale mensile stimato',
+    periodCovered: 'Periodo coperto',
+    providerSubscriptionMissing: 'Questo abbonamento è stato creato con credenziali PayPal diverse e non può più essere gestito. Annullalo su PayPal e avvia un nuovo abbonamento.',
     discountApplied: 'Sconto applicato',
     nextRenewal: 'Prossimo rinnovo',
     paymentMethod: 'Metodo attivo',

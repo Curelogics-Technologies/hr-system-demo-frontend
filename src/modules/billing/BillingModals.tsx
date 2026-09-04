@@ -158,6 +158,31 @@ export const FiscalDataModal: React.FC<FiscalModalProps> = ({
 /* Receipt — built from what is stored locally for every transaction   */
 /* ------------------------------------------------------------------ */
 
+/** Small colour chip naming a card brand, drawn rather than imported. */
+const CardBrand: React.FC<{ brand: string }> = ({ brand }) => {
+  const tone: Record<string, string> = {
+    visa: '#1a1f71',
+    mastercard: '#eb001b',
+    amex: '#2e77bb',
+    discover: '#ff6000',
+    paypal: '#003087',
+  };
+  const colour = tone[brand.toLowerCase()] ?? 'var(--text-muted)';
+  return (
+    <span
+      aria-hidden
+      style={{
+        width: 26,
+        height: 16,
+        borderRadius: 3,
+        background: colour,
+        display: 'inline-block',
+        flexShrink: 0,
+      }}
+    />
+  );
+};
+
 export const ReceiptModal: React.FC<{
   open: boolean;
   onClose: () => void;
@@ -170,8 +195,8 @@ export const ReceiptModal: React.FC<{
 
   // Each receipt is shown in the currency it was actually charged in.
   const money = (cents?: number | null) => formatMoney((cents ?? 0) / 100, tx.currency);
-  const empCents = (tx as any).unitPriceEmployeeCents ?? null;
-  const devCents = (tx as any).unitPriceDeviceCents ?? null;
+  const empCents = tx.unitPriceEmployeeCents ?? null;
+  const devCents = tx.unitPriceDeviceCents ?? null;
 
   return (
     <Modal
@@ -212,9 +237,27 @@ export const ReceiptModal: React.FC<{
           <span style={{ color: 'var(--text-muted)' }}>{t('billing.date', 'Data')}</span>
           <strong>{fmtDateTime(tx.paidAt || tx.createdAt, i18n.language)}</strong>
         </div>
+        {tx.periodStart && tx.periodEnd && (
+          <div style={row}>
+            <span style={{ color: 'var(--text-muted)' }}>{t('billing.periodCovered', 'Periodo coperto')}</span>
+            <strong>
+              {fmtDate(tx.periodStart, i18n.language)} – {fmtDate(tx.periodEnd, i18n.language)}
+            </strong>
+          </div>
+        )}
         <div style={row}>
           <span style={{ color: 'var(--text-muted)' }}>{t('billing.method', 'Metodo')}</span>
-          <strong style={{ textTransform: 'capitalize' }}>{tx.provider}</strong>
+          <strong style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {tx.paymentMethodBrand ? (
+              <>
+                <CardBrand brand={tx.paymentMethodBrand} />
+                <span style={{ textTransform: 'capitalize' }}>{tx.paymentMethodBrand}</span>
+                {tx.paymentMethodLast4 ? <span style={{ color: 'var(--text-muted)' }}>•••• {tx.paymentMethodLast4}</span> : null}
+              </>
+            ) : (
+              <span style={{ textTransform: 'capitalize' }}>{tx.provider}</span>
+            )}
+          </strong>
         </div>
 
         {(tx.seatQuantity != null || tx.deviceQuantity != null) && (
