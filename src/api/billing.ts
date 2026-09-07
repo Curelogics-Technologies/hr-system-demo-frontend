@@ -6,6 +6,8 @@ import {
   LicenseSnapshot,
   PaymentProvider,
   SuperAdminBillingCompanyRow,
+  BillingTaxRate,
+  BillingTestNoticeResult,
 } from '../types';
 
 export const billingApi = {
@@ -194,6 +196,36 @@ export const billingApi = {
     const params: Record<string, any> = { limit };
     if (companyId) params.companyId = companyId;
     const { data } = await apiClient.get('/billing/headcount-history', { params });
+    return data;
+  },
+
+  /**
+   * The tax rate every total on this page is built from.
+   */
+  getTaxRate: async (): Promise<BillingTaxRate> => {
+    const { data } = await apiClient.get('/billing/tax');
+    return data;
+  },
+
+  /**
+   * Re-reads the rate from Stripe. Stripe owns it; this only refreshes the
+   * local copy, so it is safe to press at any time.
+   */
+  syncTaxRate: async (): Promise<BillingTaxRate> => {
+    const { data } = await apiClient.post('/billing/tax/sync');
+    return data;
+  },
+
+  /**
+   * Rehearses the failed-payment alert: same recipients, same mail server,
+   * same in-app notification, everything marked as a test. Changes nothing
+   * about the subscription.
+   */
+  sendTestFailureNotice: async (companyId?: number): Promise<BillingTestNoticeResult> => {
+    const { data } = await apiClient.post(
+      '/billing/notices/test',
+      companyId ? { company_id: companyId } : {}
+    );
     return data;
   },
 

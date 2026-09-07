@@ -355,6 +355,8 @@ export interface BillingTransaction {
   subtotalCents?: number | null;
   taxCents?: number | null;
   taxPercent?: number | null;
+  /** For a failed payment: who was warned, and whether the mail went out. */
+  notice?: BillingNoticeDelivery | null;
   invoiceUrl: string | null;
   failureCode?: string | null;
   failureMessage: string | null;
@@ -407,6 +409,64 @@ export interface LicenseQuote {
   newMonthlyTotalWithTax?: number;
 }
 
+/**
+ * The tax rate as the platform mirrors it from Stripe.
+ *
+ * Stripe owns the rate; this is the local copy every total is built from.
+ * `source` and `syncedAt` are shown next to the percentage because "the rate
+ * is 22%" and "the rate was 22% when we last managed to ask Stripe" are
+ * different claims, and only one of them is safe to bill on.
+ */
+export interface BillingTaxRate {
+  percent: number;
+  enabled: boolean;
+  stripeTaxRateId: string | null;
+  displayName: string | null;
+  jurisdiction: string | null;
+  /** True when the rate is carved out of the price rather than added to it. */
+  inclusive: boolean;
+  active: boolean;
+  source: 'stripe' | 'env';
+  syncedAt: string | null;
+  syncError: string | null;
+  /** What is written onto a PayPal plan, so the two can be compared on screen. */
+  paypalPercent: number;
+  /** Only on the sync response: whether the refresh actually reached Stripe. */
+  ok?: boolean;
+}
+
+export type BillingNoticeStatus = 'sent' | 'skipped' | 'failed' | 'no_recipient';
+
+/**
+ * The outcome of a rehearsed failed-payment alert.
+ *
+ * Reported channel by channel rather than as one success flag, because the
+ * useful answers are specific: the owner was emailed but the operator copy
+ * bounced, or nothing was emailed at all because the company has no SMTP
+ * configured and only the in-app alert went out.
+ */
+export interface BillingTestNoticeResult {
+  companyName: string;
+  ownerEmail: string | null;
+  ownerStatus: BillingNoticeStatus;
+  ownerError: string | null;
+  copyTo: string | null;
+  copyStatus: BillingNoticeStatus | null;
+  inAppCount: number;
+  sentAt: string;
+}
+
+/** Where a failed-payment warning went, and whether it arrived. */
+export interface BillingNoticeDelivery {
+  emailTo: string | null;
+  emailStatus: BillingNoticeStatus | null;
+  emailError: string | null;
+  emailAt: string | null;
+  copyTo: string | null;
+  copyStatus: BillingNoticeStatus | null;
+  inAppCount: number;
+}
+
 export interface BillingOverview {
   company: {
     id: number;
@@ -433,6 +493,8 @@ export interface BillingOverview {
   };
   /** The tax rate in force, so a tax line can be labelled rather than guessed. */
   taxPercent?: number;
+  /** Where that rate came from and how fresh it is. */
+  tax?: BillingTaxRate;
   readiness?: {
     canCheckout: boolean;
     missingFields: string[];

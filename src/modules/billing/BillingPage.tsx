@@ -20,6 +20,8 @@ import {
 } from './BillingModals';
 import { billingErrorMessage, billingTransactionLabel } from './billingErrors';
 import { LicenseModal } from './LicenseModal';
+import { BillingTaxCard } from './BillingTaxCard';
+import { NoticeDeliveryLine } from './NoticeDelivery';
 import {
   CreditCard,
   AlertTriangle,
@@ -38,6 +40,7 @@ import {
   History as HistoryIcon,
   Info,
   Building2,
+  Send,
 } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
 import { Spinner } from '../../components/ui/Spinner';
@@ -128,6 +131,7 @@ export const BillingPage: React.FC = () => {
   const [preferredProvider, setPreferredProvider] = useState<PaymentProvider | null>(null);
   const [receiptTx, setReceiptTx] = useState<BillingTransaction | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [testNoticeSending, setTestNoticeSending] = useState(false);
 
   // Multi-company support for Super Admin & Multi-company managers
   const [companiesList, setCompaniesList] = useState<Company[]>([]);
@@ -212,6 +216,9 @@ export const BillingPage: React.FC = () => {
   // manual refresh to see a payment confirm.
   useEffect(() => {
     if (!socket) return;
+    // The failed-payment toast is raised once for the whole app by
+    // BillingStatusProvider, not here, so it reaches an admin who is anywhere
+    // in the product rather than only one who happens to be on this page.
     const onBillingUpdated = () => {
       fetchOverview(selectedCompanyId);
     };
@@ -272,6 +279,72 @@ export const BillingPage: React.FC = () => {
       showToast(err.response?.data?.error || t('billing.cancelFailed', 'Errore durante la cancellazione'), 'error');
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  /**
+   * Rehearses the failed-payment alert.
+   *
+   * The result is reported channel by channel rather than as "sent": the
+   * useful answer is usually the specific one - the owner was emailed but the
+   * operator copy bounced, or nothing was emailed at all because the company
+   * has no SMTP configured. A toast saying "sent" over a company that mails
+   * nothing would be the exact failure this button exists to catch.
+   */
+  const handleSendTestNotice = async () => {
+    try {
+      setTestNoticeSending(true);
+      const res = await billingApi.sendTestFailureNotice(selectedCompanyId || undefined);
+
+      const parts: string[] = [];
+      if (res.ownerStatus === 'sent') {
+        parts.push(
+          t('billing.testNoticeOwnerSent', 'email al titolare inviata a {{email}}', {
+            email: res.ownerEmail,
+          })
+        );
+      } else if (res.ownerStatus === 'skipped') {
+        parts.push(
+          t('billing.testNoticeOwnerSkipped', 'email NON inviata: SMTP non configurato per questa azienda')
+        );
+      } else if (res.ownerStatus === 'no_recipient') {
+        parts.push(
+          t('billing.testNoticeNoOwner', 'nessun titolare o admin con indirizzo email')
+        );
+      } else {
+        parts.push(
+          t('billing.testNoticeOwnerFailed', 'email al titolare non riuscita: {{error}}', {
+            error: res.ownerError || '',
+          })
+        );
+      }
+
+      if (res.copyStatus) {
+        parts.push(
+          res.copyStatus === 'sent'
+            ? t('billing.testNoticeCopySent', 'copia al gestore inviata')
+            : t('billing.testNoticeCopyFailed', 'copia al gestore non inviata')
+        );
+      }
+      parts.push(
+        t('billing.testNoticeInApp', '{{n}} notifiche in-app create', {
+          n: res.inAppCount,
+        })
+      );
+
+      showToast(
+        `${t('billing.testNoticeDone', 'Avviso di prova')} — ${parts.join(' · ')}`,
+        res.ownerStatus === 'sent' ? 'success' : 'error'
+      );
+      await fetchOverview(selectedCompanyId);
+    } catch (err: any) {
+      showToast(
+        err.response?.data?.error ||
+          t('billing.testNoticeFailed', 'Impossibile inviare l’avviso di prova'),
+        'error'
+      );
+    } finally {
+      setTestNoticeSending(false);
     }
   };
 
@@ -1085,6 +1158,14 @@ export const BillingPage: React.FC = () => {
         </div>
       </div>
 
+      {/* 4b. The tax rate every total above was built from. Read-only for a
+             company admin; a super admin can refresh it from Stripe. */}
+      <BillingTaxCard
+        tax={overview?.tax ?? null}
+        canSync={isSuperAdmin}
+        onSynced={() => fetchOverview(selectedCompanyId)}
+      />
+
       {/* 5. Transactions History */}
       <div style={{
         background: 'var(--surface)',
@@ -1093,13 +1174,33 @@ export const BillingPage: React.FC = () => {
         padding: 24,
         boxShadow: 'var(--shadow-sm)',
       }}>
-        <div style={{ marginBottom: 18 }}>
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: 'var(--text-primary)' }}>
-            {t('billing.transactionHistory', 'Storico Pagamenti & Ricevute')}
-          </h3>
-          <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
-            {t('billing.transactionHistorySubtitle', 'Tutte le transazioni, addebiti e rinnovi eseguiti')}
-          </p>
+        <div style={{
+          display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
+          gap: 12, flexWrap: 'wrap', marginBottom: 18,
+        }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: 'var(--text-primary)' }}>
+              {t('billing.transactionHistory', 'Storico Pagamenti & Ricevute')}
+            </h3>
+            <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
+              {t('billing.transactionHistorySubtitle', 'Tutte le transazioni, addebiti e rinnovi eseguiti')}
+            </p>
+          </div>
+
+          {/* The only way to prove the dunning path works, short of letting a
+              real customer's renewal fail. Same recipients, same mail server,
+              same in-app notification - marked as a test and changing nothing
+              about the subscription. Super admin only: it sends real email. */}
+          {isSuperAdmin && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={handleSendTestNotice}
+              loading={testNoticeSending}
+            >
+              <Send size={13} /> {t('billing.sendTestNotice', 'Invia avviso di prova')}
+            </Button>
+          )}
         </div>
 
         {overview?.transactions && overview.transactions.length > 0 ? (
@@ -1123,6 +1224,9 @@ export const BillingPage: React.FC = () => {
                     </td>
                     <td style={{ padding: '12px', color: 'var(--text-primary)' }}>
                       {billingTransactionLabel(tx, t)}
+                      {/* A failed payment is only half the story; what matters
+                          next is whether anyone was told. */}
+                      <NoticeDeliveryLine notice={tx.notice} compact />
                     </td>
                     <td style={{ padding: '12px', color: 'var(--text-secondary)', textTransform: 'capitalize' }}>
                       {tx.provider}

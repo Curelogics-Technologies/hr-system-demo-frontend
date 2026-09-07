@@ -5,6 +5,7 @@ import { AlertTriangle } from 'lucide-react';
 import billingApi from '../../api/billing';
 import { useAuth } from '../../context/AuthContext';
 import { useSocket } from '../../context/SocketContext';
+import { useToast } from '../../context/ToastContext';
 
 export interface BillingStatus {
   isBlocked: boolean;
@@ -16,6 +17,16 @@ export interface BillingStatus {
 
 interface BillingStatusValue {
   status: BillingStatus | null;
+  /**
+   * Whether this user is one of the people who can do anything about it.
+   *
+   * The navigation restriction applies to everyone - an employee of a blocked
+   * company cannot use the product either - but the grace-period warning and
+   * the failed-payment toast are aimed at the person who can pay. Showing "your
+   * access will be suspended on Friday" to a shop assistant is alarming and
+   * unactionable in equal measure.
+   */
+  canActOnBilling: boolean;
   refresh: () => void;
 }
 
@@ -31,18 +42,25 @@ interface BillingStatusValue {
  */
 const BillingStatusContext = createContext<BillingStatusValue>({
   status: null,
+  canActOnBilling: false,
   refresh: () => {},
 });
 
 export const BillingStatusProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
   const { socket } = useSocket();
+  const { showToast } = useToast();
+  const { t } = useTranslation();
   const location = useLocation();
   const [status, setStatus] = useState<BillingStatus | null>(null);
 
   // Super admins are never billed by the company they are inspecting, and a
   // terminal has no billing UI to send anyone to.
   const applies = !!user && user.isSuperAdmin !== true && user.role !== 'store_terminal';
+
+  // Only an admin can open the billing page and settle the payment, so only an
+  // admin is warned about it.
+  const canActOnBilling = applies && user?.role === 'admin';
 
   const refresh = useCallback(() => {
     if (!applies) {
@@ -64,14 +82,33 @@ export const BillingStatusProvider: React.FC<{ children: React.ReactNode }> = ({
   // warning would appear only on the next navigation.
   useEffect(() => {
     if (!socket || !applies) return;
-    const onBillingUpdated = () => refresh();
+    const onBillingUpdated = (payload?: { reason?: string }) => {
+      refresh();
+      // A renewal fails while nobody is doing anything. The banner and the
+      // notification both persist; this is the interruption that makes someone
+      // look at them today rather than on their next login. Raised here, in
+      // the shell, so it reaches an admin anywhere in the product - not only
+      // one who happens to have the billing page open.
+      if (payload?.reason === 'payment_failed' && canActOnBilling) {
+        showToast(
+          t(
+            'billing.paymentFailedToast',
+            'Pagamento non riuscito. Regolarizza il pagamento per non perdere l’accesso alla piattaforma.'
+          ),
+          'error'
+        );
+      }
+    };
     socket.on('billing:updated', onBillingUpdated);
     return () => {
       socket.off('billing:updated', onBillingUpdated);
     };
-  }, [socket, applies, refresh]);
+  }, [socket, applies, canActOnBilling, refresh, showToast, t]);
 
-  const value = useMemo(() => ({ status, refresh }), [status, refresh]);
+  const value = useMemo(
+    () => ({ status, canActOnBilling, refresh }),
+    [status, canActOnBilling, refresh]
+  );
 
   return (
     <BillingStatusContext.Provider value={value}>{children}</BillingStatusContext.Provider>
@@ -107,7 +144,7 @@ export const BillingGraceBanner: React.FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
-  const { status } = useBillingStatus();
+  const { status, canActOnBilling } = useBillingStatus();
 
   // Re-render as the deadline approaches, so a banner left open overnight does
   // not still claim three days remain.
@@ -122,6 +159,7 @@ export const BillingGraceBanner: React.FC = () => {
 
   // Only while the countdown is running. Once access is blocked the app shows
   // its own blocking screen, and repeating the warning above it says nothing.
+  if (!canActOnBilling) return null;
   if (!status || status.isBlocked || status.reason !== 'PAST_DUE' || left === null) return null;
 
   const onBillingPage = location.pathname.startsWith('/impostazioni/fatturazione');

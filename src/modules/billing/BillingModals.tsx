@@ -10,6 +10,7 @@ import { ExternalLink, UserPlus, UserMinus, Smartphone, Users } from 'lucide-rea
 import billingApi from '../../api/billing';
 import { getAvatarUrl, getStoreLogoUrl } from '../../api/client';
 import { billingErrorMessage, billingTransactionLabel } from './billingErrors';
+import { NoticeDeliveryDetail } from './NoticeDelivery';
 import { updateCompany } from '../../api/companies';
 import type { BillingOverview, BillingTransaction, LicenseSnapshot } from '../../types';
 
@@ -319,6 +320,10 @@ export const ReceiptModal: React.FC<{
         <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
           {billingTransactionLabel(tx, t)}
         </div>
+
+        {/* For a failed payment: who was warned, when, and whether the mail
+            server actually took it. Absent on anything that did not fail. */}
+        <NoticeDeliveryDetail notice={tx.notice} />
         {tx.failureMessage && (
           <div style={{ fontSize: 12, color: 'var(--danger, #dc2626)', marginTop: 6 }}>{tx.failureMessage}</div>
         )}

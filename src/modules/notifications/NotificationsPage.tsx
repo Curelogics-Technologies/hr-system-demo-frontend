@@ -13,6 +13,7 @@ import {
   Briefcase,
   CalendarClock,
   CheckCheck,
+  CreditCard,
   ChevronDown,
   Clock,
   Edit2,
@@ -138,6 +139,12 @@ const TYPE_VISUALS: Array<{
     bg: "rgba(13,148,136,0.13)",
   },
   {
+    startsWith: "billing.",
+    icon: CreditCard,
+    color: "#B91C1C",
+    bg: "rgba(185,28,28,0.12)",
+  },
+  {
     startsWith: "manager.",
     icon: ShieldAlert,
     color: "#334155",
@@ -153,6 +160,7 @@ const CATEGORY_ICONS: Record<NotificationCategory, LucideIcon> = {
   documents: FileText,
   ats: Briefcase,
   onboarding: GraduationCap,
+  billing: CreditCard,
   manager: ShieldAlert,
 };
 

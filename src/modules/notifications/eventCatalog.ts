@@ -6,6 +6,7 @@ export type NotificationCategory =
   | 'documents'
   | 'ats'
   | 'onboarding'
+  | 'billing'
   | 'manager';
 
 export type NotificationEventDefinition = {
@@ -52,6 +53,13 @@ export const NOTIFICATION_CATEGORY_ORDER: NotificationCategory[] = [
   'onboarding',
   'manager',
 ];
+// NOTE: 'billing' is intentionally absent from the order above, and
+// `billing.payment_failed` from the definitions, because that list drives the
+// per-event settings toggles. The server sends the payment-failure alert with
+// the settings check bypassed - a company cannot be allowed to switch off the
+// warning that its own access is about to stop - so offering a switch here
+// would be offering one that does nothing. The category still exists for the
+// notification feed, which is where these do appear.
 
 export const NOTIFICATION_CATEGORY_I18N: Record<NotificationCategory, string> = {
   employees: 'notifications.settingsCategory_employees',
@@ -61,5 +69,6 @@ export const NOTIFICATION_CATEGORY_I18N: Record<NotificationCategory, string> = 
   documents: 'notifications.settingsCategory_documents',
   ats: 'notifications.settingsCategory_ats',
   onboarding: 'notifications.settingsCategory_onboarding',
+  billing: 'notifications.settingsCategory_billing',
   manager: 'notifications.settingsCategory_manager',
 };
