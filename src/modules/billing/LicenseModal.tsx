@@ -364,7 +364,7 @@ export const LicenseModal: React.FC<Props> = ({
       } else if (res.status === 'applied') {
         showToast(
           t('billing.licensePaymentConfirmed', {
-            amount: res.amountDueNow.toFixed(2),
+            amount: (res.totalDueNow ?? res.amountDueNow).toFixed(2),
             employees: res.newEmployees,
             terminals: res.newTerminals,
           }),
@@ -373,7 +373,7 @@ export const LicenseModal: React.FC<Props> = ({
       } else {
         showToast(
           t('billing.licensePaymentStarted', {
-            amount: res.amountDueNow.toFixed(2),
+            amount: (res.totalDueNow ?? res.amountDueNow).toFixed(2),
           }),
           'success'
         );
@@ -653,6 +653,27 @@ export const LicenseModal: React.FC<Props> = ({
                       </span>
                     </div>
                   )}
+                  {/* The provider charges tax on top of the prorated licence
+                      cost, so the figure the admin approves has to be the one
+                      that leaves their account. The net line stays visible
+                      above it: an invoice nobody can reconstruct is an invoice
+                      nobody trusts. */}
+                  {(quote?.taxPercent ?? 0) > 0 && (
+                    <>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                        <span style={{ color: 'var(--text-muted)' }}>
+                          {t('billing.taxableAmount', 'Imponibile')}
+                        </span>
+                        <span>{formatMoney(quote?.amountDueNow ?? 0, currency)}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                        <span style={{ color: 'var(--text-muted)' }}>
+                          {t('billing.taxLine', 'IVA {{percent}}%', { percent: quote!.taxPercent })}
+                        </span>
+                        <span>{formatMoney(quote?.taxDueNow ?? 0, currency)}</span>
+                      </div>
+                    </>
+                  )}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                     <span style={{ fontWeight: 700 }}>
                       {t('billing.payNowProrated', 'Da pagare ora (rateo {{days}} gg)', {
@@ -660,13 +681,18 @@ export const LicenseModal: React.FC<Props> = ({
                       })}
                     </span>
                     <strong style={{ fontSize: 18, color: 'var(--accent)' }}>
-                      {formatMoney(quote?.amountDueNow ?? 0, currency)}
+                      {formatMoney(quote?.totalDueNow ?? quote?.amountDueNow ?? 0, currency)}
                     </strong>
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                     {t(
                       'billing.alreadyPaidUnaffected',
-                      { total: formatMoney(quote?.newMonthlyTotal ?? monthlyTotal, currency) }
+                      {
+                        total: formatMoney(
+                          quote?.newMonthlyTotalWithTax ?? quote?.newMonthlyTotal ?? monthlyTotal,
+                          currency
+                        ),
+                      }
                     )}
                   </div>
                 </>

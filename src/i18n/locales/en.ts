@@ -4013,6 +4013,17 @@ const en = {
     syncButton: 'Sync Licenses',
     syncSuccess: 'License quantities synchronized successfully!',
     syncFailed: 'Failed to synchronize quantities',
+    // Warning carried across the whole app while the grace period runs.
+    graceTitle: 'Payment failed: {{days}} days remaining',
+    graceTitleOne: 'Payment failed: 1 day remaining',
+    graceLastDayTitle: 'Payment failed: last day',
+    graceBody: 'Settle the payment by {{date}} to avoid your access being suspended.',
+    goToBilling: 'Go to Billing',
+    // Tax lines. The rate itself comes from the server, never hardcoded here.
+    taxableAmount: 'Subtotal',
+    taxLine: 'VAT {{percent}}%',
+    taxLineNoRate: 'VAT',
+    totalCharged: 'Total charged',
     pastDueTitle: 'Payment Past Due',
     pastDueDesc: 'The automatic renewal charge failed. Please update your payment method by {{date}} to avoid service restriction.',
     cancelingTitle: 'Scheduled for Cancellation',

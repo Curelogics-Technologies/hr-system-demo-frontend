@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import billingApi from '../../api/billing';
+import { useBillingStatus } from '../../modules/billing/useBillingStatus';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../context/AuthContext';
 import { LanguageSwitcher } from '../ui/LanguageSwitcher';
@@ -206,22 +206,12 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, mobileOpen, onMobileClose 
 
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [avatarImgError, setAvatarImgError] = useState(false);
-  const [billingRestricted, setBillingRestricted] = useState(false);
-
-  // Cheap status probe. Super admins and terminals are never restricted, and a
-  // failure here must leave navigation fully open rather than hide everything.
-  useEffect(() => {
-    if (!user || user.isSuperAdmin === true || user.role === 'store_terminal') {
-      setBillingRestricted(false);
-      return;
-    }
-    let cancelled = false;
-    billingApi
-      .getStatus()
-      .then((s) => { if (!cancelled) setBillingRestricted(!!s.restricted); })
-      .catch(() => { if (!cancelled) setBillingRestricted(false); });
-    return () => { cancelled = true; };
-  }, [user?.id, user?.isSuperAdmin, user?.role, location.pathname]);
+  // The shell reads billing once and shares it: the same answer drives which
+  // navigation is allowed here and the grace-period banner under the header.
+  // A failed probe leaves the status null, which reads as unrestricted -
+  // billing must never be the reason navigation disappears.
+  const { status: billingStatus } = useBillingStatus();
+  const billingRestricted = !!billingStatus?.restricted;
 
   useEffect(() => {
     if (!user || user.role === 'store_terminal') return;

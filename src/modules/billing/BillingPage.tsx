@@ -368,6 +368,22 @@ export const BillingPage: React.FC = () => {
     ? licensedEmployees * employeePrice + licensedTerminals * devicePrice
     : liveEmployees * employeePrice + liveDevices * devicePrice;
 
+  // The provider charges tax on top of that figure, so the card has to show
+  // what will actually be taken. Worked out per line - employees, terminals -
+  // because that is how the invoice is built, and taxing the rounded sum
+  // instead can land a cent away from what the provider collects.
+  const taxPercent = overview?.taxPercent ?? 0;
+  const taxOnCents = (cents: number) =>
+    taxPercent > 0 ? Math.round((cents * taxPercent) / 100) : 0;
+  const billedMonthlyTaxTotal =
+    (taxOnCents(
+      Math.round((hasSubscription ? licensedEmployees : liveEmployees) * employeePrice * 100)
+    ) +
+      taxOnCents(
+        Math.round((hasSubscription ? licensedTerminals : liveDevices) * devicePrice * 100)
+      )) /
+    100;
+
   // Every amount on this page is shown in the company's own currency.
   const companyCurrency = company?.currency || 'EUR';
 
@@ -678,6 +694,23 @@ export const BillingPage: React.FC = () => {
                   <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-muted)' }}> / {t('billing.month', 'mese')}</span>
                 </span>
               </div>
+
+              {taxPercent > 0 && (
+                <div style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+                  fontSize: 11, color: 'var(--text-muted)',
+                }}>
+                  <span>{t('billing.taxLine', 'IVA {{percent}}%', { percent: taxPercent })}</span>
+                  <span>
+                    +{formatMoney(billedMonthlyTaxTotal, companyCurrency)}
+                    {' · '}
+                    <strong style={{ color: 'var(--text-primary)' }}>
+                      {t('billing.totalCharged', 'Totale addebitato')}{' '}
+                      {formatMoney(licensedMonthlyTotal + billedMonthlyTaxTotal, companyCurrency)}
+                    </strong>
+                  </span>
+                </div>
+              )}
 
               {company?.discountActive && (company?.discountPercent ?? 0) > 0 && (
                 <div style={{

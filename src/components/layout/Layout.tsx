@@ -3,6 +3,7 @@ import Sidebar from './Sidebar';
 import Header from './Header';
 import { useBreakpoint } from '../../hooks/useBreakpoint';
 import { useAuth } from '../../context/AuthContext';
+import { BillingStatusProvider, BillingGraceBanner } from '../../modules/billing/useBillingStatus';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -87,18 +88,24 @@ const Layout: React.FC<LayoutProps> = ({ children, title = 'Dashboard' }) => {
   };
 
   return (
-    <div style={wrapperStyle}>
-      {mobileOpen && (
-        <div className="sidebar-overlay" onClick={() => setMobileOpen(false)} />
-      )}
-      <Sidebar collapsed={collapsed} mobileOpen={mobileOpen} onMobileClose={() => setMobileOpen(false)} />
-      <div style={mainStyle}>
-        <Header onToggleSidebar={toggleSidebar} title={title} />
-        <main style={contentStyle}>
-          {children}
-        </main>
+    // One billing probe for the whole shell: the sidebar decides what
+    // navigation to allow from it, and the banner below warns for as long as
+    // the grace period runs.
+    <BillingStatusProvider>
+      <div style={wrapperStyle}>
+        {mobileOpen && (
+          <div className="sidebar-overlay" onClick={() => setMobileOpen(false)} />
+        )}
+        <Sidebar collapsed={collapsed} mobileOpen={mobileOpen} onMobileClose={() => setMobileOpen(false)} />
+        <div style={mainStyle}>
+          <Header onToggleSidebar={toggleSidebar} title={title} />
+          <BillingGraceBanner />
+          <main style={contentStyle}>
+            {children}
+          </main>
+        </div>
       </div>
-    </div>
+    </BillingStatusProvider>
   );
 };
 

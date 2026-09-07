@@ -107,8 +107,13 @@ export const billingApi = {
     status: 'applied' | 'awaiting_payment' | 'scheduled';
     applied: boolean;
     amountDueNow: number;
+    /** Tax on the prorated charge, and the gross actually collected. */
+    taxPercent?: number;
+    taxDueNow?: number;
+    totalDueNow?: number;
     additionalMonthly?: number;
     newMonthlyTotal?: number;
+    newMonthlyTotalWithTax?: number;
     currency: string;
     extraEmployees?: number;
     extraTerminals?: number;

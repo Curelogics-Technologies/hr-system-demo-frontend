@@ -348,6 +348,13 @@ export interface BillingTransaction {
   /** The card as it was when this payment was taken. */
   paymentMethodBrand?: string | null;
   paymentMethodLast4?: string | null;
+  /**
+   * How the total split into licences and tax, as the provider reported it.
+   * Null on payments taken before a tax rate was configured.
+   */
+  subtotalCents?: number | null;
+  taxCents?: number | null;
+  taxPercent?: number | null;
   invoiceUrl: string | null;
   failureCode?: string | null;
   failureMessage: string | null;
@@ -389,6 +396,15 @@ export interface LicenseQuote {
   daysRemaining: number | null;
   /** Length of the current billing period in whole days. */
   totalDays?: number;
+  /**
+   * Tax the provider adds on top. `amountDueNow` is the net licence cost;
+   * `totalDueNow` is what is actually charged. Zero when no rate is configured.
+   */
+  taxPercent?: number;
+  taxDueNow?: number;
+  totalDueNow?: number;
+  newMonthlyTax?: number;
+  newMonthlyTotalWithTax?: number;
 }
 
 export interface BillingOverview {
@@ -412,7 +428,11 @@ export interface BillingOverview {
     employeeCount: number;
     deviceCount: number;
     calculatedMonthlyTotal: number;
+    /** Tax the provider will add to that total. Zero when no rate is set. */
+    calculatedTax?: number;
   };
+  /** The tax rate in force, so a tax line can be labelled rather than guessed. */
+  taxPercent?: number;
   readiness?: {
     canCheckout: boolean;
     missingFields: string[];

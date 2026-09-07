@@ -4014,6 +4014,17 @@ const it = {
     syncButton: 'Aggiorna licenze',
     syncSuccess: 'Quantità sincronizzate con successo!',
     syncFailed: 'Errore durante la sincronizzazione delle quantità',
+    // Warning carried across the whole app while the grace period runs.
+    graceTitle: 'Pagamento non riuscito: {{days}} giorni rimanenti',
+    graceTitleOne: 'Pagamento non riuscito: 1 giorno rimanente',
+    graceLastDayTitle: 'Pagamento non riuscito: ultimo giorno',
+    graceBody: 'Regolarizza il pagamento entro il {{date}} per evitare la sospensione dell’accesso.',
+    goToBilling: 'Vai a Fatturazione',
+    // Tax lines. The rate itself comes from the server, never hardcoded here.
+    taxableAmount: 'Imponibile',
+    taxLine: 'IVA {{percent}}%',
+    taxLineNoRate: 'IVA',
+    totalCharged: 'Totale addebitato',
     pastDueTitle: 'Pagamento in sospeso',
     pastDueDesc: 'Il tentativo di rinnovo automatico non è andato a buon fine. Aggiorna il metodo di pagamento entro il {{date}} per evitare la sospensione dell’accesso.',
     cancelingTitle: 'Cancellazione programmata',

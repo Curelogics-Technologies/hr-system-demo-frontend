@@ -288,6 +288,27 @@ export const ReceiptModal: React.FC<{
           </>
         )}
 
+        {/* Without these two lines the licence rows above do not add up to the
+            total, because the provider charged tax on them. Shown only when
+            the provider reported the split: an older payment has none, and a
+            split worked out here could disagree with the real invoice. */}
+        {tx.taxCents != null && (
+          <>
+            <div style={{ ...row, marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+              <span style={{ color: 'var(--text-muted)' }}>{t('billing.taxableAmount', 'Imponibile')}</span>
+              <strong>{money(tx.subtotalCents ?? tx.amountCents - tx.taxCents)}</strong>
+            </div>
+            <div style={row}>
+              <span style={{ color: 'var(--text-muted)' }}>
+                {tx.taxPercent != null
+                  ? t('billing.taxLine', 'IVA {{percent}}%', { percent: tx.taxPercent })
+                  : t('billing.taxLineNoRate', 'IVA')}
+              </span>
+              <strong>{money(tx.taxCents)}</strong>
+            </div>
+          </>
+        )}
+
         <div style={{ ...row, borderBottom: 'none', marginTop: 8, paddingTop: 12, borderTop: '2px solid var(--border)' }}>
           <strong style={{ fontSize: 14 }}>{t('billing.total', 'Totale')}</strong>
           <strong style={{ fontSize: 18, color: 'var(--accent)' }}>
