@@ -91,7 +91,7 @@ export const BillingTaxCard: React.FC<{
       style={{
         background: 'var(--surface)',
         border: '1px solid var(--border)',
-        borderRadius: 'var(--radius-md)',
+        borderRadius: 'var(--radius-xl)',
         padding: 20,
         marginBottom: 20,
       }}
@@ -278,7 +278,7 @@ const warnBox: React.CSSProperties = {
   alignItems: 'flex-start',
   padding: '9px 11px',
   marginBottom: 10,
-  borderRadius: 'var(--radius-sm)',
+  borderRadius: 'var(--radius-md)',
   background: 'rgba(245,158,11,0.10)',
   border: '1px solid rgba(245,158,11,0.35)',
   fontSize: 12,
