@@ -4181,6 +4181,13 @@ const it = {
     taxSyncExplain: 'Stripe è la fonte: l’aliquota viene riletta automaticamente all’avvio del server, una volta al giorno e ogni volta che premi Sincronizza. Gli abbonamenti Stripe già attivi vengono riallineati subito. Per PayPal la percentuale viene scritta sul piano: gli abbonamenti PayPal già attivi la aggiornano al prossimo cambio di licenze, perché PayPal richiede l’approvazione del cliente per cambiare piano.',
     taxRealignment: 'Abbonamenti Stripe aggiornati: {{updated}} su {{checked}}.',
     taxRealignmentPaypal: '{{n}} abbonamenti PayPal manterranno la percentuale attuale fino al prossimo cambio di licenze.',
+    taxOnLine: 'IVA {{percent}}% su {{base}}',
+    // La distinzione che fa perdere un pomeriggio: Stripe Tax e le Aliquote
+    // fiscali sono due cose diverse e solo la seconda serve qui.
+    taxWhereInStripe: 'Questa è un’aliquota fissa creata a mano in Stripe → Catalogo prodotti → Aliquote fiscali. NON è Stripe Tax: non serve attivare Stripe Tax né alcun account aggiuntivo. Imposta il tipo su “Esclusiva”.',
+    taxOpenStripeRates: 'Apri le aliquote fiscali su Stripe',
+    noticeTransport: 'Inviata tramite',
+    noticeTransportCompany: 'SMTP dell’azienda (casella piattaforma non configurata)',
   },
 
   // Impostazioni > Email. Due caselle distinte: quella della piattaforma
@@ -4245,6 +4252,30 @@ const it = {
     flowOperator: 'Gestore della piattaforma',
     flowNoAlert: 'nessun indirizzo configurato',
     flowInApp: 'In più, {{n}} utenti di questa azienda ricevono la notifica dentro la piattaforma (titolare e amministratori). Questa non dipende dall’email e non può fallire.',
+    platformTestScope: 'Questa prova verifica solo la casella email. Per provare l’intero avviso di pagamento non riuscito (email al titolare + copia al gestore + notifica in-app) usa “Invia avviso di prova” in Impostazioni → Fatturazione.',
+    // Errori SMTP tradotti in una frase e un’azione. Il testo grezzo del
+    // server resta sempre visibile sotto: è l’unica parte autorevole.
+    smtpErrRawLabel: 'Risposta del server',
+    smtpErrAuth: 'Il server di posta ha rifiutato le credenziali.',
+    smtpErrAuthAction: 'Controlla utente e password. Con Gmail, Google Workspace, Outlook o Aruba la password normale dell’account non funziona: serve una “password per le app” generata dal provider.',
+    smtpErrAppPassword: 'Il provider richiede una password dedicata alle applicazioni.',
+    smtpErrAppPasswordAction: 'Genera una “password per le app” nel pannello del provider di posta e incollala qui al posto della password dell’account.',
+    smtpErrHost: 'Il nome del server SMTP non esiste.',
+    smtpErrHostAction: 'Controlla il campo Host: di solito è simile a smtp.nomeprovider.it.',
+    smtpErrUnreachable: 'Il server SMTP non risponde su questa porta.',
+    smtpErrUnreachableAction: 'Prova la porta 587 (STARTTLS) o 465 (SSL). Se il server è corretto, il firewall del server applicativo potrebbe bloccare la connessione in uscita.',
+    smtpErrTls: 'Problema con il certificato TLS del server di posta.',
+    smtpErrTlsAction: 'Verifica che host e porta corrispondano al tipo di cifratura previsto dal provider.',
+    smtpErrSender: 'Il server ha accettato l’accesso ma ha rifiutato il mittente o il destinatario.',
+    smtpErrSenderAction: 'Il campo Mittente deve essere un indirizzo che questo account è autorizzato a usare, di norma lo stesso dell’utente SMTP.',
+    smtpErrRate: 'Il server ha applicato un limite temporaneo di invio.',
+    smtpErrRateAction: 'Riprova tra qualche minuto. Se accade spesso, il provider limita il numero di email.',
+    smtpErrNoPlatform: 'La casella email della piattaforma non è ancora configurata.',
+    smtpErrNoPlatformAction: 'Compila Impostazioni → Email → Piattaforma e salva.',
+    smtpErrNoCompany: 'Questa azienda non ha una configurazione SMTP.',
+    smtpErrNoCompanyAction: 'Configura la casella della piattaforma (consigliato) oppure l’SMTP di questa azienda nella scheda Aziende.',
+    smtpErrUnknown: 'Il server di posta ha rifiutato il messaggio.',
+    smtpErrUnknownAction: 'Il testo esatto restituito dal server è riportato qui sotto.',
   },
 } as const;
 
