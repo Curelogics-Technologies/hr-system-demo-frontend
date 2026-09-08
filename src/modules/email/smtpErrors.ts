@@ -19,6 +19,14 @@ export interface SmtpDiagnosis {
   summary: string;
   /** What to do about it. */
   action: string;
+  /**
+   * Who can fix it, when the answer is not on this screen.
+   *
+   * Half of these failures are not the operator's to solve - a blocked port or
+   * a rejected sender is decided by whoever runs the mail server. Naming them
+   * saves an hour of retrying the same password.
+   */
+  contact?: string;
   /** The server's own words, kept verbatim. */
   raw: string;
 }
@@ -27,7 +35,12 @@ export function diagnoseSmtpError(raw: string | null | undefined, t: TFunction):
   if (!raw || !raw.trim()) return null;
   const text = raw.toLowerCase();
 
-  const d = (summary: string, action: string): SmtpDiagnosis => ({ summary, action, raw });
+  const d = (summary: string, action: string, contact?: string): SmtpDiagnosis => ({
+    summary,
+    action,
+    contact,
+    raw,
+  });
 
   // Authentication. By far the most common, and the one whose raw text is
   // most misleading: the credentials can be exactly right and still be
@@ -45,6 +58,10 @@ export function diagnoseSmtpError(raw: string | null | undefined, t: TFunction):
       t(
         'email.smtpErrAuthAction',
         'Controlla utente e password. Con Gmail, Google Workspace, Outlook o Aruba la password normale dell’account non funziona: serve una “password per le app” generata dal provider.'
+      ),
+      t(
+        'email.smtpErrAuthContact',
+        'Se utente e password sono corretti, chiedi al fornitore della casella email (o a chi gestisce il dominio) di abilitare l’accesso SMTP per questo account.'
       )
     );
   }
@@ -55,6 +72,10 @@ export function diagnoseSmtpError(raw: string | null | undefined, t: TFunction):
       t(
         'email.smtpErrAppPasswordAction',
         'Genera una “password per le app” nel pannello del provider di posta e incollala qui al posto della password dell’account.'
+      ),
+      t(
+        'email.smtpErrAppPasswordContact',
+        'Su Gmail e Google Workspace occorre prima attivare la verifica in due passaggi sull’account.'
       )
     );
   }
@@ -63,7 +84,11 @@ export function diagnoseSmtpError(raw: string | null | undefined, t: TFunction):
   if (text.includes('enotfound') || text.includes('getaddrinfo')) {
     return d(
       t('email.smtpErrHost', 'Il nome del server SMTP non esiste.'),
-      t('email.smtpErrHostAction', 'Controlla il campo Host: di solito è simile a smtp.nomeprovider.it.')
+      t('email.smtpErrHostAction', 'Controlla il campo Host: di solito è simile a smtp.nomeprovider.it.'),
+      t(
+        'email.smtpErrHostContact',
+        'Il nome esatto del server è indicato nel pannello del fornitore della casella email.'
+      )
     );
   }
 
@@ -79,6 +104,10 @@ export function diagnoseSmtpError(raw: string | null | undefined, t: TFunction):
       t(
         'email.smtpErrUnreachableAction',
         'Prova la porta 587 (STARTTLS) o 465 (SSL). Se il server è corretto, il firewall del server applicativo potrebbe bloccare la connessione in uscita.'
+      ),
+      t(
+        'email.smtpErrUnreachableContact',
+        'Se entrambe le porte falliscono, chiedi a chi gestisce l’hosting del server di sbloccare le connessioni SMTP in uscita: non è una cosa che si possa risolvere da questa pagina.'
       )
     );
   }
@@ -87,7 +116,8 @@ export function diagnoseSmtpError(raw: string | null | undefined, t: TFunction):
   if (text.includes('self signed') || text.includes('certificate') || text.includes('tls')) {
     return d(
       t('email.smtpErrTls', 'Problema con il certificato TLS del server di posta.'),
-      t('email.smtpErrTlsAction', 'Verifica che host e porta corrispondano al tipo di cifratura previsto dal provider.')
+      t('email.smtpErrTlsAction', 'Verifica che host e porta corrispondano al tipo di cifratura previsto dal provider.'),
+      t('email.smtpErrTlsContact', 'Il fornitore della casella email può confermare porta e cifratura corrette.')
     );
   }
 
@@ -104,6 +134,10 @@ export function diagnoseSmtpError(raw: string | null | undefined, t: TFunction):
       t(
         'email.smtpErrSenderAction',
         'Il campo Mittente deve essere un indirizzo che questo account è autorizzato a usare, di norma lo stesso dell’utente SMTP.'
+      ),
+      t(
+        'email.smtpErrSenderContact',
+        'Se il mittente è già corretto, chiedi al fornitore della casella email di autorizzare l’invio da questo indirizzo.'
       )
     );
   }
@@ -111,7 +145,8 @@ export function diagnoseSmtpError(raw: string | null | undefined, t: TFunction):
   if (text.includes('421') || text.includes('too many') || text.includes('rate limit')) {
     return d(
       t('email.smtpErrRate', 'Il server ha applicato un limite temporaneo di invio.'),
-      t('email.smtpErrRateAction', 'Riprova tra qualche minuto. Se accade spesso, il provider limita il numero di email.')
+      t('email.smtpErrRateAction', 'Riprova tra qualche minuto. Se accade spesso, il provider limita il numero di email.'),
+      t('email.smtpErrRateContact', 'Il fornitore della casella email può alzare il limite di invio giornaliero.')
     );
   }
 
@@ -135,7 +170,11 @@ export function diagnoseSmtpError(raw: string | null | undefined, t: TFunction):
 
   return d(
     t('email.smtpErrUnknown', 'Il server di posta ha rifiutato il messaggio.'),
-    t('email.smtpErrUnknownAction', 'Il testo esatto restituito dal server è riportato qui sotto.')
+    t('email.smtpErrUnknownAction', 'Il testo esatto restituito dal server è riportato qui sotto.'),
+    t(
+      'email.smtpErrUnknownContact',
+      'Inoltra questo testo al fornitore della casella email: contiene il codice di errore che serve loro per identificare il problema.'
+    )
   );
 }
 
@@ -143,5 +182,7 @@ export function diagnoseSmtpError(raw: string | null | undefined, t: TFunction):
 export function smtpErrorSummary(raw: string | null | undefined, t: TFunction): string | null {
   const diagnosis = diagnoseSmtpError(raw, t);
   if (!diagnosis) return null;
+  // The contact line is left out of the toast on purpose: a toast is read in
+  // two seconds, and the panel that stays on screen carries the full guidance.
   return `${diagnosis.summary} ${diagnosis.action}`;
 }

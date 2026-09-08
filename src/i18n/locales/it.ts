@@ -4256,6 +4256,15 @@ const it = {
     // Errori SMTP tradotti in una frase e un’azione. Il testo grezzo del
     // server resta sempre visibile sotto: è l’unica parte autorevole.
     smtpErrRawLabel: 'Risposta del server',
+    smtpErrWhoLabel: 'Chi può risolverlo',
+    smtpErrAuthContact: 'Se utente e password sono corretti, chiedi al fornitore della casella email (o a chi gestisce il dominio) di abilitare l’accesso SMTP per questo account.',
+    smtpErrAppPasswordContact: 'Su Gmail e Google Workspace occorre prima attivare la verifica in due passaggi sull’account.',
+    smtpErrHostContact: 'Il nome esatto del server è indicato nel pannello del fornitore della casella email.',
+    smtpErrUnreachableContact: 'Se entrambe le porte falliscono, chiedi a chi gestisce l’hosting del server di sbloccare le connessioni SMTP in uscita: non è una cosa che si possa risolvere da questa pagina.',
+    smtpErrTlsContact: 'Il fornitore della casella email può confermare porta e cifratura corrette.',
+    smtpErrSenderContact: 'Se il mittente è già corretto, chiedi al fornitore della casella email di autorizzare l’invio da questo indirizzo.',
+    smtpErrRateContact: 'Il fornitore della casella email può alzare il limite di invio giornaliero.',
+    smtpErrUnknownContact: 'Inoltra questo testo al fornitore della casella email: contiene il codice di errore che serve loro per identificare il problema.',
     smtpErrAuth: 'Il server di posta ha rifiutato le credenziali.',
     smtpErrAuthAction: 'Controlla utente e password. Con Gmail, Google Workspace, Outlook o Aruba la password normale dell’account non funziona: serve una “password per le app” generata dal provider.',
     smtpErrAppPassword: 'Il provider richiede una password dedicata alle applicazioni.',

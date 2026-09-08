@@ -34,6 +34,14 @@ export const SmtpErrorNotice: React.FC<{ error: string | null | undefined }> = (
       <div style={{ minWidth: 0 }}>
         <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{diagnosis.summary}</div>
         <div style={{ color: 'var(--text-secondary)', marginTop: 2 }}>{diagnosis.action}</div>
+        {/* Named separately because it is the line that ends a wasted hour:
+            some of these are decided by whoever runs the mail server, not by
+            anything on this page. */}
+        {diagnosis.contact && (
+          <div style={{ color: 'var(--text-secondary)', marginTop: 4 }}>
+            <strong>{t('email.smtpErrWhoLabel', 'Chi può risolverlo')}:</strong> {diagnosis.contact}
+          </div>
+        )}
         <div
           style={{
             marginTop: 6,
