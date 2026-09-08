@@ -1554,7 +1554,12 @@ export default function NotificationsPage() {
                     />
                     <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
                       {selectedNotificationIds.size > 0
-                        ? t("notifications.selectedCount", `${selectedNotificationIds.size} selected`)
+                        ? // The count has to travel as an interpolation value, not baked
+                          // into the fallback string: a translated label would otherwise
+                          // render the placeholder verbatim.
+                          t("notifications.selectedCount", "{{n}} selected", {
+                            n: selectedNotificationIds.size,
+                          })
                         : t("notifications.selectAll", "Select all")}
                     </span>
                   </div>
@@ -1568,7 +1573,9 @@ export default function NotificationsPage() {
                       <Trash2 size={14} style={{ marginRight: 5 }} />
                       {deleting
                         ? t("common.deleting", "Deleting...")
-                        : t("notifications.deleteSelected", `Delete (${selectedNotificationIds.size})`)}
+                        : t("notifications.deleteSelected", "Delete ({{n}})", {
+                            n: selectedNotificationIds.size,
+                          })}
                     </Button>
                   )}
                 </div>

@@ -1158,13 +1158,22 @@ export const BillingPage: React.FC = () => {
         </div>
       </div>
 
-      {/* 4b. The tax rate every total above was built from. Read-only for a
-             company admin; a super admin can refresh it from Stripe. */}
-      <BillingTaxCard
-        tax={overview?.tax ?? null}
-        canSync={isSuperAdmin}
-        onSynced={() => fetchOverview(selectedCompanyId)}
-      />
+      {/* 4b. The tax rate every total above was built from.
+             Super admin only: the rate is a platform-wide setting owned by the
+             operator. A company admin still sees the tax lines on their own
+             invoice above - that is their money - but not the configuration
+             behind it. The server enforces this too; this only avoids
+             rendering a panel that would arrive empty. */}
+      {isSuperAdmin && (
+        <BillingTaxCard
+          tax={overview?.tax ?? null}
+          canSync
+          monthlyNet={licensedMonthlyTotal}
+          monthlyTax={billedMonthlyTaxTotal}
+          currency={companyCurrency}
+          onSynced={() => fetchOverview(selectedCompanyId)}
+        />
+      )}
 
       {/* 5. Transactions History */}
       <div style={{

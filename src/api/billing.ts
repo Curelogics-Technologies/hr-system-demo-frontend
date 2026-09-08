@@ -8,7 +8,10 @@ import {
   SuperAdminBillingCompanyRow,
   BillingTaxRate,
   BillingTestNoticeResult,
+  NoticeRecipients,
 } from '../types';
+
+export type { NoticeRecipients };
 
 export const billingApi = {
   /**
@@ -196,6 +199,29 @@ export const billingApi = {
     const params: Record<string, any> = { limit };
     if (companyId) params.companyId = companyId;
     const { data } = await apiClient.get('/billing/headcount-history', { params });
+    return data;
+  },
+
+  /**
+   * Who a failed-payment warning for this company would actually reach.
+   * Resolved by the same code the real alert uses, so the settings page shows
+   * what would happen rather than what ought to.
+   */
+  getNoticeRecipients: async (companyId?: number): Promise<NoticeRecipients> => {
+    const { data } = await apiClient.get('/billing/notices/recipients', {
+      params: companyId ? { company_id: companyId } : {},
+    });
+    return data;
+  },
+
+  /**
+   * Points the platform at a different Stripe Tax Rate, then reads it straight
+   * back from Stripe so the caller sees the real percentage.
+   */
+  setTaxRate: async (stripeTaxRateId: string): Promise<BillingTaxRate> => {
+    const { data } = await apiClient.put('/billing/tax', {
+      stripe_tax_rate_id: stripeTaxRateId,
+    });
     return data;
   },
 

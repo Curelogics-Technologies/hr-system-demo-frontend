@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Percent, RefreshCw, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Percent, RefreshCw, AlertTriangle, CheckCircle2, Save } from 'lucide-react';
 import billingApi from '../../api/billing';
+import { formatMoney } from '../../constants/currencies';
 import { useToast } from '../../context/ToastContext';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
+import { Input } from '../../components/ui/Input';
 import type { BillingTaxRate } from '../../types';
 
 /**
@@ -25,13 +27,55 @@ export const BillingTaxCard: React.FC<{
   tax: BillingTaxRate | null;
   canSync: boolean;
   onSynced?: (tax: BillingTaxRate) => void;
-}> = ({ tax, canSync, onSynced }) => {
+  /** The company's current monthly licence cost, for the worked example. */
+  monthlyNet?: number;
+  /**
+   * The tax on it, worked out per invoice line by the caller. Passed in rather
+   * than recomputed here because both providers tax each line and then add up,
+   * and taxing the rounded total instead can land a cent away from the invoice.
+   */
+  monthlyTax?: number;
+  currency?: string;
+}> = ({ tax, canSync, onSynced, monthlyNet = 0, monthlyTax, currency = 'EUR' }) => {
   const { t, i18n } = useTranslation();
   const { showToast } = useToast();
   const [syncing, setSyncing] = useState(false);
+  const [savingId, setSavingId] = useState(false);
   const [local, setLocal] = useState<BillingTaxRate | null>(null);
+  const [editingId, setEditingId] = useState(false);
+  const [rateIdDraft, setRateIdDraft] = useState('');
 
   const rate = local ?? tax;
+
+  const handleSaveRateId = async () => {
+    setSavingId(true);
+    try {
+      const fresh = await billingApi.setTaxRate(rateIdDraft.trim());
+      setLocal(fresh);
+      onSynced?.(fresh);
+      setEditingId(false);
+      if (fresh.ok) {
+        showToast(
+          t('billing.taxRateIdSaved', 'Aliquota collegata: {{percent}}%', { percent: fresh.percent }),
+          'success'
+        );
+      } else {
+        showToast(
+          fresh.syncError ||
+            t('billing.taxSyncNoRate', 'Stripe non ha restituito un’aliquota utilizzabile.'),
+          'error'
+        );
+      }
+    } catch (err: any) {
+      showToast(
+        err?.response?.data?.error ||
+          t('billing.taxRateIdSaveFailed', 'Impossibile salvare l’ID aliquota'),
+        'error'
+      );
+    } finally {
+      setSavingId(false);
+    }
+  };
 
   const handleSync = async () => {
     setSyncing(true);
@@ -76,6 +120,12 @@ export const BillingTaxCard: React.FC<{
         minute: '2-digit',
       })
     : null;
+
+  // The caller's per-line figure when it has one; otherwise rounded to whole
+  // cents the same way the server does, so this matches the invoice rather
+  // than approximating it.
+  const exampleTax =
+    monthlyTax !== undefined ? monthlyTax : rate ? Math.round(monthlyNet * rate.percent) / 100 : 0;
 
   const row: React.CSSProperties = {
     display: 'flex',
@@ -220,14 +270,95 @@ export const BillingTaxCard: React.FC<{
             </div>
           )}
 
+          {/* How the two providers actually get the rate. Asked often enough
+              to be worth stating on the page: Stripe is read automatically,
+              PayPal is written at plan creation and cannot be changed on a
+              live subscription without the subscriber approving it. */}
+          <div style={syncNote}>
+            <RefreshCw size={14} style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 2 }} />
+            <div>
+              {t(
+                'billing.taxSyncExplain',
+                'Stripe è la fonte: l’aliquota viene riletta automaticamente all’avvio del server, una volta al giorno e ogni volta che premi Sincronizza. Gli abbonamenti Stripe già attivi vengono riallineati subito. Per PayPal la percentuale viene scritta sul piano: gli abbonamenti PayPal già attivi la aggiornano al prossimo cambio di licenze, perché PayPal richiede l’approvazione del cliente per cambiare piano.'
+              )}
+            </div>
+          </div>
+
+          {rate.realignment && rate.realignment.stripeChecked > 0 && (
+            <div style={syncNote}>
+              <CheckCircle2 size={14} style={{ color: '#16a34a', flexShrink: 0, marginTop: 2 }} />
+              <div>
+                {t(
+                  'billing.taxRealignment',
+                  'Abbonamenti Stripe aggiornati: {{updated}} su {{checked}}.',
+                  {
+                    updated: rate.realignment.stripeUpdated,
+                    checked: rate.realignment.stripeChecked,
+                  }
+                )}
+                {rate.realignment.paypalStale > 0 &&
+                  ' ' +
+                    t(
+                      'billing.taxRealignmentPaypal',
+                      '{{n}} abbonamenti PayPal manterranno la percentuale attuale fino al prossimo cambio di licenze.',
+                      { n: rate.realignment.paypalStale }
+                    )}
+              </div>
+            </div>
+          )}
+
           <div style={{ marginTop: 6 }}>
             <div style={row}>
               <span style={{ color: 'var(--text-muted)' }}>
                 {t('billing.taxStripeRateId', 'ID aliquota Stripe')}
               </span>
-              <span style={{ fontFamily: 'monospace', fontSize: 12 }}>
-                {rate.stripeTaxRateId || '—'}
-              </span>
+              {/* The one part of the arrangement that is genuinely a local
+                  decision: which of the dashboard's tax rates this platform
+                  charges. The rate itself is still created and owned in
+                  Stripe - saving here re-reads it from Stripe immediately, so
+                  the percentage shown is never the one somebody typed. */}
+              {editingId ? (
+                <span style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <Input
+                    value={rateIdDraft}
+                    onChange={(e) => setRateIdDraft(e.target.value)}
+                    placeholder="txr_1AbC..."
+                    style={{ fontFamily: 'monospace', fontSize: 12, minWidth: 200 }}
+                  />
+                  <Button size="sm" onClick={handleSaveRateId} loading={savingId}>
+                    <Save size={12} /> {t('common.save', 'Salva')}
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={() => setEditingId(false)}>
+                    {t('common.cancel', 'Annulla')}
+                  </Button>
+                </span>
+              ) : (
+                <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <span style={{ fontFamily: 'monospace', fontSize: 12 }}>
+                    {rate.stripeTaxRateId || '—'}
+                  </span>
+                  {canSync && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRateIdDraft(rate.stripeTaxRateId || '');
+                        setEditingId(true);
+                      }}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--accent)',
+                        cursor: 'pointer',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        padding: 0,
+                      }}
+                    >
+                      {t('common.edit', 'Modifica')}
+                    </button>
+                  )}
+                </span>
+              )}
             </div>
             <div style={row}>
               <span style={{ color: 'var(--text-muted)' }}>
@@ -266,6 +397,66 @@ export const BillingTaxCard: React.FC<{
               <span>{syncedLabel || t('billing.taxNeverSynced', 'mai')}</span>
             </div>
           </div>
+
+          {/* The arithmetic, on this company's real figures. A percentage on
+              its own is not checkable; a subtotal, a tax line and a total that
+              a person can reproduce with a calculator is. This is the number
+              that will appear on the Stripe invoice. */}
+          {monthlyNet > 0 && rate.percent > 0 && (
+            <div
+              style={{
+                marginTop: 14,
+                padding: '12px 14px',
+                borderRadius: 'var(--radius-sm)',
+                background: 'var(--background)',
+                border: '1px solid var(--border)',
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 11,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  color: 'var(--text-muted)',
+                  marginBottom: 6,
+                }}
+              >
+                {t('billing.taxExampleTitle', 'Calcolo sul canone mensile attuale')}
+              </div>
+              <div style={exampleRow}>
+                <span style={{ color: 'var(--text-muted)' }}>
+                  {t('billing.taxableAmount', 'Imponibile')}
+                </span>
+                <span>{formatMoney(monthlyNet, currency)}</span>
+              </div>
+              <div style={exampleRow}>
+                <span style={{ color: 'var(--text-muted)' }}>
+                  {t('billing.taxLine', 'IVA {{percent}}%', { percent: rate.percent })}
+                </span>
+                <span>{formatMoney(exampleTax, currency)}</span>
+              </div>
+              <div
+                style={{
+                  ...exampleRow,
+                  borderTop: '1px solid var(--border)',
+                  marginTop: 4,
+                  paddingTop: 7,
+                  fontWeight: 800,
+                }}
+              >
+                <span>{t('billing.totalCharged', 'Totale addebitato')}</span>
+                <span style={{ color: 'var(--accent)' }}>
+                  {formatMoney(monthlyNet + exampleTax, currency)}
+                </span>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
+                {t(
+                  'billing.taxExampleNote',
+                  'Stripe e PayPal addebitano questo totale e mostrano al cliente le stesse tre righe.'
+                )}
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
@@ -287,3 +478,25 @@ const warnBox: React.CSSProperties = {
 };
 
 export default BillingTaxCard;
+
+const exampleRow: React.CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  gap: 12,
+  padding: '3px 0',
+  fontSize: 12.5,
+};
+
+const syncNote: React.CSSProperties = {
+  display: 'flex',
+  gap: 8,
+  alignItems: 'flex-start',
+  padding: '9px 11px',
+  marginBottom: 10,
+  borderRadius: 'var(--radius-sm)',
+  background: 'var(--background)',
+  border: '1px solid var(--border)',
+  fontSize: 12,
+  lineHeight: 1.55,
+  color: 'var(--text-secondary)',
+};

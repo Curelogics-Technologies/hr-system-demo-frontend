@@ -433,6 +433,19 @@ export interface BillingTaxRate {
   paypalPercent: number;
   /** Only on the sync response: whether the refresh actually reached Stripe. */
   ok?: boolean;
+  /**
+   * Only on a sync or a rate change: what it took to bring live subscriptions
+   * in line. Stripe tax rate objects are immutable, so a changed percentage is
+   * a new object and every existing subscription has to be re-pointed at it.
+   * PayPal cannot be corrected without the subscriber approving a new plan,
+   * so those are counted and reported instead.
+   */
+  realignment?: {
+    stripeUpdated: number;
+    stripeChecked: number;
+    paypalStale: number;
+    errors: string[];
+  };
 }
 
 export type BillingNoticeStatus = 'sent' | 'skipped' | 'failed' | 'no_recipient';
@@ -456,6 +469,28 @@ export interface BillingTestNoticeResult {
   sentAt: string;
 }
 
+/**
+ * Who a failed-payment warning would reach for one company, and from where.
+ *
+ * Used to draw the delivery diagram on the platform email settings page:
+ * sender, purpose, recipient — resolved by the same backend code the real
+ * alert uses, so the picture cannot drift from the behaviour.
+ */
+export interface NoticeRecipients {
+  companyId: number;
+  companyName: string | null;
+  ownerEmail: string | null;
+  ownerName: string | null;
+  companyEmail: string | null;
+  /** How many people get the in-app alert, which cannot bounce. */
+  inAppRecipients: number;
+  platform: {
+    configured: boolean;
+    from: string | null;
+    alertEmail: string | null;
+  };
+}
+
 /** Where a failed-payment warning went, and whether it arrived. */
 export interface BillingNoticeDelivery {
   emailTo: string | null;
@@ -465,6 +500,8 @@ export interface BillingNoticeDelivery {
   copyTo: string | null;
   copyStatus: BillingNoticeStatus | null;
   inAppCount: number;
+  /** Which mailbox carried it: the platform's own, or the company's SMTP. */
+  transport?: 'platform' | 'company' | 'none' | null;
 }
 
 export interface BillingOverview {
