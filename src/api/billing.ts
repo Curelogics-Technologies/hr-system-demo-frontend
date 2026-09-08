@@ -6,7 +6,13 @@ import {
   LicenseSnapshot,
   PaymentProvider,
   SuperAdminBillingCompanyRow,
+  BillingTaxRate,
+  BillingTestNoticeResult,
+  NoticeRecipients,
+  StripeTaxRateOption,
 } from '../types';
+
+export type { NoticeRecipients };
 
 export const billingApi = {
   /**
@@ -107,8 +113,13 @@ export const billingApi = {
     status: 'applied' | 'awaiting_payment' | 'scheduled';
     applied: boolean;
     amountDueNow: number;
+    /** Tax on the prorated charge, and the gross actually collected. */
+    taxPercent?: number;
+    taxDueNow?: number;
+    totalDueNow?: number;
     additionalMonthly?: number;
     newMonthlyTotal?: number;
+    newMonthlyTotalWithTax?: number;
     currency: string;
     extraEmployees?: number;
     extraTerminals?: number;
@@ -189,6 +200,71 @@ export const billingApi = {
     const params: Record<string, any> = { limit };
     if (companyId) params.companyId = companyId;
     const { data } = await apiClient.get('/billing/headcount-history', { params });
+    return data;
+  },
+
+  /**
+   * Who a failed-payment warning for this company would actually reach.
+   * Resolved by the same code the real alert uses, so the settings page shows
+   * what would happen rather than what ought to.
+   */
+  getNoticeRecipients: async (companyId?: number): Promise<NoticeRecipients> => {
+    const { data } = await apiClient.get('/billing/notices/recipients', {
+      params: companyId ? { company_id: companyId } : {},
+    });
+    return data;
+  },
+
+  /**
+   * The tax rates that exist on the Stripe account, so one can be picked from
+   * a list rather than copied between browser tabs.
+   */
+  listAvailableTaxRates: async (): Promise<{
+    rates: StripeTaxRateOption[];
+    error?: string;
+  }> => {
+    const { data } = await apiClient.get('/billing/tax/available');
+    return data;
+  },
+
+  /**
+   * Points the platform at a different Stripe Tax Rate, then reads it straight
+   * back from Stripe so the caller sees the real percentage.
+   */
+  setTaxRate: async (stripeTaxRateId: string): Promise<BillingTaxRate> => {
+    const { data } = await apiClient.put('/billing/tax', {
+      stripe_tax_rate_id: stripeTaxRateId,
+    });
+    return data;
+  },
+
+  /**
+   * The tax rate every total on this page is built from.
+   */
+  getTaxRate: async (): Promise<BillingTaxRate> => {
+    const { data } = await apiClient.get('/billing/tax');
+    return data;
+  },
+
+  /**
+   * Re-reads the rate from Stripe. Stripe owns it; this only refreshes the
+   * local copy, so it is safe to press at any time.
+   */
+  syncTaxRate: async (): Promise<BillingTaxRate> => {
+    const { data } = await apiClient.post('/billing/tax/sync');
+    return data;
+  },
+
+  /**
+   * Rehearses the failed-payment alert: same recipients, same mail server,
+   * same in-app notification, everything marked as a test. Changes nothing
+   * about the subscription.
+   */
+  sendTestFailureNotice: async (companyId?: number): Promise<BillingTestNoticeResult> => {
+    const { data } = await apiClient.post(
+      '/billing/notices/test',
+      companyId ? { company_id: companyId } : {}
+    );
     return data;
   },
 

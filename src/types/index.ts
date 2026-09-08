@@ -339,6 +339,24 @@ export interface BillingTransaction {
   description: string | null;
   seatQuantity?: number;
   deviceQuantity?: number;
+  /** Unit prices as charged, so a receipt can show each line amount. */
+  unitPriceEmployeeCents?: number | null;
+  unitPriceDeviceCents?: number | null;
+  /** The billing cycle this payment covered. */
+  periodStart?: string | null;
+  periodEnd?: string | null;
+  /** The card as it was when this payment was taken. */
+  paymentMethodBrand?: string | null;
+  paymentMethodLast4?: string | null;
+  /**
+   * How the total split into licences and tax, as the provider reported it.
+   * Null on payments taken before a tax rate was configured.
+   */
+  subtotalCents?: number | null;
+  taxCents?: number | null;
+  taxPercent?: number | null;
+  /** For a failed payment: who was warned, and whether the mail went out. */
+  notice?: BillingNoticeDelivery | null;
   invoiceUrl: string | null;
   failureCode?: string | null;
   failureMessage: string | null;
@@ -380,6 +398,126 @@ export interface LicenseQuote {
   daysRemaining: number | null;
   /** Length of the current billing period in whole days. */
   totalDays?: number;
+  /**
+   * Tax the provider adds on top. `amountDueNow` is the net licence cost;
+   * `totalDueNow` is what is actually charged. Zero when no rate is configured.
+   */
+  taxPercent?: number;
+  taxDueNow?: number;
+  totalDueNow?: number;
+  newMonthlyTax?: number;
+  newMonthlyTotalWithTax?: number;
+}
+
+/**
+ * The tax rate as the platform mirrors it from Stripe.
+ *
+ * Stripe owns the rate; this is the local copy every total is built from.
+ * `source` and `syncedAt` are shown next to the percentage because "the rate
+ * is 22%" and "the rate was 22% when we last managed to ask Stripe" are
+ * different claims, and only one of them is safe to bill on.
+ */
+export interface BillingTaxRate {
+  percent: number;
+  enabled: boolean;
+  stripeTaxRateId: string | null;
+  displayName: string | null;
+  jurisdiction: string | null;
+  /** True when the rate is carved out of the price rather than added to it. */
+  inclusive: boolean;
+  active: boolean;
+  source: 'stripe' | 'env';
+  syncedAt: string | null;
+  syncError: string | null;
+  /** What is written onto a PayPal plan, so the two can be compared on screen. */
+  paypalPercent: number;
+  /** Only on the sync response: whether the refresh actually reached Stripe. */
+  ok?: boolean;
+  /**
+   * Only on a sync or a rate change: what it took to bring live subscriptions
+   * in line. Stripe tax rate objects are immutable, so a changed percentage is
+   * a new object and every existing subscription has to be re-pointed at it.
+   * PayPal cannot be corrected without the subscriber approving a new plan,
+   * so those are counted and reported instead.
+   */
+  realignment?: {
+    stripeUpdated: number;
+    stripeChecked: number;
+    paypalStale: number;
+    errors: string[];
+  };
+}
+
+export type BillingNoticeStatus = 'sent' | 'skipped' | 'failed' | 'no_recipient';
+
+/**
+ * The outcome of a rehearsed failed-payment alert.
+ *
+ * Reported channel by channel rather than as one success flag, because the
+ * useful answers are specific: the owner was emailed but the operator copy
+ * bounced, or nothing was emailed at all because the company has no SMTP
+ * configured and only the in-app alert went out.
+ */
+export interface BillingTestNoticeResult {
+  companyName: string;
+  ownerEmail: string | null;
+  ownerStatus: BillingNoticeStatus;
+  ownerError: string | null;
+  copyTo: string | null;
+  copyStatus: BillingNoticeStatus | null;
+  inAppCount: number;
+  sentAt: string;
+}
+
+/**
+ * Who a failed-payment warning would reach for one company, and from where.
+ *
+ * Used to draw the delivery diagram on the platform email settings page:
+ * sender, purpose, recipient — resolved by the same backend code the real
+ * alert uses, so the picture cannot drift from the behaviour.
+ */
+export interface NoticeRecipients {
+  companyId: number;
+  companyName: string | null;
+  ownerEmail: string | null;
+  ownerName: string | null;
+  companyEmail: string | null;
+  /** How many people get the in-app alert, which cannot bounce. */
+  inAppRecipients: number;
+  platform: {
+    configured: boolean;
+    from: string | null;
+    alertEmail: string | null;
+  };
+}
+
+/**
+ * One tax rate as it exists in the Stripe dashboard.
+ *
+ * Listed so the operator picks a rate instead of copying a `txr_…` id between
+ * two browser tabs. Archived rates are included and shown as unselectable —
+ * an empty list explains nothing, a greyed-out entry explains itself.
+ */
+export interface StripeTaxRateOption {
+  id: string;
+  percentage: number;
+  inclusive: boolean;
+  active: boolean;
+  displayName: string | null;
+  jurisdiction: string | null;
+}
+
+/** Where a failed-payment warning went, and whether it arrived. */
+export interface BillingNoticeDelivery {
+  emailTo: string | null;
+  emailStatus: BillingNoticeStatus | null;
+  emailError: string | null;
+  emailAt: string | null;
+  copyTo: string | null;
+  copyStatus: BillingNoticeStatus | null;
+  inAppCount: number;
+  /** Which mailbox carried it: the platform's own, or the company's SMTP. */
+  transport?: 'platform' | 'company' | 'none' | null;
 }
 
 export interface BillingOverview {
@@ -403,7 +541,13 @@ export interface BillingOverview {
     employeeCount: number;
     deviceCount: number;
     calculatedMonthlyTotal: number;
+    /** Tax the provider will add to that total. Zero when no rate is set. */
+    calculatedTax?: number;
   };
+  /** The tax rate in force, so a tax line can be labelled rather than guessed. */
+  taxPercent?: number;
+  /** Where that rate came from and how fresh it is. */
+  tax?: BillingTaxRate;
   readiness?: {
     canCheckout: boolean;
     missingFields: string[];

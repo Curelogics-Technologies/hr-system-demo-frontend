@@ -8,7 +8,8 @@ import { Company } from '../../types';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Alert } from '../../components/ui/Alert';
-import { Eye, EyeOff, Mail, ShieldCheck, Info, RefreshCw } from 'lucide-react';
+import { Eye, EyeOff, Mail, ShieldCheck, Info, RefreshCw, Server, Building2 } from 'lucide-react';
+import { PlatformEmailSettings } from './PlatformEmailSettings';
 
 export default function EmailSettingsPage() {
   const { t } = useTranslation();
@@ -37,6 +38,24 @@ export default function EmailSettingsPage() {
   const [showPass, setShowPass] = useState(false);
   const [isEditing, setIsEditing] = useState(true);
   const [hasSavedConfig, setHasSavedConfig] = useState(false);
+
+  /**
+   * Two kinds of mailbox live on this page and they are not interchangeable.
+   *
+   * 'platform' is VeylOHR's own: it sends billing warnings to a customer's
+   * account owner and the copy to the operator. 'companies' is each tenant's,
+   * sending that tenant's internal mail. Platform is the default tab because
+   * it is the one that has to be filled in before the first real customer is
+   * activated, and the one an operator is most likely to have overlooked.
+   *
+   * Only a super admin sees the choice. A company admin has exactly one
+   * mailbox to configure and gets the page as it always was.
+   */
+  const [tab, setTab] = useState<'platform' | 'companies'>('platform');
+
+  // Everything below the tab strip belongs to the per-company mailbox. A
+  // company admin has no tabs and always sees it.
+  const showCompanyTab = !isUserSuperAdmin || tab === 'companies';
 
   // Helper to update form fields and reset validation status to idle
   function handleFormChange(fields: Partial<SmtpConfig>) {
@@ -148,7 +167,12 @@ export default function EmailSettingsPage() {
     }
   }
 
-  if (loading && companies.length === 0 && isUserSuperAdmin) {
+  // Only the company tab waits on the company list. Guarding this on the tab
+  // matters: the loader below never resolves for a super admin with no
+  // companies yet (the config effect returns early while selectedCompanyId is
+  // undefined), and without this the platform tab would be unreachable behind
+  // a skeleton that never goes away.
+  if (showCompanyTab && loading && companies.length === 0 && isUserSuperAdmin) {
     return (
       <div className="page-enter" style={{ maxWidth: 920, margin: '0 auto', padding: '20px' }}>
         <div style={{ height: 200, borderRadius: 14, background: 'var(--surface)', opacity: 0.5, border: '1px solid var(--border)' }} />
@@ -209,8 +233,37 @@ export default function EmailSettingsPage() {
         </p>
       </section>
 
+      {isUserSuperAdmin && (
+        <div
+          role="tablist"
+          style={{
+            display: 'flex',
+            gap: 6,
+            padding: 5,
+            borderRadius: 12,
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+          }}
+        >
+          <TabButton
+            active={tab === 'platform'}
+            onClick={() => setTab('platform')}
+            icon={<Server size={15} />}
+            label={t('email.tabPlatform', 'Piattaforma (VeylOHR)')}
+          />
+          <TabButton
+            active={tab === 'companies'}
+            onClick={() => setTab('companies')}
+            icon={<Building2 size={15} />}
+            label={t('email.tabCompanies', 'Aziende')}
+          />
+        </div>
+      )}
+
+      {isUserSuperAdmin && tab === 'platform' && <PlatformEmailSettings />}
+
       {/* Super Admin Company Selector Dropdown Card */}
-      {isUserSuperAdmin && companies.length > 0 && (
+      {showCompanyTab && isUserSuperAdmin && companies.length > 0 && (
         <section style={{
           background: 'var(--surface)',
           borderRadius: 14,
@@ -258,10 +311,10 @@ export default function EmailSettingsPage() {
         </section>
       )}
 
-      {error && <Alert variant="danger" onClose={() => setError(null)}>{error}</Alert>}
+      {showCompanyTab && error && <Alert variant="danger" onClose={() => setError(null)}>{error}</Alert>}
 
       {/* Real-time Email Configuration Validation Alerts */}
-      {validationState === 'checking' && (
+      {showCompanyTab && validationState === 'checking' && (
         <Alert variant="warning">
           <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <RefreshCw size={16} className="animate-spin" />
@@ -270,20 +323,20 @@ export default function EmailSettingsPage() {
         </Alert>
       )}
 
-      {validationState === 'success' && (
+      {showCompanyTab && validationState === 'success' && (
         <Alert variant="success" onClose={() => setValidationState('idle')}>
           {t('email.verifySuccess', 'Email configuration successful')}
         </Alert>
       )}
 
-      {validationState === 'failed' && (
+      {showCompanyTab && validationState === 'failed' && (
         <Alert variant="danger" onClose={() => setValidationState('idle')}>
           {t('email.verifyFailed', 'Email configuration failed')}
         </Alert>
       )}
 
       {/* Loading Skeleton during dynamic switching */}
-      {loading ? (
+      {showCompanyTab && (loading ? (
         <div style={{ padding: '24px', background: 'var(--surface)', borderRadius: 14, border: '1px solid var(--border)', display: 'grid', gap: 20 }}>
           <div style={{ height: 40, borderRadius: 8, background: 'var(--border)', opacity: 0.3 }} />
           <div style={{ height: 40, borderRadius: 8, background: 'var(--border)', opacity: 0.3 }} />
@@ -423,7 +476,41 @@ export default function EmailSettingsPage() {
             </div>
           </form>
         </section>
-      )}
+      ))}
     </div>
   );
 }
+
+/** One tab in the platform / companies switch. */
+const TabButton: React.FC<{
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+}> = ({ active, onClick, icon, label }) => (
+  <button
+    type="button"
+    role="tab"
+    aria-selected={active}
+    onClick={onClick}
+    style={{
+      flex: 1,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      padding: '10px 14px',
+      borderRadius: 9,
+      border: '1px solid transparent',
+      background: active ? 'var(--background)' : 'transparent',
+      borderColor: active ? 'var(--border)' : 'transparent',
+      color: active ? 'var(--text-primary)' : 'var(--text-muted)',
+      fontSize: 13,
+      fontWeight: active ? 700 : 500,
+      cursor: 'pointer',
+    }}
+  >
+    {icon}
+    {label}
+  </button>
+);

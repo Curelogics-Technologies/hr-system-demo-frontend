@@ -13,6 +13,7 @@ import {
   Briefcase,
   CalendarClock,
   CheckCheck,
+  CreditCard,
   ChevronDown,
   Clock,
   Edit2,
@@ -138,6 +139,12 @@ const TYPE_VISUALS: Array<{
     bg: "rgba(13,148,136,0.13)",
   },
   {
+    startsWith: "billing.",
+    icon: CreditCard,
+    color: "#B91C1C",
+    bg: "rgba(185,28,28,0.12)",
+  },
+  {
     startsWith: "manager.",
     icon: ShieldAlert,
     color: "#334155",
@@ -153,6 +160,7 @@ const CATEGORY_ICONS: Record<NotificationCategory, LucideIcon> = {
   documents: FileText,
   ats: Briefcase,
   onboarding: GraduationCap,
+  billing: CreditCard,
   manager: ShieldAlert,
 };
 
@@ -1546,7 +1554,12 @@ export default function NotificationsPage() {
                     />
                     <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
                       {selectedNotificationIds.size > 0
-                        ? t("notifications.selectedCount", `${selectedNotificationIds.size} selected`)
+                        ? // The count has to travel as an interpolation value, not baked
+                          // into the fallback string: a translated label would otherwise
+                          // render the placeholder verbatim.
+                          t("notifications.selectedCount", "{{n}} selected", {
+                            n: selectedNotificationIds.size,
+                          })
                         : t("notifications.selectAll", "Select all")}
                     </span>
                   </div>
@@ -1560,7 +1573,9 @@ export default function NotificationsPage() {
                       <Trash2 size={14} style={{ marginRight: 5 }} />
                       {deleting
                         ? t("common.deleting", "Deleting...")
-                        : t("notifications.deleteSelected", `Delete (${selectedNotificationIds.size})`)}
+                        : t("notifications.deleteSelected", "Delete ({{n}})", {
+                            n: selectedNotificationIds.size,
+                          })}
                     </Button>
                   )}
                 </div>

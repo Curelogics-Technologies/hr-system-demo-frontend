@@ -10,6 +10,7 @@ import { ExternalLink, UserPlus, UserMinus, Smartphone, Users } from 'lucide-rea
 import billingApi from '../../api/billing';
 import { getAvatarUrl, getStoreLogoUrl } from '../../api/client';
 import { billingErrorMessage, billingTransactionLabel } from './billingErrors';
+import { NoticeDeliveryDetail } from './NoticeDelivery';
 import { updateCompany } from '../../api/companies';
 import type { BillingOverview, BillingTransaction, LicenseSnapshot } from '../../types';
 
@@ -158,6 +159,31 @@ export const FiscalDataModal: React.FC<FiscalModalProps> = ({
 /* Receipt — built from what is stored locally for every transaction   */
 /* ------------------------------------------------------------------ */
 
+/** Small colour chip naming a card brand, drawn rather than imported. */
+const CardBrand: React.FC<{ brand: string }> = ({ brand }) => {
+  const tone: Record<string, string> = {
+    visa: '#1a1f71',
+    mastercard: '#eb001b',
+    amex: '#2e77bb',
+    discover: '#ff6000',
+    paypal: '#003087',
+  };
+  const colour = tone[brand.toLowerCase()] ?? 'var(--text-muted)';
+  return (
+    <span
+      aria-hidden
+      style={{
+        width: 26,
+        height: 16,
+        borderRadius: 3,
+        background: colour,
+        display: 'inline-block',
+        flexShrink: 0,
+      }}
+    />
+  );
+};
+
 export const ReceiptModal: React.FC<{
   open: boolean;
   onClose: () => void;
@@ -170,8 +196,8 @@ export const ReceiptModal: React.FC<{
 
   // Each receipt is shown in the currency it was actually charged in.
   const money = (cents?: number | null) => formatMoney((cents ?? 0) / 100, tx.currency);
-  const empCents = (tx as any).unitPriceEmployeeCents ?? null;
-  const devCents = (tx as any).unitPriceDeviceCents ?? null;
+  const empCents = tx.unitPriceEmployeeCents ?? null;
+  const devCents = tx.unitPriceDeviceCents ?? null;
 
   return (
     <Modal
@@ -212,9 +238,27 @@ export const ReceiptModal: React.FC<{
           <span style={{ color: 'var(--text-muted)' }}>{t('billing.date', 'Data')}</span>
           <strong>{fmtDateTime(tx.paidAt || tx.createdAt, i18n.language)}</strong>
         </div>
+        {tx.periodStart && tx.periodEnd && (
+          <div style={row}>
+            <span style={{ color: 'var(--text-muted)' }}>{t('billing.periodCovered', 'Periodo coperto')}</span>
+            <strong>
+              {fmtDate(tx.periodStart, i18n.language)} – {fmtDate(tx.periodEnd, i18n.language)}
+            </strong>
+          </div>
+        )}
         <div style={row}>
           <span style={{ color: 'var(--text-muted)' }}>{t('billing.method', 'Metodo')}</span>
-          <strong style={{ textTransform: 'capitalize' }}>{tx.provider}</strong>
+          <strong style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {tx.paymentMethodBrand ? (
+              <>
+                <CardBrand brand={tx.paymentMethodBrand} />
+                <span style={{ textTransform: 'capitalize' }}>{tx.paymentMethodBrand}</span>
+                {tx.paymentMethodLast4 ? <span style={{ color: 'var(--text-muted)' }}>•••• {tx.paymentMethodLast4}</span> : null}
+              </>
+            ) : (
+              <span style={{ textTransform: 'capitalize' }}>{tx.provider}</span>
+            )}
+          </strong>
         </div>
 
         {(tx.seatQuantity != null || tx.deviceQuantity != null) && (
@@ -245,6 +289,27 @@ export const ReceiptModal: React.FC<{
           </>
         )}
 
+        {/* Without these two lines the licence rows above do not add up to the
+            total, because the provider charged tax on them. Shown only when
+            the provider reported the split: an older payment has none, and a
+            split worked out here could disagree with the real invoice. */}
+        {tx.taxCents != null && (
+          <>
+            <div style={{ ...row, marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+              <span style={{ color: 'var(--text-muted)' }}>{t('billing.taxableAmount', 'Imponibile')}</span>
+              <strong>{money(tx.subtotalCents ?? tx.amountCents - tx.taxCents)}</strong>
+            </div>
+            <div style={row}>
+              <span style={{ color: 'var(--text-muted)' }}>
+                {tx.taxPercent != null
+                  ? t('billing.taxLine', 'IVA {{percent}}%', { percent: tx.taxPercent })
+                  : t('billing.taxLineNoRate', 'IVA')}
+              </span>
+              <strong>{money(tx.taxCents)}</strong>
+            </div>
+          </>
+        )}
+
         <div style={{ ...row, borderBottom: 'none', marginTop: 8, paddingTop: 12, borderTop: '2px solid var(--border)' }}>
           <strong style={{ fontSize: 14 }}>{t('billing.total', 'Totale')}</strong>
           <strong style={{ fontSize: 18, color: 'var(--accent)' }}>
@@ -255,6 +320,10 @@ export const ReceiptModal: React.FC<{
         <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
           {billingTransactionLabel(tx, t)}
         </div>
+
+        {/* For a failed payment: who was warned, when, and whether the mail
+            server actually took it. Absent on anything that did not fail. */}
+        <NoticeDeliveryDetail notice={tx.notice} />
         {tx.failureMessage && (
           <div style={{ fontSize: 12, color: 'var(--danger, #dc2626)', marginTop: 6 }}>{tx.failureMessage}</div>
         )}
